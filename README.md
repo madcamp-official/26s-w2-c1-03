@@ -22,16 +22,16 @@
 
 | 이름 | 학교 | GitHub | 역할 |
 |---|---|---|---|
-| 주성민 |  |  |  |
-| 김희서 |  |  |  |
+| 이예원 | 숙명여대 | ywlee1127[https://github.com/ywlee1127] | FullStack Dev |
+| 이지민 | KAIST | ljm030206[https://github.com/ljm030206] | Server Dev |
 
 ---
 
 ## 선택 옵션
 
 - [ ] 실시간 인터랙션
-- [ ] LLM Wrapper
-- [ ] Cross-Platform
+- [x] LLM Wrapper
+- [x] Cross-Platform
 
 ---
 
