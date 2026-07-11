@@ -90,6 +90,16 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
     }
   }
 
+  Future<void> _logout() async {
+    await ref.read(authControllerProvider.notifier).logout();
+    if (!mounted) return;
+    // 마이 탭은 AppShell 안에 push 없이 떠 있는 상태라, 로그인 화면으로 갈 땐
+    // 이 화면을 포함한 전체 스택을 비워야 뒤로가기로 다시 못 돌아온다.
+    Navigator.of(
+      context,
+    ).pushAndRemoveUntil(MaterialPageRoute(builder: (_) => const LoginScreen()), (route) => false);
+  }
+
   Future<void> _confirmAndWithdraw() async {
     final confirmed = await showDialog<bool>(
       context: context,
@@ -255,7 +265,17 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
                     : const Text('저장', style: TextStyle(fontWeight: FontWeight.w700)),
               ),
             ),
-            const SizedBox(height: 32),
+            const SizedBox(height: 24),
+            Center(
+              child: TextButton(
+                onPressed: _logout,
+                child: const Text(
+                  '로그아웃',
+                  style: TextStyle(color: Color(0xFF4E5968), fontSize: 13, fontWeight: FontWeight.w600),
+                ),
+              ),
+            ),
+            const SizedBox(height: 8),
             Center(
               child: TextButton(
                 onPressed: _withdrawing ? null : _confirmAndWithdraw,

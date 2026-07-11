@@ -1,8 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import '../../home/presentation/home_placeholder_screen.dart';
+import '../../home/presentation/app_shell.dart';
 import 'profile_controller.dart';
-import 'profile_state.dart';
 
 /// 최초 로그인 시 필수로 거치는 닉네임 입력 화면(기능명세서 §5 "최초 로그인 시
 /// 필요한 최소 정보(닉네임)만 추가로 입력받을 수 있다"). 완료해야 홈으로 넘어간다.
@@ -45,11 +44,10 @@ class _OnboardingNicknameScreenState extends ConsumerState<OnboardingNicknameScr
     final saved = await ref.read(profileControllerProvider.notifier).updateNickname(nickname);
     if (!mounted) return;
 
-    final state = ref.read(profileControllerProvider);
-    if (saved && state is ProfileLoaded) {
+    if (saved) {
       Navigator.of(
         context,
-      ).pushReplacement(MaterialPageRoute(builder: (_) => HomePlaceholderScreen(user: state.user)));
+      ).pushReplacement(MaterialPageRoute(builder: (_) => const AppShell()));
       return;
     }
 
