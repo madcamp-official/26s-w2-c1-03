@@ -21,4 +21,12 @@ class UsersApi {
     );
     return AuthUser.fromJson(response.data!);
   }
+
+  Future<AuthUser> updateProfileImageUrl(String profileImageUrl) async {
+    final response = await _apiClient.dio.patch<Map<String, dynamic>>(
+      '/users/me',
+      data: {'profileImageUrl': profileImageUrl},
+    );
+    return AuthUser.fromJson(response.data!);
+  }
 }

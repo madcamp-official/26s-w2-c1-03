@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import '../profile_image_upload_service.dart';
 import 'profile_controller.dart';
 import 'profile_state.dart';
 
@@ -14,6 +15,7 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
   final _controller = TextEditingController();
   bool _controllerInitialized = false;
   bool _submitting = false;
+  bool _uploadingImage = false;
   String? _errorText;
 
   @override
@@ -57,10 +59,32 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
     }
   }
 
-  void _showImageUploadComingSoon() {
-    ScaffoldMessenger.of(
-      context,
-    ).showSnackBar(const SnackBar(content: Text('프로필 사진 변경은 곧 지원 예정이에요.')));
+  Future<void> _changePhoto(String userId) async {
+    if (_uploadingImage) return;
+    setState(() => _uploadingImage = true);
+
+    final result = await ref
+        .read(profileImageUploadServiceProvider)
+        .pickAndUpload(userId: userId);
+
+    if (!mounted) return;
+
+    switch (result) {
+      case ProfileImagePickCancelled():
+        setState(() => _uploadingImage = false);
+      case ProfileImagePickFailed(:final message):
+        setState(() => _uploadingImage = false);
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(message)));
+      case ProfileImagePicked(:final downloadUrl):
+        final saved = await ref
+            .read(profileControllerProvider.notifier)
+            .updateProfileImageUrl(downloadUrl);
+        if (!mounted) return;
+        setState(() => _uploadingImage = false);
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(saved ? '프로필 사진을 변경했어요.' : '저장하지 못했어요. 다시 시도해주세요.')),
+        );
+    }
   }
 
   @override
@@ -106,22 +130,43 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
           ),
         ),
       ),
-      ProfileLoaded() => Padding(
+      ProfileLoaded(:final user) => Padding(
         padding: const EdgeInsets.all(22),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            // 프로필 이미지 자리 — Supabase Storage 연동 전이라 자리만 잡아둔다(plan.md 참고).
             Center(
               child: Column(
                 children: [
-                  const CircleAvatar(
-                    radius: 44,
-                    backgroundColor: Color(0xFFF2F4F6),
-                    child: Icon(Icons.person, size: 40, color: Color(0xFFB0B8C1)),
+                  Stack(
+                    alignment: Alignment.center,
+                    children: [
+                      CircleAvatar(
+                        radius: 44,
+                        backgroundColor: const Color(0xFFF2F4F6),
+                        backgroundImage: user.profileImageUrl != null
+                            ? NetworkImage(user.profileImageUrl!)
+                            : null,
+                        child: user.profileImageUrl == null
+                            ? const Icon(Icons.person, size: 40, color: Color(0xFFB0B8C1))
+                            : null,
+                      ),
+                      if (_uploadingImage)
+                        const CircleAvatar(
+                          radius: 44,
+                          backgroundColor: Color(0x66000000),
+                          child: CircularProgressIndicator(
+                            strokeWidth: 2,
+                            color: Colors.white,
+                          ),
+                        ),
+                    ],
                   ),
                   const SizedBox(height: 8),
-                  TextButton(onPressed: _showImageUploadComingSoon, child: const Text('사진 변경')),
+                  TextButton(
+                    onPressed: _uploadingImage ? null : () => _changePhoto(user.id),
+                    child: const Text('사진 변경'),
+                  ),
                 ],
               ),
             ),

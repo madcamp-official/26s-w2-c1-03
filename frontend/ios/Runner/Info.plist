@@ -26,6 +26,10 @@
 	<string>$(FLUTTER_BUILD_NUMBER)</string>
 	<key>LSRequiresIPhoneOS</key>
 	<true/>
+	<!-- 프로필 사진 선택(image_picker)에 필요. 이 문구가 없으면 iOS가 사진 접근을
+	     요청하는 순간 앱이 그냥 크래시한다. -->
+	<key>NSPhotoLibraryUsageDescription</key>
+	<string>프로필 사진을 선택하려면 사진 보관함 접근 권한이 필요해요.</string>
 	<!-- 카카오 로그인 리다이렉트 스킴. "kakao" 뒤에 카카오 개발자 콘솔의 네이티브 앱 키를
 	     그대로 붙인다(예: 네이티브 앱 키가 abcd1234면 kakaoabcd1234). Android처럼 빌드
 	     설정에서 자동 치환하지 않고 여기 직접 채워야 한다 — 값을 바꾸면 이 파일도 같이 바꿀 것. -->

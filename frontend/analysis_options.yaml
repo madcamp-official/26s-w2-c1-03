@@ -9,6 +9,13 @@
 # packages, and plugins designed to encourage good coding practices.
 include: package:flutter_lints/flutter.yaml
 
+analyzer:
+  # firebase_storage(SPM) 등 일부 플러그인은 macOS 빌드 시 build/macos/SourcePackages
+  # 아래에 자기 자신의 테스트 소스를 그대로 복사해 넣는다. mockito 등 우리가 안 쓰는
+  # dev 의존성을 참조해서 analyze가 깨지므로 빌드 산출물 전체를 분석 대상에서 뺀다.
+  exclude:
+    - build/**
+
 linter:
   # The lint rules applied to this project can be customized in the
   # section below to disable rules from the `package:flutter_lints/flutter.yaml`

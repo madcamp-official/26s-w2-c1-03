@@ -3,9 +3,14 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../core/network/api_exception.dart';
 import '../../auth/presentation/login_controller.dart' show apiClientProvider;
 import '../data/users_api.dart';
+import '../profile_image_upload_service.dart';
 import 'profile_state.dart';
 
 final usersApiProvider = Provider<UsersApi>((ref) => UsersApi(ref.watch(apiClientProvider)));
+
+final profileImageUploadServiceProvider = Provider<ProfileImageUploadService>(
+  (ref) => ProfileImageUploadService(),
+);
 
 final profileControllerProvider = StateNotifierProvider<ProfileController, ProfileState>((ref) {
   return ProfileController(ref.watch(usersApiProvider));
@@ -32,6 +37,18 @@ class ProfileController extends StateNotifier<ProfileState> {
   Future<bool> updateNickname(String nickname) async {
     try {
       final updated = await _usersApi.updateNickname(nickname);
+      state = ProfileLoaded(updated);
+      return true;
+    } on DioException catch (e) {
+      state = _toFailedState(e);
+      return false;
+    }
+  }
+
+  /// updateNickname과 동일한 이유로 직전 상태와 무관하게 항상 시도한다.
+  Future<bool> updateProfileImageUrl(String profileImageUrl) async {
+    try {
+      final updated = await _usersApi.updateProfileImageUrl(profileImageUrl);
       state = ProfileLoaded(updated);
       return true;
     } on DioException catch (e) {
