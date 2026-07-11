@@ -13,8 +13,12 @@ class AuthAuthenticating extends AuthState {
 }
 
 class AuthAuthenticated extends AuthState {
-  const AuthAuthenticated(this.user);
+  const AuthAuthenticated(this.user, {required this.isNewUser});
   final AuthUser user;
+
+  /// 로그인 응답의 isNewUser 그대로 — 최초 로그인이면 로그인 화면에서 온보딩
+  /// 닉네임 화면으로 보내야 한다(features/profile/presentation/onboarding_nickname_screen.dart).
+  final bool isNewUser;
 }
 
 /// USER_CANCELLED는 여기 오지 않는다 — provider_token_result 단계에서 이미

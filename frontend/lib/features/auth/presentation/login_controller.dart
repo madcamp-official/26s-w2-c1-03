@@ -74,7 +74,7 @@ class AuthController extends StateNotifier<AuthState> {
             accessToken: result.tokens.accessToken,
             refreshToken: result.tokens.refreshToken,
           );
-          state = AuthAuthenticated(result.user);
+          state = AuthAuthenticated(result.user, isNewUser: result.isNewUser);
         } on DioException catch (e) {
           state = _toFailedState(e);
         }

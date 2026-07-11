@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../home/presentation/home_placeholder_screen.dart';
+import '../../profile/presentation/onboarding_nickname_screen.dart';
 import 'auth_state.dart';
 import 'login_controller.dart';
 
@@ -11,9 +12,13 @@ class LoginScreen extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     ref.listen<AuthState>(authControllerProvider, (previous, next) {
       if (next is AuthAuthenticated) {
-        Navigator.of(
-          context,
-        ).pushReplacement(MaterialPageRoute(builder: (_) => HomePlaceholderScreen(user: next.user)));
+        // 최초 로그인이면 닉네임부터 받는다(기능명세서 §5) — 그 전엔 홈으로 보내지 않는다.
+        final route = next.isNewUser
+            ? MaterialPageRoute<void>(
+                builder: (_) => OnboardingNicknameScreen(initialNickname: next.user.nickname),
+              )
+            : MaterialPageRoute<void>(builder: (_) => HomePlaceholderScreen(user: next.user));
+        Navigator.of(context).pushReplacement(route);
       }
     });
 
