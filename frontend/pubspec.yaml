@@ -35,6 +35,19 @@ dependencies:
   # Use with the CupertinoIcons class for iOS style icons.
   cupertino_icons: ^1.0.8
 
+  # 상태관리 (plan.md Phase 1 결정)
+  flutter_riverpod: ^2.6.1
+
+  # 백엔드(API 명세서) 연동
+  dio: ^5.7.0
+
+  # 액세스/리프레시 토큰 저장 (평문 저장 금지, plan.md §8.1)
+  flutter_secure_storage: ^9.2.2
+
+  # 소셜 로그인
+  kakao_flutter_sdk_user: ^1.9.6
+  google_sign_in: ^6.2.2
+
 dev_dependencies:
   flutter_test:
     sdk: flutter

@@ -26,6 +26,26 @@
 	<string>$(FLUTTER_BUILD_NUMBER)</string>
 	<key>LSRequiresIPhoneOS</key>
 	<true/>
+	<!-- 카카오 로그인 리다이렉트 스킴. "kakao" 뒤에 카카오 개발자 콘솔의 네이티브 앱 키를
+	     그대로 붙인다(예: 네이티브 앱 키가 abcd1234면 kakaoabcd1234). Android처럼 빌드
+	     설정에서 자동 치환하지 않고 여기 직접 채워야 한다 — 값을 바꾸면 이 파일도 같이 바꿀 것. -->
+	<key>CFBundleURLTypes</key>
+	<array>
+		<dict>
+			<key>CFBundleTypeRole</key>
+			<string>Editor</string>
+			<key>CFBundleURLSchemes</key>
+			<array>
+				<string>kakaoREPLACE_WITH_NATIVE_APP_KEY</string>
+			</array>
+		</dict>
+	</array>
+	<!-- 카카오톡 설치 여부 확인(isKakaoTalkInstalled())에 필요 -->
+	<key>LSApplicationQueriesSchemes</key>
+	<array>
+		<string>kakaokompassauth</string>
+		<string>kakaolink</string>
+	</array>
 	<key>UIApplicationSceneManifest</key>
 	<dict>
 		<key>UIApplicationSupportsMultipleScenes</key>

@@ -1,3 +1,5 @@
+import java.util.Properties
+
 plugins {
     id("com.android.application")
     // START: FlutterFire Configuration
@@ -6,6 +8,17 @@ plugins {
     // The Flutter Gradle Plugin must be applied after the Android and Kotlin Gradle plugins.
     id("dev.flutter.flutter-gradle-plugin")
 }
+
+// 카카오 네이티브 앱 키는 비밀값은 아니지만(클라이언트에 원래 내장되는 값) 소스에
+// 직접 박아두지 않고 android/local.properties(.gitignore 대상)에서 읽는다.
+// local.properties에 `kakaoNativeAppKey=발급받은키` 한 줄을 추가해서 쓴다.
+val localProperties = Properties().apply {
+    val localPropertiesFile = rootProject.file("local.properties")
+    if (localPropertiesFile.exists()) {
+        localPropertiesFile.inputStream().use { load(it) }
+    }
+}
+val kakaoNativeAppKey: String = localProperties.getProperty("kakaoNativeAppKey", "")
 
 android {
     namespace = "com.tripandend.app"
@@ -26,6 +39,8 @@ android {
         targetSdk = flutter.targetSdkVersion
         versionCode = flutter.versionCode
         versionName = flutter.versionName
+        // AndroidManifest.xml의 ${kakaoNativeAppKey} 자리에 채워진다(카카오 로그인 리다이렉트 스킴).
+        manifestPlaceholders["kakaoNativeAppKey"] = kakaoNativeAppKey
     }
 
     buildTypes {
