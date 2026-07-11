@@ -15,7 +15,10 @@ interface KakaoUserMeResponse {
 /**
  * 카카오는 앱의 REST API 키가 아니라 "사용자 본인의" 로그인 액세스 토큰을
  * Bearer로 보내 /v2/user/me를 호출하는 방식으로 검증한다(KAKAO_REST_API_KEY는
- * 여기서 쓰지 않음 — 카카오 로컬 API(장소 검색, Phase 7)에서 앱 단위 인증에 재사용).
+ * 여기서 쓰지 않음). 원래 계획은 이 키를 Kakao 로컬 API(장소 인기순 정렬,
+ * Phase 7)에서도 재사용하는 것이었으나, Kakao 로컬 API가 평점/리뷰수를 제공하지
+ * 않아(카카오 공식 정책) Phase 7은 Google Places API로 대체했다 — 현재
+ * KAKAO_REST_API_KEY는 로그인 검증에만 쓰인다.
  */
 @Injectable()
 export class KakaoTokenVerifier implements SocialTokenVerifier {

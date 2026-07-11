@@ -2,8 +2,8 @@ import { Injectable } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { OAuth2Client } from 'google-auth-library';
 import { BusinessException } from '../../common/exceptions/business-exception';
+import { isNetworkError } from '../../common/utils/network-error.util';
 import { AuthErrorCode } from '../exceptions/auth-error-code';
-import { isNetworkError } from './network-error.util';
 import { SocialTokenVerificationResult, SocialTokenVerifier } from './social-token-verifier';
 
 @Injectable()

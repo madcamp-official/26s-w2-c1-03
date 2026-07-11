@@ -22,4 +22,11 @@ export const envValidationSchema = Joi.object({
   // 소셜 로그인 — 카카오/구글만(애플 제외)
   KAKAO_REST_API_KEY: Joi.string().required(),
   GOOGLE_CLIENT_ID: Joi.string().required(),
+
+  // Phase 7(Place 후보 추천) — TourAPI(국내 전용, §areaCode2 확인 완료)
+  TOUR_API_SERVICE_KEY: Joi.string().required(),
+  TOUR_API_BASE_URL: Joi.string().uri().required(),
+  // 인기순 정렬용 평점/리뷰수 — Kakao 로컬 API는 이 데이터를 제공하지 않아(카카오 공식
+  // 정책) Google Places API (New)로 대체했다.
+  GOOGLE_PLACES_API_KEY: Joi.string().required(),
 });

@@ -1,0 +1,169 @@
+import { Injectable, Logger } from '@nestjs/common';
+import { InjectRepository } from '@nestjs/typeorm';
+import { Repository } from 'typeorm';
+import { TripsService } from '../trips/trips.service';
+import { GooglePlacesClient } from './clients/google-places.client';
+import {
+  FetchAreaBasedListParams,
+  TourApiClient,
+  TourApiPlaceItem,
+} from './clients/tour-api.client';
+import { ListCandidatesQueryDto, PlaceCategory } from './dto/list-candidates-query.dto';
+import { Place, PlaceSource } from './entities/place.entity';
+import { BusinessException } from '../common/exceptions/business-exception';
+import { PlacesErrorCode } from './exceptions/places-error-code';
+
+export interface PlaceCandidateDto {
+  id: string;
+  source: PlaceSource;
+  name: string;
+  address: string | null;
+  lat: number | null;
+  lng: number | null;
+  categoryCode: string | null;
+  imageUrl: string | null;
+  overview: string | null;
+  tel: string | null;
+  rating: number | null;
+  reviewCount: number | null;
+}
+
+const CATEGORY_TO_CONTENT_TYPE_ID: Record<PlaceCategory, string> = {
+  tourist_spot: '12',
+  restaurant: '39',
+  shopping: '38',
+};
+
+/** 매칭 안 된 장소(rating=null)는 항상 매칭된 장소보다 뒤로 보낸다(API 명세서 §2.2). */
+const UNMATCHED_SCORE = -1;
+
+@Injectable()
+export class PlacesService {
+  private readonly logger = new Logger(PlacesService.name);
+
+  constructor(
+    @InjectRepository(Place) private readonly placeRepository: Repository<Place>,
+    private readonly tripsService: TripsService,
+    private readonly tourApiClient: TourApiClient,
+    private readonly googlePlacesClient: GooglePlacesClient,
+  ) {}
+
+  async getCandidates(
+    tripId: string,
+    userId: string,
+    query: ListCandidatesQueryDto,
+  ): Promise<{ candidates: PlaceCandidateDto[] }> {
+    // getDetail이 멤버십 검증까지 함께 해준다(TRIP_NOT_FOUND/TRIP_FORBIDDEN은 그대로 전파).
+    const trip = await this.tripsService.getDetail(tripId, userId);
+    if (!trip.areaCode) {
+      throw new BusinessException(PlacesErrorCode.AREA_CODE_REQUIRED);
+    }
+
+    const fetchParams: FetchAreaBasedListParams = {
+      areaCode: trip.areaCode,
+      sigunguCode: trip.sigunguCode ?? undefined,
+      contentTypeId: query.category ? CATEGORY_TO_CONTENT_TYPE_ID[query.category] : undefined,
+    };
+    const rawItems = await this.tourApiClient.fetchAreaBasedList(fetchParams);
+
+    const cachedPlaces = await Promise.all(rawItems.map((item) => this.upsertPlace(item)));
+
+    const withPopularity = await Promise.all(
+      cachedPlaces.map(async (place) => ({
+        place,
+        popularity: await this.safeMatchGooglePlace(place),
+      })),
+    );
+
+    withPopularity.sort(
+      (a, b) => this.popularityScore(b.popularity) - this.popularityScore(a.popularity),
+    );
+
+    return {
+      candidates: withPopularity.map(({ place, popularity }) =>
+        this.toCandidateDto(place, popularity),
+      ),
+    };
+  }
+
+  async getPlaceDetail(placeId: string): Promise<PlaceCandidateDto> {
+    const place = await this.placeRepository.findOneBy({ id: placeId });
+    if (!place) {
+      throw new BusinessException(PlacesErrorCode.PLACE_NOT_FOUND);
+    }
+    const popularity = await this.safeMatchGooglePlace(place);
+    return this.toCandidateDto(place, popularity);
+  }
+
+  /** (source, externalId) 기준 upsert — TourAPI 캐시 테이블이라 존재하면 최신 정보로 갱신한다. */
+  private async upsertPlace(item: TourApiPlaceItem): Promise<Place> {
+    const existing = await this.placeRepository.findOneBy({
+      source: PlaceSource.TOURAPI,
+      externalId: item.contentId,
+    });
+    const place = existing ?? this.placeRepository.create({ source: PlaceSource.TOURAPI });
+
+    place.externalId = item.contentId;
+    place.contentTypeId = item.contentTypeId;
+    place.name = item.title;
+    place.address = [item.addr1, item.addr2].filter(Boolean).join(' ') || null;
+    place.latitude = item.mapY;
+    place.longitude = item.mapX;
+    place.areaCode = item.areaCode;
+    place.sigunguCode = item.sigunguCode;
+    place.categoryCode = item.cat3 ?? item.cat2 ?? item.cat1;
+    place.tel = item.tel;
+    place.imageUrl = item.firstImage;
+    place.syncedAt = new Date();
+
+    return this.placeRepository.save(place);
+  }
+
+  /** Google Places 매칭 실패는 후보 전체 조회를 막지 않는다 — 미매칭으로 처리하고 계속 진행한다. */
+  private async safeMatchGooglePlace(
+    place: Place,
+  ): Promise<{ rating: number; reviewCount: number } | null> {
+    if (!place.latitude || !place.longitude) {
+      return null;
+    }
+    try {
+      return await this.googlePlacesClient.matchPlace({
+        name: place.name,
+        latitude: Number(place.latitude),
+        longitude: Number(place.longitude),
+      });
+    } catch (error) {
+      this.logger.warn(`Google Places 매칭 실패(placeId=${place.id}): ${(error as Error).message}`);
+      return null;
+    }
+  }
+
+  private popularityScore(popularity: { rating: number; reviewCount: number } | null): number {
+    if (!popularity) {
+      return UNMATCHED_SCORE;
+    }
+    // 평점만으로는 리뷰 1개짜리 5점이 리뷰 1만 개짜리 4.5점을 이겨버리므로, 리뷰수에
+    // 로그 가중치를 곱해 표본 크기를 반영한 단순 인기도 점수를 쓴다.
+    return popularity.rating * Math.log10(popularity.reviewCount + 1);
+  }
+
+  private toCandidateDto(
+    place: Place,
+    popularity: { rating: number; reviewCount: number } | null,
+  ): PlaceCandidateDto {
+    return {
+      id: place.id,
+      source: place.source,
+      name: place.name,
+      address: place.address,
+      lat: place.latitude ? Number(place.latitude) : null,
+      lng: place.longitude ? Number(place.longitude) : null,
+      categoryCode: place.categoryCode,
+      imageUrl: place.imageUrl,
+      overview: place.overview,
+      tel: place.tel,
+      rating: popularity?.rating ?? null,
+      reviewCount: popularity?.reviewCount ?? null,
+    };
+  }
+}
