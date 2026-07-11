@@ -1,11 +1,18 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import '../../../core/theme/app_colors.dart';
+import '../../../core/widgets/app_button.dart';
 import '../../auth/presentation/login_controller.dart';
 import '../../auth/presentation/login_screen.dart';
+import '../../trips/presentation/trip_list_controller.dart';
+import '../../trips/presentation/trip_list_state.dart';
 import '../profile_image_upload_service.dart';
 import 'profile_controller.dart';
 import 'profile_state.dart';
 
+/// 마이 탭(design.md 시안 `3d`). 알림 설정/사진첩 접근 관리/친구 초대처럼 아직
+/// 구현되지 않은 메뉴는 눌러도 갈 곳이 없는 "죽은 링크"가 되므로 넣지 않는다 —
+/// 실제로 동작하는 항목(닉네임·사진 변경, 로그아웃, 탈퇴)만 리스트로 보여준다.
 class ProfileScreen extends ConsumerStatefulWidget {
   const ProfileScreen({super.key});
 
@@ -24,7 +31,10 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
   @override
   void initState() {
     super.initState();
-    Future.microtask(() => ref.read(profileControllerProvider.notifier).load());
+    Future.microtask(() {
+      ref.read(profileControllerProvider.notifier).load();
+      ref.read(tripListControllerProvider.notifier).load();
+    });
   }
 
   @override
@@ -36,11 +46,11 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
   Future<void> _save() async {
     final nickname = _controller.text.trim();
     if (nickname.isEmpty) {
-      setState(() => _errorText = '닉네임을 입력해주세요.');
+      setState(() => _errorText = '닉네임을 입력해줘');
       return;
     }
     if (nickname.length > 30) {
-      setState(() => _errorText = '닉네임은 30자 이내로 입력해주세요.');
+      setState(() => _errorText = '닉네임은 30자 이내로 입력해줘');
       return;
     }
 
@@ -54,11 +64,9 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
 
     setState(() => _submitting = false);
     if (saved) {
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(const SnackBar(content: Text('닉네임을 변경했어요.')));
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('닉네임을 변경했어')));
     } else {
-      setState(() => _errorText = '저장하지 못했어요. 다시 시도해주세요.');
+      setState(() => _errorText = '저장하지 못했어. 다시 시도해줘');
     }
   }
 
@@ -84,9 +92,9 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
             .updateProfileImageUrl(downloadUrl);
         if (!mounted) return;
         setState(() => _uploadingImage = false);
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text(saved ? '프로필 사진을 변경했어요.' : '저장하지 못했어요. 다시 시도해주세요.')),
-        );
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text(saved ? '프로필 사진을 변경했어' : '저장하지 못했어. 다시 시도해줘')));
     }
   }
 
@@ -104,8 +112,8 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (dialogContext) => AlertDialog(
-        title: const Text('정말 탈퇴하시겠어요?'),
-        content: const Text('탈퇴하면 계정 정보가 삭제되고 되돌릴 수 없어요.'),
+        title: const Text('정말 탈퇴할까?'),
+        content: const Text('탈퇴하면 계정 정보가 삭제되고 되돌릴 수 없어'),
         actions: [
           TextButton(
             onPressed: () => Navigator.of(dialogContext).pop(false),
@@ -113,7 +121,7 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
           ),
           TextButton(
             onPressed: () => Navigator.of(dialogContext).pop(true),
-            child: const Text('탈퇴', style: TextStyle(color: Color(0xFFD14343))),
+            child: const Text('탈퇴', style: TextStyle(color: AppColors.danger)),
           ),
         ],
       ),
@@ -129,7 +137,7 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
       setState(() => _withdrawing = false);
       ScaffoldMessenger.of(
         context,
-      ).showSnackBar(const SnackBar(content: Text('탈퇴하지 못했어요. 다시 시도해주세요.')));
+      ).showSnackBar(const SnackBar(content: Text('탈퇴하지 못했어. 다시 시도해줘')));
       return;
     }
 
@@ -146,6 +154,7 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
   @override
   Widget build(BuildContext context) {
     final state = ref.watch(profileControllerProvider);
+    final tripState = ref.watch(tripListControllerProvider);
 
     if (state is ProfileLoaded && !_controllerInitialized) {
       _controller.text = state.user.nickname;
@@ -154,29 +163,40 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
 
     return Scaffold(
       backgroundColor: Colors.white,
-      appBar: AppBar(
-        backgroundColor: Colors.white,
-        elevation: 0,
-        title: const Text(
-          '프로필',
-          style: TextStyle(color: Color(0xFF191F28), fontWeight: FontWeight.w700),
+      body: SafeArea(
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 22),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const SizedBox(height: 12),
+              const Text(
+                '마이',
+                style: TextStyle(fontSize: 24, fontWeight: FontWeight.w800, color: AppColors.ink900),
+              ),
+              const SizedBox(height: 20),
+              Expanded(child: _buildBody(state, tripState)),
+            ],
+          ),
         ),
-        iconTheme: const IconThemeData(color: Color(0xFF191F28)),
       ),
-      body: SafeArea(child: _buildBody(state)),
     );
   }
 
-  Widget _buildBody(ProfileState state) {
+  Widget _buildBody(ProfileState state, TripListState tripState) {
     return switch (state) {
-      ProfileLoading() => const Center(child: CircularProgressIndicator()),
+      ProfileLoading() => const Center(child: CircularProgressIndicator(color: AppColors.ink900)),
       ProfileFailed(:final message) => Center(
         child: Padding(
           padding: const EdgeInsets.all(24),
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              Text(message, textAlign: TextAlign.center),
+              Text(
+                message,
+                textAlign: TextAlign.center,
+                style: const TextStyle(color: AppColors.ink600, fontWeight: FontWeight.w600),
+              ),
               const SizedBox(height: 12),
               TextButton(
                 onPressed: () => ref.read(profileControllerProvider.notifier).load(),
@@ -186,114 +206,175 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
           ),
         ),
       ),
-      ProfileLoaded(:final user) => Padding(
-        padding: const EdgeInsets.all(22),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Center(
-              child: Column(
-                children: [
-                  Stack(
-                    alignment: Alignment.center,
-                    children: [
-                      CircleAvatar(
+      ProfileLoaded(:final user) => ListView(
+        padding: const EdgeInsets.only(bottom: 120),
+        children: [
+          Center(
+            child: Column(
+              children: [
+                Stack(
+                  alignment: Alignment.center,
+                  children: [
+                    CircleAvatar(
+                      radius: 44,
+                      backgroundColor: AppColors.lime,
+                      backgroundImage: user.profileImageUrl != null
+                          ? NetworkImage(user.profileImageUrl!)
+                          : null,
+                      child: user.profileImageUrl == null
+                          ? Text(
+                              user.nickname.isNotEmpty ? user.nickname.substring(0, 1) : '',
+                              style: const TextStyle(
+                                fontSize: 32,
+                                fontWeight: FontWeight.w800,
+                                color: AppColors.green800,
+                              ),
+                            )
+                          : null,
+                    ),
+                    if (_uploadingImage)
+                      const CircleAvatar(
                         radius: 44,
-                        backgroundColor: const Color(0xFFF2F4F6),
-                        backgroundImage: user.profileImageUrl != null
-                            ? NetworkImage(user.profileImageUrl!)
-                            : null,
-                        child: user.profileImageUrl == null
-                            ? const Icon(Icons.person, size: 40, color: Color(0xFFB0B8C1))
-                            : null,
-                      ),
-                      if (_uploadingImage)
-                        const CircleAvatar(
-                          radius: 44,
-                          backgroundColor: Color(0x66000000),
-                          child: CircularProgressIndicator(
-                            strokeWidth: 2,
-                            color: Colors.white,
-                          ),
-                        ),
-                    ],
-                  ),
-                  const SizedBox(height: 8),
-                  TextButton(
-                    onPressed: _uploadingImage ? null : () => _changePhoto(user.id),
-                    child: const Text('사진 변경'),
-                  ),
-                ],
-              ),
-            ),
-            const SizedBox(height: 16),
-            const Text(
-              '닉네임',
-              style: TextStyle(fontSize: 13, fontWeight: FontWeight.w700, color: Color(0xFF4E5968)),
-            ),
-            const SizedBox(height: 8),
-            TextField(
-              controller: _controller,
-              maxLength: 30,
-              decoration: InputDecoration(
-                errorText: _errorText,
-                filled: true,
-                fillColor: const Color(0xFFF2F4F6),
-                border: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(14),
-                  borderSide: BorderSide.none,
-                ),
-              ),
-            ),
-            const SizedBox(height: 8),
-            SizedBox(
-              width: double.infinity,
-              height: 48,
-              child: ElevatedButton(
-                onPressed: _submitting ? null : _save,
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: const Color(0xFF191F28),
-                  foregroundColor: Colors.white,
-                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
-                ),
-                child: _submitting
-                    ? const SizedBox(
-                        width: 18,
-                        height: 18,
+                        backgroundColor: Color(0x66000000),
                         child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
-                      )
-                    : const Text('저장', style: TextStyle(fontWeight: FontWeight.w700)),
-              ),
-            ),
-            const SizedBox(height: 24),
-            Center(
-              child: TextButton(
-                onPressed: _logout,
-                child: const Text(
-                  '로그아웃',
-                  style: TextStyle(color: Color(0xFF4E5968), fontSize: 13, fontWeight: FontWeight.w600),
-                ),
-              ),
-            ),
-            const SizedBox(height: 8),
-            Center(
-              child: TextButton(
-                onPressed: _withdrawing ? null : _confirmAndWithdraw,
-                child: _withdrawing
-                    ? const SizedBox(
-                        width: 16,
-                        height: 16,
-                        child: CircularProgressIndicator(strokeWidth: 2),
-                      )
-                    : const Text(
-                        '회원 탈퇴',
-                        style: TextStyle(color: Color(0xFF8B95A1), fontSize: 12.5),
                       ),
+                  ],
+                ),
+                const SizedBox(height: 10),
+                TextButton(
+                  onPressed: _uploadingImage ? null : () => _changePhoto(user.id),
+                  child: const Text(
+                    '사진 변경',
+                    style: TextStyle(color: AppColors.ink600, fontWeight: FontWeight.w700, fontSize: 13),
+                  ),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(height: 16),
+          _StatsRow(tripState: tripState),
+          const SizedBox(height: 28),
+          const Text(
+            '닉네임',
+            style: TextStyle(fontSize: 13, fontWeight: FontWeight.w700, color: AppColors.ink600),
+          ),
+          const SizedBox(height: 8),
+          TextField(
+            controller: _controller,
+            maxLength: 30,
+            style: const TextStyle(fontSize: 14.5, fontWeight: FontWeight.w600, color: AppColors.ink900),
+            decoration: InputDecoration(
+              errorText: _errorText,
+              filled: true,
+              fillColor: AppColors.surfaceSubtle,
+              border: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(16),
+                borderSide: BorderSide.none,
               ),
             ),
-          ],
-        ),
+          ),
+          AppButton(label: '저장', height: 48, loading: _submitting, onPressed: _save),
+          const SizedBox(height: 24),
+          Container(
+            decoration: const BoxDecoration(
+              border: Border(top: BorderSide(color: AppColors.border, width: 1)),
+            ),
+            child: Column(
+              children: [
+                InkWell(
+                  onTap: _logout,
+                  child: const Padding(
+                    padding: EdgeInsets.symmetric(vertical: 14),
+                    child: Text(
+                      '로그아웃',
+                      style: TextStyle(fontSize: 14.5, fontWeight: FontWeight.w700, color: AppColors.ink900),
+                    ),
+                  ),
+                ),
+                InkWell(
+                  onTap: _withdrawing ? null : _confirmAndWithdraw,
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(vertical: 14),
+                    child: _withdrawing
+                        ? const SizedBox(
+                            width: 16,
+                            height: 16,
+                            child: CircularProgressIndicator(strokeWidth: 2, color: AppColors.ink400),
+                          )
+                        : const Text(
+                            '회원 탈퇴',
+                            style: TextStyle(
+                              fontSize: 13,
+                              fontWeight: FontWeight.w600,
+                              color: AppColors.ink400,
+                            ),
+                          ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
       ),
     };
+  }
+}
+
+class _StatsRow extends StatelessWidget {
+  const _StatsRow({required this.tripState});
+  final TripListState tripState;
+
+  @override
+  Widget build(BuildContext context) {
+    final total = tripState is TripListLoaded ? (tripState as TripListLoaded).trips.length : null;
+
+    return Container(
+      padding: const EdgeInsets.symmetric(vertical: 18),
+      decoration: BoxDecoration(
+        color: AppColors.surfaceMuted,
+        borderRadius: BorderRadius.circular(18),
+      ),
+      child: Row(
+        children: [
+          Expanded(child: _StatItem(value: total?.toString() ?? '-', label: '내 여행')),
+          const _StatDivider(),
+          const Expanded(child: _StatItem(value: '0', label: '여행 기록')),
+          const _StatDivider(),
+          const Expanded(child: _StatItem(value: '0', label: '저장한 사진')),
+        ],
+      ),
+    );
+  }
+}
+
+class _StatItem extends StatelessWidget {
+  const _StatItem({required this.value, required this.label});
+  final String value;
+  final String label;
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      children: [
+        Text(
+          value,
+          style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w800, color: AppColors.ink900),
+        ),
+        const SizedBox(height: 4),
+        Text(
+          label,
+          style: const TextStyle(fontSize: 11.5, fontWeight: FontWeight.w600, color: AppColors.ink400),
+        ),
+      ],
+    );
+  }
+}
+
+class _StatDivider extends StatelessWidget {
+  const _StatDivider();
+
+  @override
+  Widget build(BuildContext context) {
+    return const SizedBox(height: 32, child: VerticalDivider(color: AppColors.borderStrong, width: 1));
   }
 }

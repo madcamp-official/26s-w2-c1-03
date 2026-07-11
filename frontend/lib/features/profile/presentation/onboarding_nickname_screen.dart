@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import '../../../core/theme/app_colors.dart';
+import '../../../core/widgets/app_button.dart';
 import '../../home/presentation/app_shell.dart';
 import 'profile_controller.dart';
 
@@ -69,50 +71,34 @@ class _OnboardingNicknameScreenState extends ConsumerState<OnboardingNicknameScr
             children: [
               const SizedBox(height: 48),
               const Text(
-                '어떻게 불러드릴까요?',
-                style: TextStyle(fontSize: 24, fontWeight: FontWeight.w800, color: Color(0xFF191F28)),
+                '어떻게 불러줄까?',
+                style: TextStyle(fontSize: 26, fontWeight: FontWeight.w800, color: AppColors.ink900),
               ),
               const SizedBox(height: 8),
               const Text(
-                '나중에 프로필에서 언제든 바꿀 수 있어요.',
-                style: TextStyle(fontSize: 14, color: Color(0xFF8B95A1), fontWeight: FontWeight.w600),
+                '나중에 프로필에서 언제든 바꿀 수 있어',
+                style: TextStyle(fontSize: 14, color: AppColors.ink400, fontWeight: FontWeight.w600),
               ),
               const SizedBox(height: 28),
               TextField(
                 controller: _controller,
                 maxLength: 30,
                 autofocus: true,
+                style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w700, color: AppColors.ink900),
                 decoration: InputDecoration(
                   hintText: '닉네임',
+                  hintStyle: const TextStyle(color: AppColors.ink400, fontWeight: FontWeight.w600),
                   errorText: _errorText,
                   filled: true,
-                  fillColor: const Color(0xFFF2F4F6),
+                  fillColor: AppColors.surfaceSubtle,
                   border: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(14),
+                    borderRadius: BorderRadius.circular(16),
                     borderSide: BorderSide.none,
                   ),
                 ),
               ),
               const Spacer(),
-              SizedBox(
-                width: double.infinity,
-                height: 52,
-                child: ElevatedButton(
-                  onPressed: _submitting ? null : _submit,
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: const Color(0xFF191F28),
-                    foregroundColor: Colors.white,
-                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
-                  ),
-                  child: _submitting
-                      ? const SizedBox(
-                          width: 20,
-                          height: 20,
-                          child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
-                        )
-                      : const Text('시작하기', style: TextStyle(fontSize: 15, fontWeight: FontWeight.w700)),
-                ),
-              ),
+              AppButton(label: '시작하기', onPressed: _submit, loading: _submitting),
               const SizedBox(height: 24),
             ],
           ),

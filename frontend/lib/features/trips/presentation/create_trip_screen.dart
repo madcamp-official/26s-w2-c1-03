@@ -4,11 +4,15 @@ import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../core/network/api_exception.dart';
+import '../../../core/theme/app_colors.dart';
+import '../../../core/widgets/app_button.dart';
 import 'trip_detail_screen.dart';
 import 'trip_list_controller.dart';
 
-/// 여행 생성 화면. `areaCode`/`sigunguCode`는 이번 스코프에서 받지 않는다 —
-/// 도시는 자유 텍스트로만 받고, 지역코드 매핑은 Phase 7(장소 추천)에서 추가한다.
+/// 여행 생성 화면(design.md 시안 `3b` 레이아웃 차용). `areaCode`/`sigunguCode`는
+/// 이번 스코프에서 받지 않는다 — 도시는 자유 텍스트로만 받고, 지역코드 매핑과
+/// AI 장소 추천(시안 `4b`)은 Phase 7에서 추가한다. 그래서 CTA는 AI 액션이 아니라
+/// "확정" 액션이라 lime이 아니라 ink 버튼을 쓴다(§2.4).
 class CreateTripScreen extends ConsumerStatefulWidget {
   const CreateTripScreen({super.key});
 
@@ -48,11 +52,11 @@ class _CreateTripScreenState extends ConsumerState<CreateTripScreen> {
     final city = _cityController.text.trim();
 
     if (title.isEmpty || city.isEmpty) {
-      setState(() => _errorText = '제목과 도시를 모두 입력해주세요.');
+      setState(() => _errorText = '제목과 도시를 모두 입력해줘');
       return;
     }
     if (_dateRange == null) {
-      setState(() => _errorText = '여행 기간을 선택해주세요.');
+      setState(() => _errorText = '여행 기간을 선택해줘');
       return;
     }
 
@@ -81,7 +85,7 @@ class _CreateTripScreenState extends ConsumerState<CreateTripScreen> {
       final error = e.error;
       setState(() {
         _submitting = false;
-        _errorText = error is ApiException ? error.message : '네트워크 연결을 확인해주세요.';
+        _errorText = error is ApiException ? error.message : '네트워크 연결을 확인해줘';
       });
     }
   }
@@ -92,119 +96,138 @@ class _CreateTripScreenState extends ConsumerState<CreateTripScreen> {
     return '${date.year}-$month-$day';
   }
 
-  InputDecoration _inputDecoration(String hint) {
-    return InputDecoration(
-      hintText: hint,
-      filled: true,
-      fillColor: const Color(0xFFF2F4F6),
-      border: OutlineInputBorder(borderRadius: BorderRadius.circular(14), borderSide: BorderSide.none),
-    );
-  }
-
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: Colors.white,
-      appBar: AppBar(
-        backgroundColor: Colors.white,
-        elevation: 0,
-        title: const Text(
-          '새 여행',
-          style: TextStyle(color: Color(0xFF191F28), fontWeight: FontWeight.w700),
-        ),
-      ),
       body: SafeArea(
         child: Padding(
-          padding: const EdgeInsets.all(22),
+          padding: const EdgeInsets.fromLTRB(22, 12, 22, 22),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
+              _CloseButton(onTap: () => Navigator.of(context).pop()),
+              const SizedBox(height: 20),
               const Text(
                 '어디로 떠날 거야?',
-                style: TextStyle(fontSize: 22, fontWeight: FontWeight.w800, color: Color(0xFF191F28)),
+                style: TextStyle(fontSize: 26, fontWeight: FontWeight.w800, color: AppColors.ink900),
               ),
-              const SizedBox(height: 20),
+              const SizedBox(height: 8),
+              const Text(
+                '제목이랑 도시, 날짜만 알려주면\n여행을 만들어줄게',
+                style: TextStyle(
+                  fontSize: 14,
+                  color: AppColors.ink400,
+                  fontWeight: FontWeight.w600,
+                  height: 1.4,
+                ),
+              ),
+              const SizedBox(height: 24),
               if (_errorText != null) ...[
-                _ErrorBanner(message: _errorText!),
+                AppErrorBanner(message: _errorText!),
                 const SizedBox(height: 16),
               ],
-              TextField(
-                controller: _titleController,
-                decoration: _inputDecoration('여행 제목 (예: 제주 3박4일)'),
+              _FieldContainer(
+                icon: Icons.edit_outlined,
+                child: TextField(
+                  controller: _titleController,
+                  style: _fieldTextStyle,
+                  decoration: _fieldDecoration('여행 제목 · 예) 제주 3박4일'),
+                ),
               ),
               const SizedBox(height: 12),
-              TextField(controller: _cityController, decoration: _inputDecoration('도시 (예: 제주)')),
+              _FieldContainer(
+                icon: Icons.search,
+                child: TextField(
+                  controller: _cityController,
+                  style: _fieldTextStyle,
+                  decoration: _fieldDecoration('도시 검색 · 예) 오사카, 다낭'),
+                ),
+              ),
               const SizedBox(height: 12),
               InkWell(
                 onTap: _pickDateRange,
-                borderRadius: BorderRadius.circular(14),
-                child: Container(
-                  width: double.infinity,
-                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
-                  decoration: BoxDecoration(
-                    color: const Color(0xFFF2F4F6),
-                    borderRadius: BorderRadius.circular(14),
-                  ),
+                borderRadius: BorderRadius.circular(16),
+                child: _FieldContainer(
+                  icon: Icons.calendar_today_outlined,
                   child: Text(
                     _dateRange == null
-                        ? '여행 기간 선택'
+                        ? '날짜 선택'
                         : '${_formatDate(_dateRange!.start)} ~ ${_formatDate(_dateRange!.end)}',
                     style: TextStyle(
                       fontSize: 14.5,
                       fontWeight: FontWeight.w600,
-                      color: _dateRange == null
-                          ? const Color(0xFF8B95A1)
-                          : const Color(0xFF191F28),
+                      color: _dateRange == null ? AppColors.ink400 : AppColors.ink900,
                     ),
                   ),
                 ),
               ),
               const Spacer(),
-              SizedBox(
-                width: double.infinity,
-                height: 52,
-                child: ElevatedButton(
-                  onPressed: _submitting ? null : _submit,
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: const Color(0xFF191F28),
-                    foregroundColor: Colors.white,
-                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
-                  ),
-                  child: _submitting
-                      ? const SizedBox(
-                          width: 20,
-                          height: 20,
-                          child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
-                        )
-                      : const Text('만들기', style: TextStyle(fontSize: 15, fontWeight: FontWeight.w700)),
-                ),
-              ),
-              const SizedBox(height: 12),
+              AppButton(label: '만들기', onPressed: _submit, loading: _submitting),
             ],
           ),
         ),
       ),
     );
   }
+
+  static const _fieldTextStyle = TextStyle(
+    fontSize: 14.5,
+    fontWeight: FontWeight.w600,
+    color: AppColors.ink900,
+  );
+
+  InputDecoration _fieldDecoration(String hint) {
+    return InputDecoration(
+      hintText: hint,
+      hintStyle: const TextStyle(color: AppColors.ink400, fontWeight: FontWeight.w600),
+      border: InputBorder.none,
+      isDense: true,
+      contentPadding: EdgeInsets.zero,
+    );
+  }
 }
 
-class _ErrorBanner extends StatelessWidget {
-  const _ErrorBanner({required this.message});
-  final String message;
+class _FieldContainer extends StatelessWidget {
+  const _FieldContainer({required this.icon, required this.child});
+
+  final IconData icon;
+  final Widget child;
 
   @override
   Widget build(BuildContext context) {
     return Container(
       width: double.infinity,
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 15),
       decoration: BoxDecoration(
-        color: const Color(0xFFFFF1F1),
-        borderRadius: BorderRadius.circular(14),
+        color: AppColors.surfaceSubtle,
+        borderRadius: BorderRadius.circular(16),
       ),
-      child: Text(
-        message,
-        textAlign: TextAlign.center,
-        style: const TextStyle(color: Color(0xFFD14343), fontSize: 13.5, fontWeight: FontWeight.w600),
+      child: Row(
+        children: [
+          Icon(icon, size: 18, color: AppColors.ink400),
+          const SizedBox(width: 10),
+          Expanded(child: child),
+        ],
+      ),
+    );
+  }
+}
+
+class _CloseButton extends StatelessWidget {
+  const _CloseButton({required this.onTap});
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return InkWell(
+      onTap: onTap,
+      customBorder: const CircleBorder(),
+      child: Container(
+        width: 36,
+        height: 36,
+        decoration: const BoxDecoration(color: AppColors.surfaceSubtle, shape: BoxShape.circle),
+        child: const Icon(Icons.close, size: 20, color: AppColors.ink900),
       ),
     );
   }

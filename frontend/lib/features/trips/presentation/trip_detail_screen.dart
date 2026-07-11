@@ -4,6 +4,8 @@ import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../core/network/api_exception.dart';
+import '../../../core/theme/app_colors.dart';
+import '../../../core/widgets/app_button.dart';
 import '../data/trip_models.dart';
 import 'trip_list_controller.dart';
 
@@ -136,7 +138,7 @@ class _TripDetailScreenState extends ConsumerState<TripDetailScreen> {
           ),
           TextButton(
             onPressed: () => Navigator.of(dialogContext).pop(true),
-            child: const Text('삭제', style: TextStyle(color: Color(0xFFD14343))),
+            child: const Text('삭제', style: TextStyle(color: AppColors.danger)),
           ),
         ],
       ),
@@ -175,12 +177,13 @@ class _TripDetailScreenState extends ConsumerState<TripDetailScreen> {
         elevation: 0,
         title: const Text(
           '여행 상세',
-          style: TextStyle(color: Color(0xFF191F28), fontWeight: FontWeight.w700),
+          style: TextStyle(color: AppColors.ink900, fontWeight: FontWeight.w700),
         ),
+        iconTheme: const IconThemeData(color: AppColors.ink900),
         actions: [
           if (state is _DetailLoaded && !_editing)
             IconButton(
-              icon: const Icon(Icons.edit_outlined, color: Color(0xFF191F28)),
+              icon: const Icon(Icons.edit_outlined, color: AppColors.ink900),
               onPressed: () => setState(() => _editing = true),
             ),
           if (state is _DetailLoaded)
@@ -189,9 +192,9 @@ class _TripDetailScreenState extends ConsumerState<TripDetailScreen> {
                   ? const SizedBox(
                       width: 18,
                       height: 18,
-                      child: CircularProgressIndicator(strokeWidth: 2),
+                      child: CircularProgressIndicator(strokeWidth: 2, color: AppColors.danger),
                     )
-                  : const Icon(Icons.delete_outline, color: Color(0xFFD14343)),
+                  : const Icon(Icons.delete_outline, color: AppColors.danger),
               onPressed: _deleting ? null : _confirmAndDelete,
             ),
         ],
@@ -234,22 +237,23 @@ class _TripDetailScreenState extends ConsumerState<TripDetailScreen> {
     return [
       TextField(
         controller: _titleController,
+        style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w700, color: AppColors.ink900),
         decoration: InputDecoration(
           filled: true,
-          fillColor: const Color(0xFFF2F4F6),
-          border: OutlineInputBorder(borderRadius: BorderRadius.circular(14), borderSide: BorderSide.none),
+          fillColor: AppColors.surfaceSubtle,
+          border: OutlineInputBorder(borderRadius: BorderRadius.circular(16), borderSide: BorderSide.none),
         ),
       ),
       const SizedBox(height: 12),
       InkWell(
         onTap: _pickDateRange,
-        borderRadius: BorderRadius.circular(14),
+        borderRadius: BorderRadius.circular(16),
         child: Container(
           width: double.infinity,
           padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
           decoration: BoxDecoration(
-            color: const Color(0xFFF2F4F6),
-            borderRadius: BorderRadius.circular(14),
+            color: AppColors.surfaceSubtle,
+            borderRadius: BorderRadius.circular(16),
           ),
           child: Text(
             _dateRange == null
@@ -258,7 +262,7 @@ class _TripDetailScreenState extends ConsumerState<TripDetailScreen> {
             style: const TextStyle(
               fontSize: 14.5,
               fontWeight: FontWeight.w600,
-              color: Color(0xFF191F28),
+              color: AppColors.ink900,
             ),
           ),
         ),
@@ -267,27 +271,16 @@ class _TripDetailScreenState extends ConsumerState<TripDetailScreen> {
       Row(
         children: [
           Expanded(
-            child: OutlinedButton(
+            child: AppButton(
+              label: '취소',
+              variant: AppButtonVariant.outline,
+              height: 48,
               onPressed: _saving ? null : () => setState(() => _editing = false),
-              child: const Text('취소'),
             ),
           ),
           const SizedBox(width: 12),
           Expanded(
-            child: ElevatedButton(
-              onPressed: _saving ? null : _save,
-              style: ElevatedButton.styleFrom(
-                backgroundColor: const Color(0xFF191F28),
-                foregroundColor: Colors.white,
-              ),
-              child: _saving
-                  ? const SizedBox(
-                      width: 18,
-                      height: 18,
-                      child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
-                    )
-                  : const Text('저장'),
-            ),
+            child: AppButton(label: '저장', height: 48, loading: _saving, onPressed: _save),
           ),
         ],
       ),
@@ -298,17 +291,17 @@ class _TripDetailScreenState extends ConsumerState<TripDetailScreen> {
     return [
       Text(
         trip.title,
-        style: const TextStyle(fontSize: 22, fontWeight: FontWeight.w800, color: Color(0xFF191F28)),
+        style: const TextStyle(fontSize: 22, fontWeight: FontWeight.w800, color: AppColors.ink900),
       ),
       const SizedBox(height: 8),
       Text(
         trip.cityName,
-        style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w600, color: Color(0xFF4E5968)),
+        style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w600, color: AppColors.ink600),
       ),
       const SizedBox(height: 4),
       Text(
         '${trip.startDate} ~ ${trip.endDate}',
-        style: const TextStyle(fontSize: 13.5, color: Color(0xFF8B95A1), fontWeight: FontWeight.w600),
+        style: const TextStyle(fontSize: 13.5, color: AppColors.ink400, fontWeight: FontWeight.w600),
       ),
       const SizedBox(height: 12),
       _StatusBadge(status: trip.status),
@@ -331,12 +324,12 @@ class _StatusBadge extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
       decoration: BoxDecoration(
-        color: const Color(0xFFF2F4F6),
+        color: AppColors.surfaceSubtle,
         borderRadius: BorderRadius.circular(999),
       ),
       child: Text(
         label,
-        style: const TextStyle(fontSize: 11.5, fontWeight: FontWeight.w700, color: Color(0xFF4E5968)),
+        style: const TextStyle(fontSize: 11.5, fontWeight: FontWeight.w700, color: AppColors.ink600),
       ),
     );
   }
