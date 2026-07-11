@@ -5,6 +5,7 @@ import { AppController } from './app.controller';
 import { AppService } from './app.service';
 import { envValidationSchema } from './config/env.validation';
 import { buildDataSourceOptions } from './config/database.config';
+import { AuthModule } from './auth/auth.module';
 import { UsersModule } from './users/users.module';
 import { TripsModule } from './trips/trips.module';
 import { PlacesModule } from './places/places.module';
@@ -24,6 +25,7 @@ import { NotificationsModule } from './notifications/notifications.module';
       useFactory: (configService: ConfigService) =>
         buildDataSourceOptions(configService.getOrThrow<string>('DATABASE_URL')),
     }),
+    AuthModule,
     UsersModule,
     TripsModule,
     PlacesModule,

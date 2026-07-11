@@ -48,6 +48,7 @@ describeIfDb('초기 스키마 Repository CRUD (Phase 3)', () => {
       'trips',
       'user_devices',
       'social_accounts',
+      'refresh_tokens',
       'users',
       'notification_logs',
     ];
