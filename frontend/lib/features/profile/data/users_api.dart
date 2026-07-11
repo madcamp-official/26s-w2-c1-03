@@ -1,9 +1,9 @@
 import '../../../core/network/api_client.dart';
 import '../../auth/data/auth_models.dart';
 
-/// API 명세서 §1: GET/PATCH /users/me. 응답이 로그인 응답의 user와 완전히 같은
-/// 리소스라 별도 모델을 만들지 않고 auth/data/auth_models.dart의 AuthUser를
-/// 그대로 재사용한다(회원 탈퇴·디바이스 등록은 이번 스코프 아님 — plan.md 참고).
+/// API 명세서 §1: GET/PATCH/DELETE /users/me. GET/PATCH 응답이 로그인 응답의
+/// user와 완전히 같은 리소스라 별도 모델을 만들지 않고 auth/data/auth_models.dart의
+/// AuthUser를 그대로 재사용한다(이미지 업로드·디바이스 등록은 이번 스코프 아님 — plan.md 참고).
 class UsersApi {
   UsersApi(this._apiClient);
 
@@ -28,5 +28,10 @@ class UsersApi {
       data: {'profileImageUrl': profileImageUrl},
     );
     return AuthUser.fromJson(response.data!);
+  }
+
+  /// 회원 탈퇴(soft delete: status=withdrawn). 204 응답, 별도 바디 없음.
+  Future<void> deleteMe() {
+    return _apiClient.dio.delete<void>('/users/me');
   }
 }
