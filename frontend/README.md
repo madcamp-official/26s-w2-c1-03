@@ -15,3 +15,32 @@ A few resources to get you started if this is your first Flutter project:
 For help getting started with Flutter development, view the
 [online documentation](https://docs.flutter.dev/), which offers tutorials,
 samples, guidance on mobile development, and a full API reference.
+
+## 소셜 로그인 로컬 실행 설정
+
+이 값들은 비밀값이 아니라(클라이언트 앱에 원래 내장되는 값) 커밋해도 되지만,
+바뀌기 쉬운 값이라 소스에 직접 박아두지 않고 아래처럼 주입한다.
+
+1. **카카오 네이티브 앱 키**: `android/local.properties`(gitignore 대상)에 한 줄 추가
+   ```
+   kakaoNativeAppKey=발급받은_카카오_네이티브_앱_키
+   ```
+   iOS는 빌드 설정 치환이 안 돼서 `ios/Runner/Info.plist`의
+   `kakaoREPLACE_WITH_NATIVE_APP_KEY` 부분을 직접 `kakao` + 네이티브 앱 키로 바꿔야 한다.
+
+2. **백엔드 URL / 구글 서버 클라이언트 ID**: `flutter run`/`flutter build` 시
+   `--dart-define`으로 전달한다.
+   ```
+   flutter run \
+     --dart-define=API_BASE_URL=http://10.0.2.2:3000 \
+     --dart-define=GOOGLE_SERVER_CLIENT_ID=xxxxx.apps.googleusercontent.com
+   ```
+   `GOOGLE_SERVER_CLIENT_ID`는 Android용 OAuth 클라이언트가 아니라 **"웹 애플리케이션"
+   타입**으로 따로 만든 클라이언트 ID여야 한다(google_sign_in이 idToken을 받으려면
+   이게 있어야 함). 백엔드 `.env`의 `GOOGLE_CLIENT_ID`와 반드시 같은 값이어야 한다.
+   안드로이드 에뮬레이터에서 로컬 백엔드에 접속할 땐 `localhost` 대신 `10.0.2.2`를 쓴다.
+
+3. `com.google.gms.google-services` 플러그인이 `android/app/build.gradle.kts`에 이미
+   적용돼 있는데 `google-services.json`이 아직 없다 — Firebase 프로젝트를 만들어
+   `android/app/google-services.json`에 넣기 전까지는 Android 빌드 자체가 안 될 수 있다
+   (Phase 11/13, Firebase Storage·푸시 알림 붙일 때 같이 처리될 예정).

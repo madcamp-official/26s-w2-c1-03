@@ -1,4 +1,4 @@
-package com.example.tripandend
+package com.tripandend.app
 
 import io.flutter.embedding.android.FlutterActivity
 
