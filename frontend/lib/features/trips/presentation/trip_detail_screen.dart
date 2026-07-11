@@ -6,6 +6,8 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../core/network/api_exception.dart';
 import '../../../core/theme/app_colors.dart';
 import '../../../core/widgets/app_button.dart';
+import '../../../core/widgets/app_list_row.dart';
+import '../../places/presentation/place_selection_screen.dart';
 import '../data/trip_models.dart';
 import 'trip_list_controller.dart';
 
@@ -305,6 +307,22 @@ class _TripDetailScreenState extends ConsumerState<TripDetailScreen> {
       ),
       const SizedBox(height: 12),
       _StatusBadge(status: trip.status),
+      const SizedBox(height: 20),
+      AppListRow(
+        showDivider: false,
+        leading: Container(
+          width: 40,
+          height: 40,
+          decoration: const BoxDecoration(color: AppColors.surfaceSubtle, shape: BoxShape.circle),
+          child: const Icon(Icons.explore_outlined, size: 19, color: AppColors.ink600),
+        ),
+        title: '가고 싶은 곳 골라보기',
+        subtitle: '이 지역 추천 장소를 둘러봐',
+        trailing: const AppChevron(),
+        onTap: () => Navigator.of(
+          context,
+        ).push(MaterialPageRoute(builder: (_) => PlaceSelectionScreen(tripId: trip.id))),
+      ),
     ];
   }
 }

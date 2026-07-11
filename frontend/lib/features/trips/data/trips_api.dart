@@ -18,10 +18,19 @@ class TripsApi {
     required String cityName,
     required String startDate,
     required String endDate,
+    String? areaCode,
+    String? sigunguCode,
   }) async {
     final response = await _apiClient.dio.post<Map<String, dynamic>>(
       '/trips',
-      data: {'title': title, 'cityName': cityName, 'startDate': startDate, 'endDate': endDate},
+      data: {
+        'title': title,
+        'cityName': cityName,
+        'startDate': startDate,
+        'endDate': endDate,
+        if (areaCode != null) 'areaCode': areaCode,
+        if (sigunguCode != null) 'sigunguCode': sigunguCode,
+      },
     );
     return Trip.fromJson(response.data!);
   }

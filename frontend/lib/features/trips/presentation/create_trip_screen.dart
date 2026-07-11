@@ -3,15 +3,18 @@ import 'dart:async';
 import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import '../../../core/data/area_codes.dart';
 import '../../../core/network/api_exception.dart';
 import '../../../core/theme/app_colors.dart';
 import '../../../core/widgets/app_button.dart';
+import 'city_search_sheet.dart';
 import 'trip_detail_screen.dart';
 import 'trip_list_controller.dart';
 
-/// 여행 생성 화면(design.md 시안 `3b` 레이아웃 차용). `areaCode`/`sigunguCode`는
-/// 이번 스코프에서 받지 않는다 — 도시는 자유 텍스트로만 받고, 지역코드 매핑과
-/// AI 장소 추천(시안 `4b`)은 Phase 7에서 추가한다. 그래서 CTA는 AI 액션이 아니라
+/// 여행 생성 화면(design.md 시안 `3b` 레이아웃 차용). 도시는 자유 텍스트가 아니라
+/// `core/data/area_codes.dart`의 국내 시/군/구 234개 중 검색해서 고른다 —
+/// TourAPI `areaCode`/`sigunguCode`에 곧바로 매핑되어야 Phase 7 장소 후보 API가
+/// 동작하기 때문이다(§places §AREA_CODE_REQUIRED). CTA는 AI 액션이 아니라
 /// "확정" 액션이라 lime이 아니라 ink 버튼을 쓴다(§2.4).
 class CreateTripScreen extends ConsumerStatefulWidget {
   const CreateTripScreen({super.key});
@@ -22,16 +25,22 @@ class CreateTripScreen extends ConsumerStatefulWidget {
 
 class _CreateTripScreenState extends ConsumerState<CreateTripScreen> {
   final _titleController = TextEditingController();
-  final _cityController = TextEditingController();
   DateTimeRange? _dateRange;
+  SigunguEntry? _selectedCity;
   String? _errorText;
   bool _submitting = false;
 
   @override
   void dispose() {
     _titleController.dispose();
-    _cityController.dispose();
     super.dispose();
+  }
+
+  Future<void> _pickCity() async {
+    final picked = await showCitySearchSheet(context);
+    if (picked != null) {
+      setState(() => _selectedCity = picked);
+    }
   }
 
   Future<void> _pickDateRange() async {
@@ -49,9 +58,9 @@ class _CreateTripScreenState extends ConsumerState<CreateTripScreen> {
 
   Future<void> _submit() async {
     final title = _titleController.text.trim();
-    final city = _cityController.text.trim();
+    final city = _selectedCity;
 
-    if (title.isEmpty || city.isEmpty) {
+    if (title.isEmpty || city == null) {
       setState(() => _errorText = '제목과 도시를 모두 입력해줘');
       return;
     }
@@ -70,7 +79,9 @@ class _CreateTripScreenState extends ConsumerState<CreateTripScreen> {
           .read(tripsApiProvider)
           .create(
             title: title,
-            cityName: city,
+            cityName: city.label,
+            areaCode: city.areaCode,
+            sigunguCode: city.sigunguCode,
             startDate: _formatDate(_dateRange!.start),
             endDate: _formatDate(_dateRange!.end),
           );
@@ -136,12 +147,19 @@ class _CreateTripScreenState extends ConsumerState<CreateTripScreen> {
                 ),
               ),
               const SizedBox(height: 12),
-              _FieldContainer(
-                icon: Icons.search,
-                child: TextField(
-                  controller: _cityController,
-                  style: _fieldTextStyle,
-                  decoration: _fieldDecoration('도시 검색 · 예) 오사카, 다낭'),
+              InkWell(
+                onTap: _pickCity,
+                borderRadius: BorderRadius.circular(16),
+                child: _FieldContainer(
+                  icon: Icons.search,
+                  child: Text(
+                    _selectedCity?.label ?? '도시 검색 · 예) 강릉, 해운대구',
+                    style: TextStyle(
+                      fontSize: 14.5,
+                      fontWeight: FontWeight.w600,
+                      color: _selectedCity == null ? AppColors.ink400 : AppColors.ink900,
+                    ),
+                  ),
                 ),
               ),
               const SizedBox(height: 12),

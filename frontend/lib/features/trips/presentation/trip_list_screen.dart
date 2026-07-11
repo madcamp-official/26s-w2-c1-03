@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../core/theme/app_colors.dart';
 import '../../../core/theme/app_gradients.dart';
+import '../../../core/widgets/ai_badge.dart';
 import '../../../core/widgets/app_button.dart';
 import '../../profile/presentation/profile_controller.dart';
 import '../../profile/presentation/profile_state.dart';
@@ -10,8 +11,13 @@ import 'trip_detail_screen.dart';
 import 'trip_list_controller.dart';
 import 'trip_list_state.dart';
 
-/// "홈" 탭 콘텐츠(design.md §5.2, 시안 `2a`). 여행 생성은 이 화면 안이 아니라
+/// "홈" 탭 콘텐츠(design_example.pdf 시안 `1a` 기준 — 알림 벨 + D-day 히어로 카드 +
+/// "다음엔 여기 어때?" AI 추천 캐러셀 + 지난 여행 기록). 여행 생성은 이 화면 안이 아니라
 /// AppShell 중앙 FAB이 담당한다.
+///
+/// "다음엔 여기 어때?"는 아직 백엔드에 추천 여행지 API가 없어(plan.md에 없는 신규
+/// 기능) 정적 더미 데이터로만 채운다 — 카드 탭도 "곧 만나요" 안내만 띄운다. Phase 7
+/// 결정(국내 여행 전용)에 맞춰 목적지도 국내 도시로만 채운다.
 class TripListScreen extends ConsumerStatefulWidget {
   const TripListScreen({super.key});
 
@@ -109,9 +115,6 @@ class _GreetingHeader extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final nickname = profileState is ProfileLoaded ? (profileState as ProfileLoaded).user.nickname : null;
-    final imageUrl = profileState is ProfileLoaded
-        ? (profileState as ProfileLoaded).user.profileImageUrl
-        : null;
 
     return Row(
       mainAxisAlignment: MainAxisAlignment.spaceBetween,
@@ -122,24 +125,27 @@ class _GreetingHeader extends StatelessWidget {
             style: const TextStyle(fontSize: 19, fontWeight: FontWeight.w700, color: AppColors.ink900),
           ),
         ),
-        CircleAvatar(
-          radius: 20,
-          backgroundColor: AppColors.lime,
-          backgroundImage: imageUrl != null ? NetworkImage(imageUrl) : null,
-          child: imageUrl == null
-              ? Text(
-                  nickname != null && nickname.isNotEmpty ? nickname.substring(0, 1) : '',
-                  style: const TextStyle(
-                    fontSize: 14,
-                    fontWeight: FontWeight.w800,
-                    color: AppColors.green800,
-                  ),
-                )
-              : null,
+        // 알림(Phase 13)이 아직 없어 눌러도 "곧 만나요" 안내만 뜬다 — 그래서 실제
+        // 안 읽음이 없는데 있는 척하는 빨간 점은 넣지 않는다.
+        InkWell(
+          borderRadius: BorderRadius.circular(19),
+          onTap: () => _showComingSoon(context, '알림'),
+          child: Container(
+            width: 38,
+            height: 38,
+            decoration: const BoxDecoration(color: AppColors.surfaceSubtle, shape: BoxShape.circle),
+            child: const Icon(Icons.notifications_outlined, size: 19, color: AppColors.ink600),
+          ),
         ),
       ],
     );
   }
+}
+
+void _showComingSoon(BuildContext context, String label) {
+  ScaffoldMessenger.of(
+    context,
+  ).showSnackBar(SnackBar(content: Text('$label은(는) 곧 만나요 👋')));
 }
 
 class _TripListBody extends StatelessWidget {
@@ -164,6 +170,8 @@ class _TripListBody extends StatelessWidget {
             _DdayHeroCard(trip: upcoming),
             const SizedBox(height: 28),
           ],
+          const _RecommendedDestinationsSection(),
+          const SizedBox(height: 28),
           if (others.isNotEmpty) ...[
             const Text(
               '지난 여행 기록',
@@ -284,13 +292,34 @@ class _DdayHeroCard extends StatelessWidget {
             style: const TextStyle(fontSize: 14.5, fontWeight: FontWeight.w600, color: AppColors.green700),
           ),
           const SizedBox(height: 18),
-          AppButton(
-            label: '일정 보기',
-            onPressed: () {
-              Navigator.of(
-                context,
-              ).push(MaterialPageRoute(builder: (_) => TripDetailScreen(tripId: trip.id)));
-            },
+          Row(
+            children: [
+              Expanded(
+                child: AppButton(
+                  label: '일정 보기',
+                  onPressed: () {
+                    Navigator.of(
+                      context,
+                    ).push(MaterialPageRoute(builder: (_) => TripDetailScreen(tripId: trip.id)));
+                  },
+                ),
+              ),
+              const SizedBox(width: 8),
+              // 공동 여행 계획(초대 링크, Phase 10)이 아직 없어 "곧 만나요"만 띄운다.
+              InkWell(
+                borderRadius: BorderRadius.circular(14),
+                onTap: () => _showComingSoon(context, '친구 초대'),
+                child: Container(
+                  width: 46,
+                  height: 52,
+                  decoration: BoxDecoration(
+                    color: const Color(0x99FFFFFF),
+                    borderRadius: BorderRadius.circular(14),
+                  ),
+                  child: const Icon(Icons.ios_share, size: 18, color: AppColors.green900),
+                ),
+              ),
+            ],
           ),
         ],
       ),
@@ -329,6 +358,133 @@ class _TripCard extends StatelessWidget {
             color: Colors.white,
           ),
         ),
+      ),
+    );
+  }
+}
+
+class _RecommendedDestination {
+  const _RecommendedDestination({required this.name, required this.subtitle, this.tag});
+  final String name;
+  final String subtitle;
+  final String? tag;
+}
+
+/// 정적 더미(위 클래스 상단 주석 참고) — 국내 여행 전용 결정(plan.md §16)에 맞춰
+/// 목적지도 국내 도시로만 채운다.
+const _recommendedDestinations = [
+  _RecommendedDestination(name: '강릉', subtitle: '바다 보러 가기 딱 좋아', tag: 'AI 추천'),
+  _RecommendedDestination(name: '여수', subtitle: '밤바다 아직 안 가봤으면', tag: '가성비'),
+  _RecommendedDestination(name: '경주', subtitle: '천년 고도 산책하기'),
+];
+
+class _RecommendedDestinationsSection extends StatelessWidget {
+  const _RecommendedDestinationsSection();
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(
+          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+          children: [
+            const Text(
+              '다음엔 여기 어때?',
+              style: TextStyle(fontSize: 17, fontWeight: FontWeight.w800, color: AppColors.ink900),
+            ),
+            InkWell(
+              onTap: () => _showComingSoon(context, '여행지 추천'),
+              child: const Text(
+                '더보기',
+                style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: AppColors.ink400),
+              ),
+            ),
+          ],
+        ),
+        const SizedBox(height: 14),
+        SizedBox(
+          height: 148,
+          child: ListView.separated(
+            scrollDirection: Axis.horizontal,
+            clipBehavior: Clip.none,
+            itemCount: _recommendedDestinations.length,
+            separatorBuilder: (context, index) => const SizedBox(width: 14),
+            itemBuilder: (context, index) => _DestinationCard(
+              destination: _recommendedDestinations[index],
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+class _DestinationCard extends StatelessWidget {
+  const _DestinationCard({required this.destination});
+  final _RecommendedDestination destination;
+
+  @override
+  Widget build(BuildContext context) {
+    final tag = destination.tag;
+    return InkWell(
+      borderRadius: BorderRadius.circular(20),
+      onTap: () => _showComingSoon(context, '여행지 추천'),
+      child: SizedBox(
+        width: 130,
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Container(
+              height: 96,
+              width: double.infinity,
+              padding: const EdgeInsets.all(8),
+              decoration: BoxDecoration(
+                gradient: AppGradients.forKey(destination.name),
+                borderRadius: BorderRadius.circular(18),
+              ),
+              alignment: Alignment.topLeft,
+              child: tag == null ? null : _DestinationTag(label: tag),
+            ),
+            const SizedBox(height: 8),
+            Text(
+              destination.name,
+              style: const TextStyle(fontSize: 14.5, fontWeight: FontWeight.w700, color: AppColors.ink900),
+            ),
+            const SizedBox(height: 2),
+            Text(
+              destination.subtitle,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: AppColors.ink400),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+/// "AI 추천"은 기존 AiBadge(라임)를 그대로 재사용하고, "가성비" 같은 AI와 무관한
+/// 태그는 라임을 쓰지 않는다(design.md §8 안티패턴 7번 — AI 신호를 남용하지 않는다).
+class _DestinationTag extends StatelessWidget {
+  const _DestinationTag({required this.label});
+  final String label;
+
+  @override
+  Widget build(BuildContext context) {
+    if (label == 'AI 추천') {
+      return const AiBadge();
+    }
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+      decoration: BoxDecoration(
+        color: const Color(0xE6FFFFFF),
+        borderRadius: BorderRadius.circular(999),
+      ),
+      child: Text(
+        label,
+        style: const TextStyle(fontSize: 10.5, fontWeight: FontWeight.w800, color: AppColors.ink600),
       ),
     );
   }
