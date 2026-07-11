@@ -27,13 +27,21 @@
                 <action android:name="android.intent.action.MAIN"/>
                 <category android:name="android.intent.category.LAUNCHER"/>
             </intent-filter>
-            <!-- 카카오 로그인 리다이렉트. kakaoNativeAppKey는 build.gradle.kts의
-                 manifestPlaceholders에서 android/local.properties 값으로 채워진다. -->
+        </activity>
+        <!-- 카카오 로그인 리다이렉트. kakao_flutter_sdk_common이 병합하는
+             AuthCodeCustomTabsActivity의 onNewIntent()만 이 리다이렉트를 받아
+             로그인 Future를 완료시킨다 — MainActivity에 걸면 인텐트가 거기로
+             가버려서 SDK가 영원히 응답을 못 받는다(무한 로딩). kakaoNativeAppKey는
+             build.gradle.kts의 manifestPlaceholders에서 android/local.properties
+             값으로 채워진다. -->
+        <activity
+            android:name="com.kakao.sdk.flutter.AuthCodeCustomTabsActivity"
+            android:exported="true">
             <intent-filter>
                 <action android:name="android.intent.action.VIEW"/>
                 <category android:name="android.intent.category.DEFAULT"/>
                 <category android:name="android.intent.category.BROWSABLE"/>
-                <data android:scheme="kakao${kakaoNativeAppKey}"/>
+                <data android:scheme="kakao${kakaoNativeAppKey}" android:host="oauth"/>
             </intent-filter>
         </activity>
         <!-- Don't delete the meta-data below.
