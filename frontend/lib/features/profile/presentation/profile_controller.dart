@@ -57,6 +57,18 @@ class ProfileController extends StateNotifier<ProfileState> {
     }
   }
 
+  /// 성공하면 서버 계정은 이미 soft-delete됐다는 뜻 — 로컬 세션 정리(토큰 폐기,
+  /// 로그인 화면 이동)는 화면 쪽에서 AuthController.logout()으로 이어서 처리한다.
+  Future<bool> withdraw() async {
+    try {
+      await _usersApi.deleteMe();
+      return true;
+    } on DioException catch (e) {
+      state = _toFailedState(e);
+      return false;
+    }
+  }
+
   ProfileState _toFailedState(DioException e) {
     final error = e.error;
     if (error is ApiException) {

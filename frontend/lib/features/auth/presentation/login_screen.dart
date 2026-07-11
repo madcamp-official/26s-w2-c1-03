@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import '../../home/presentation/home_placeholder_screen.dart';
+import '../../home/presentation/app_shell.dart';
 import '../../profile/presentation/onboarding_nickname_screen.dart';
 import 'auth_state.dart';
 import 'login_controller.dart';
@@ -17,7 +17,7 @@ class LoginScreen extends ConsumerWidget {
             ? MaterialPageRoute<void>(
                 builder: (_) => OnboardingNicknameScreen(initialNickname: next.user.nickname),
               )
-            : MaterialPageRoute<void>(builder: (_) => HomePlaceholderScreen(user: next.user));
+            : MaterialPageRoute<void>(builder: (_) => const AppShell());
         Navigator.of(context).pushReplacement(route);
       }
     });

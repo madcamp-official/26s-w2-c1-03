@@ -5,7 +5,7 @@ import 'package:kakao_flutter_sdk_user/kakao_flutter_sdk_user.dart';
 import 'core/config/app_config.dart';
 import 'features/auth/presentation/login_controller.dart';
 import 'features/auth/presentation/login_screen.dart';
-import 'features/home/presentation/home_placeholder_screen.dart';
+import 'features/home/presentation/app_shell.dart';
 import 'features/profile/data/users_api.dart';
 
 void main() async {
@@ -37,8 +37,9 @@ class TripAndEndApp extends StatelessWidget {
 }
 
 /// 저장된 액세스 토큰이 있으면 GET /users/me로 세션이 아직 유효한지 확인해 바로
-/// 홈으로 보낸다. 토큰이 없거나(첫 실행) 만료돼서 refresh까지 실패하면(ApiClient의
-/// 401 인터셉터가 이미 처리) 로그인 화면으로 보낸다.
+/// 앱 셸로 보낸다. 토큰이 없거나(첫 실행) 만료돼서 refresh까지 실패하면(ApiClient의
+/// 401 인터셉터가 이미 처리) 로그인 화면으로 보낸다. 응답 자체(user)는 각 탭이
+/// 필요하면 자기 컨트롤러로 직접 조회하므로 여기선 세션 유효성 확인 용도로만 쓴다.
 class _StartupGate extends ConsumerStatefulWidget {
   const _StartupGate();
 
@@ -58,8 +59,8 @@ class _StartupGateState extends ConsumerState<_StartupGate> {
 
     try {
       final usersApi = UsersApi(ref.read(apiClientProvider));
-      final user = await usersApi.getMe();
-      return HomePlaceholderScreen(user: user);
+      await usersApi.getMe();
+      return const AppShell();
     } catch (_) {
       await tokenStorage.clear();
       return const LoginScreen();

@@ -1,0 +1,343 @@
+import 'dart:async';
+
+import 'package:dio/dio.dart';
+import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+import '../../../core/network/api_exception.dart';
+import '../data/trip_models.dart';
+import 'trip_list_controller.dart';
+
+sealed class _DetailState {
+  const _DetailState();
+}
+
+class _DetailLoading extends _DetailState {
+  const _DetailLoading();
+}
+
+class _DetailLoaded extends _DetailState {
+  const _DetailLoaded(this.trip);
+  final Trip trip;
+}
+
+class _DetailFailed extends _DetailState {
+  const _DetailFailed(this.message);
+  final String message;
+}
+
+/// 상세 조회/인라인 수정/삭제. 이 화면은 tripId 하나에 매인 일회성 화면이라
+/// Riverpod StateNotifier 대신 로컬 setState로 관리한다(다른 화면과 공유할
+/// 상태가 아님 — TripListScreen/ProfileScreen처럼 앱 전역에서 watch될 필요 없음).
+class TripDetailScreen extends ConsumerStatefulWidget {
+  const TripDetailScreen({super.key, required this.tripId});
+
+  final String tripId;
+
+  @override
+  ConsumerState<TripDetailScreen> createState() => _TripDetailScreenState();
+}
+
+class _TripDetailScreenState extends ConsumerState<TripDetailScreen> {
+  _DetailState _state = const _DetailLoading();
+  final _titleController = TextEditingController();
+  DateTimeRange? _dateRange;
+  bool _editing = false;
+  bool _saving = false;
+  bool _deleting = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _load();
+  }
+
+  @override
+  void dispose() {
+    _titleController.dispose();
+    super.dispose();
+  }
+
+  Future<void> _load() async {
+    setState(() => _state = const _DetailLoading());
+    try {
+      final trip = await ref.read(tripsApiProvider).getDetail(widget.tripId);
+      _titleController.text = trip.title;
+      _dateRange = DateTimeRange(
+        start: DateTime.parse(trip.startDate),
+        end: DateTime.parse(trip.endDate),
+      );
+      if (!mounted) return;
+      setState(() => _state = _DetailLoaded(trip));
+    } on DioException catch (e) {
+      if (!mounted) return;
+      final error = e.error;
+      setState(
+        () => _state = _DetailFailed(
+          error is ApiException ? error.message : '네트워크 연결을 확인해주세요.',
+        ),
+      );
+    }
+  }
+
+  Future<void> _pickDateRange() async {
+    final now = DateTime.now();
+    final picked = await showDateRangePicker(
+      context: context,
+      firstDate: DateTime(now.year - 1),
+      lastDate: DateTime(now.year + 2),
+      initialDateRange: _dateRange,
+    );
+    if (picked != null) {
+      setState(() => _dateRange = picked);
+    }
+  }
+
+  Future<void> _save() async {
+    final title = _titleController.text.trim();
+    if (title.isEmpty || _dateRange == null) return;
+
+    setState(() => _saving = true);
+    try {
+      final updated = await ref
+          .read(tripsApiProvider)
+          .update(
+            widget.tripId,
+            title: title,
+            startDate: _formatDate(_dateRange!.start),
+            endDate: _formatDate(_dateRange!.end),
+          );
+      unawaited(ref.read(tripListControllerProvider.notifier).load());
+      if (!mounted) return;
+      setState(() {
+        _state = _DetailLoaded(updated);
+        _editing = false;
+        _saving = false;
+      });
+    } on DioException catch (e) {
+      if (!mounted) return;
+      final error = e.error;
+      setState(() => _saving = false);
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(error is ApiException ? error.message : '저장하지 못했어요.')),
+      );
+    }
+  }
+
+  Future<void> _confirmAndDelete() async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('여행을 삭제할까요?'),
+        content: const Text('삭제하면 되돌릴 수 없어요.'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(dialogContext).pop(false),
+            child: const Text('취소'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.of(dialogContext).pop(true),
+            child: const Text('삭제', style: TextStyle(color: Color(0xFFD14343))),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true) return;
+
+    setState(() => _deleting = true);
+    try {
+      await ref.read(tripsApiProvider).delete(widget.tripId);
+      unawaited(ref.read(tripListControllerProvider.notifier).load());
+      if (!mounted) return;
+      Navigator.of(context).pop();
+    } on DioException catch (e) {
+      if (!mounted) return;
+      final error = e.error;
+      setState(() => _deleting = false);
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(error is ApiException ? error.message : '삭제하지 못했어요.')),
+      );
+    }
+  }
+
+  String _formatDate(DateTime date) {
+    final month = date.month.toString().padLeft(2, '0');
+    final day = date.day.toString().padLeft(2, '0');
+    return '${date.year}-$month-$day';
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final state = _state;
+    return Scaffold(
+      backgroundColor: Colors.white,
+      appBar: AppBar(
+        backgroundColor: Colors.white,
+        elevation: 0,
+        title: const Text(
+          '여행 상세',
+          style: TextStyle(color: Color(0xFF191F28), fontWeight: FontWeight.w700),
+        ),
+        actions: [
+          if (state is _DetailLoaded && !_editing)
+            IconButton(
+              icon: const Icon(Icons.edit_outlined, color: Color(0xFF191F28)),
+              onPressed: () => setState(() => _editing = true),
+            ),
+          if (state is _DetailLoaded)
+            IconButton(
+              icon: _deleting
+                  ? const SizedBox(
+                      width: 18,
+                      height: 18,
+                      child: CircularProgressIndicator(strokeWidth: 2),
+                    )
+                  : const Icon(Icons.delete_outline, color: Color(0xFFD14343)),
+              onPressed: _deleting ? null : _confirmAndDelete,
+            ),
+        ],
+      ),
+      body: SafeArea(child: _buildBody(state)),
+    );
+  }
+
+  Widget _buildBody(_DetailState state) {
+    if (state is _DetailLoading) {
+      return const Center(child: CircularProgressIndicator());
+    }
+    if (state is _DetailFailed) {
+      return Center(
+        child: Padding(
+          padding: const EdgeInsets.all(24),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text(state.message, textAlign: TextAlign.center),
+              const SizedBox(height: 12),
+              TextButton(onPressed: _load, child: const Text('다시 시도')),
+            ],
+          ),
+        ),
+      );
+    }
+
+    final trip = (state as _DetailLoaded).trip;
+    return Padding(
+      padding: const EdgeInsets.all(22),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: _editing ? _buildEditFields() : _buildReadOnlyFields(trip),
+      ),
+    );
+  }
+
+  List<Widget> _buildEditFields() {
+    return [
+      TextField(
+        controller: _titleController,
+        decoration: InputDecoration(
+          filled: true,
+          fillColor: const Color(0xFFF2F4F6),
+          border: OutlineInputBorder(borderRadius: BorderRadius.circular(14), borderSide: BorderSide.none),
+        ),
+      ),
+      const SizedBox(height: 12),
+      InkWell(
+        onTap: _pickDateRange,
+        borderRadius: BorderRadius.circular(14),
+        child: Container(
+          width: double.infinity,
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
+          decoration: BoxDecoration(
+            color: const Color(0xFFF2F4F6),
+            borderRadius: BorderRadius.circular(14),
+          ),
+          child: Text(
+            _dateRange == null
+                ? '여행 기간 선택'
+                : '${_formatDate(_dateRange!.start)} ~ ${_formatDate(_dateRange!.end)}',
+            style: const TextStyle(
+              fontSize: 14.5,
+              fontWeight: FontWeight.w600,
+              color: Color(0xFF191F28),
+            ),
+          ),
+        ),
+      ),
+      const SizedBox(height: 16),
+      Row(
+        children: [
+          Expanded(
+            child: OutlinedButton(
+              onPressed: _saving ? null : () => setState(() => _editing = false),
+              child: const Text('취소'),
+            ),
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: ElevatedButton(
+              onPressed: _saving ? null : _save,
+              style: ElevatedButton.styleFrom(
+                backgroundColor: const Color(0xFF191F28),
+                foregroundColor: Colors.white,
+              ),
+              child: _saving
+                  ? const SizedBox(
+                      width: 18,
+                      height: 18,
+                      child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
+                    )
+                  : const Text('저장'),
+            ),
+          ),
+        ],
+      ),
+    ];
+  }
+
+  List<Widget> _buildReadOnlyFields(Trip trip) {
+    return [
+      Text(
+        trip.title,
+        style: const TextStyle(fontSize: 22, fontWeight: FontWeight.w800, color: Color(0xFF191F28)),
+      ),
+      const SizedBox(height: 8),
+      Text(
+        trip.cityName,
+        style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w600, color: Color(0xFF4E5968)),
+      ),
+      const SizedBox(height: 4),
+      Text(
+        '${trip.startDate} ~ ${trip.endDate}',
+        style: const TextStyle(fontSize: 13.5, color: Color(0xFF8B95A1), fontWeight: FontWeight.w600),
+      ),
+      const SizedBox(height: 12),
+      _StatusBadge(status: trip.status),
+    ];
+  }
+}
+
+class _StatusBadge extends StatelessWidget {
+  const _StatusBadge({required this.status});
+  final String status;
+
+  @override
+  Widget build(BuildContext context) {
+    final label = switch (status) {
+      'planning' => '계획 중',
+      'ongoing' => '여행 중',
+      'completed' => '완료',
+      _ => status,
+    };
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+      decoration: BoxDecoration(
+        color: const Color(0xFFF2F4F6),
+        borderRadius: BorderRadius.circular(999),
+      ),
+      child: Text(
+        label,
+        style: const TextStyle(fontSize: 11.5, fontWeight: FontWeight.w700, color: Color(0xFF4E5968)),
+      ),
+    );
+  }
+}

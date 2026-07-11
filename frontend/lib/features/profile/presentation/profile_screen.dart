@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import '../../auth/presentation/login_controller.dart';
+import '../../auth/presentation/login_screen.dart';
 import '../profile_image_upload_service.dart';
 import 'profile_controller.dart';
 import 'profile_state.dart';
@@ -16,6 +18,7 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
   bool _controllerInitialized = false;
   bool _submitting = false;
   bool _uploadingImage = false;
+  bool _withdrawing = false;
   String? _errorText;
 
   @override
@@ -85,6 +88,59 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
           SnackBar(content: Text(saved ? '프로필 사진을 변경했어요.' : '저장하지 못했어요. 다시 시도해주세요.')),
         );
     }
+  }
+
+  Future<void> _logout() async {
+    await ref.read(authControllerProvider.notifier).logout();
+    if (!mounted) return;
+    // 마이 탭은 AppShell 안에 push 없이 떠 있는 상태라, 로그인 화면으로 갈 땐
+    // 이 화면을 포함한 전체 스택을 비워야 뒤로가기로 다시 못 돌아온다.
+    Navigator.of(
+      context,
+    ).pushAndRemoveUntil(MaterialPageRoute(builder: (_) => const LoginScreen()), (route) => false);
+  }
+
+  Future<void> _confirmAndWithdraw() async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('정말 탈퇴하시겠어요?'),
+        content: const Text('탈퇴하면 계정 정보가 삭제되고 되돌릴 수 없어요.'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(dialogContext).pop(false),
+            child: const Text('취소'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.of(dialogContext).pop(true),
+            child: const Text('탈퇴', style: TextStyle(color: Color(0xFFD14343))),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true) return;
+
+    setState(() => _withdrawing = true);
+
+    final withdrawn = await ref.read(profileControllerProvider.notifier).withdraw();
+    if (!mounted) return;
+
+    if (!withdrawn) {
+      setState(() => _withdrawing = false);
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('탈퇴하지 못했어요. 다시 시도해주세요.')));
+      return;
+    }
+
+    // 계정은 이미 서버에서 삭제됐으니, 이 기기의 세션(토큰)도 정리한다.
+    await ref.read(authControllerProvider.notifier).logout();
+    if (!mounted) return;
+
+    Navigator.of(context).pushAndRemoveUntil(
+      MaterialPageRoute(builder: (_) => const LoginScreen()),
+      (route) => false,
+    );
   }
 
   @override
@@ -207,6 +263,32 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
                         child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
                       )
                     : const Text('저장', style: TextStyle(fontWeight: FontWeight.w700)),
+              ),
+            ),
+            const SizedBox(height: 24),
+            Center(
+              child: TextButton(
+                onPressed: _logout,
+                child: const Text(
+                  '로그아웃',
+                  style: TextStyle(color: Color(0xFF4E5968), fontSize: 13, fontWeight: FontWeight.w600),
+                ),
+              ),
+            ),
+            const SizedBox(height: 8),
+            Center(
+              child: TextButton(
+                onPressed: _withdrawing ? null : _confirmAndWithdraw,
+                child: _withdrawing
+                    ? const SizedBox(
+                        width: 16,
+                        height: 16,
+                        child: CircularProgressIndicator(strokeWidth: 2),
+                      )
+                    : const Text(
+                        '회원 탈퇴',
+                        style: TextStyle(color: Color(0xFF8B95A1), fontSize: 12.5),
+                      ),
               ),
             ),
           ],
