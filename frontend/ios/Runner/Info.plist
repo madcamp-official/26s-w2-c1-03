@@ -40,7 +40,18 @@
 			<string>Editor</string>
 			<key>CFBundleURLSchemes</key>
 			<array>
-				<string>kakaoREPLACE_WITH_NATIVE_APP_KEY</string>
+				<string>kakaoad103f738ca5b988358a62e5e15c8bed</string>
+			</array>
+		</dict>
+		<!-- 구글 로그인(google_sign_in) 리다이렉트 스킴. GoogleService-Info.plist의
+		     REVERSED_CLIENT_ID와 정확히 같은 값이어야 한다 — 없으면 로그인 시도 시 네이티브
+		     SDK가 크래시한다. plist를 갱신하면 이 값도 같이 바꿀 것. -->
+		<dict>
+			<key>CFBundleTypeRole</key>
+			<string>Editor</string>
+			<key>CFBundleURLSchemes</key>
+			<array>
+				<string>com.googleusercontent.apps.217633740424-6njh9eo1p6h8e4685gjov8i58h19a5lk</string>
 			</array>
 		</dict>
 	</array>
