@@ -63,7 +63,7 @@ describe('PlacesService', () => {
   let placeRepository: RepoMock<Place>;
   let tripsService: { getDetail: jest.Mock };
   let tourApiClient: { fetchAreaBasedList: jest.Mock };
-  let googlePlacesClient: { matchPlace: jest.Mock };
+  let googlePlacesClient: { matchPlace: jest.Mock; searchText: jest.Mock; getPlaceDetails: jest.Mock };
   let tatsCnctrRateClient: { fetchConcentrationMap: jest.Mock };
   let service: PlacesService;
 
@@ -71,7 +71,7 @@ describe('PlacesService', () => {
     placeRepository = createRepositoryMock<Place>();
     tripsService = { getDetail: jest.fn() };
     tourApiClient = { fetchAreaBasedList: jest.fn() };
-    googlePlacesClient = { matchPlace: jest.fn() };
+    googlePlacesClient = { matchPlace: jest.fn(), searchText: jest.fn(), getPlaceDetails: jest.fn() };
     tatsCnctrRateClient = { fetchConcentrationMap: jest.fn(async () => new Map<string, number>()) };
 
     service = new PlacesService(
@@ -216,6 +216,47 @@ describe('PlacesService', () => {
     });
   });
 
+  describe('searchCandidates', () => {
+    it('Google 검색 결과를 저장하지 않고(place_id만) 실시간 값으로 후보를 구성한다', async () => {
+      tripsService.getDetail.mockResolvedValue({ areaCode: null, sigunguCode: null });
+      googlePlacesClient.searchText.mockResolvedValue([
+        {
+          externalId: 'ChIJ1',
+          name: '스타벅스 강남',
+          address: '서울 강남구',
+          latitude: 37.5,
+          longitude: 127.0,
+          rating: 4.3,
+          reviewCount: 500,
+        },
+      ]);
+      (placeRepository.findOneBy as jest.Mock).mockResolvedValue(null);
+      (placeRepository.save as jest.Mock).mockImplementation(async (p) => ({ ...p, id: 'uuid-1' }));
+
+      const result = await service.searchCandidates('trip-1', 'user-1', '스타벅스');
+
+      // 저장된 행에는 Google 콘텐츠(name/address/좌표)가 없어야 한다 — place_id만.
+      const saved = (placeRepository.save as jest.Mock).mock.calls[0][0];
+      expect(saved).toMatchObject({
+        source: PlaceSource.GOOGLE,
+        externalId: 'ChIJ1',
+        name: null,
+        address: null,
+        latitude: null,
+        longitude: null,
+      });
+      // 응답은 실시간 Google 값으로 채워진다.
+      expect(result.candidates[0]).toMatchObject({
+        id: 'uuid-1',
+        source: PlaceSource.GOOGLE,
+        name: '스타벅스 강남',
+        address: '서울 강남구',
+        rating: 4.3,
+        reviewCount: 500,
+      });
+    });
+  });
+
   describe('getPlaceDetail', () => {
     it('존재하지 않으면 PLACE_NOT_FOUND를 던진다', async () => {
       (placeRepository.findOneBy as jest.Mock).mockResolvedValue(null);
@@ -255,6 +296,49 @@ describe('PlacesService', () => {
         name: '경복궁',
         rating: 4.7,
         reviewCount: 58000,
+      });
+    });
+
+    it('Google 장소(place_id만 저장)는 place_id로 상세를 실시간 재조회해 반환한다', async () => {
+      const googlePlace: Place = {
+        id: 'place-g',
+        source: PlaceSource.GOOGLE,
+        externalId: 'ChIJ1',
+        contentTypeId: null,
+        name: null,
+        address: null,
+        latitude: null,
+        longitude: null,
+        areaCode: null,
+        sigunguCode: null,
+        categoryCode: null,
+        tel: null,
+        imageUrl: null,
+        overview: null,
+        syncedAt: null,
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      };
+      (placeRepository.findOneBy as jest.Mock).mockResolvedValue(googlePlace);
+      googlePlacesClient.getPlaceDetails.mockResolvedValue({
+        externalId: 'ChIJ1',
+        name: '스타벅스 강남',
+        address: '서울 강남구',
+        latitude: 37.5,
+        longitude: 127.0,
+        rating: 4.3,
+        reviewCount: 500,
+      });
+
+      const result = await service.getPlaceDetail('place-g');
+
+      expect(googlePlacesClient.getPlaceDetails).toHaveBeenCalledWith('ChIJ1');
+      expect(googlePlacesClient.matchPlace).not.toHaveBeenCalled();
+      expect(result).toMatchObject({
+        id: 'place-g',
+        source: PlaceSource.GOOGLE,
+        name: '스타벅스 강남',
+        rating: 4.3,
       });
     });
   });
