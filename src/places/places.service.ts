@@ -2,7 +2,7 @@ import { Injectable, Logger } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { TripsService } from '../trips/trips.service';
-import { GooglePlacesClient } from './clients/google-places.client';
+import { GooglePlacesClient, PlacePopularity } from './clients/google-places.client';
 import {
   FetchAreaBasedListParams,
   TourApiClient,
@@ -21,6 +21,8 @@ export interface PlaceCandidateDto {
   lat: number | null;
   lng: number | null;
   categoryCode: string | null;
+  /** TourAPI contentTypeId(관광지 12/음식점 39/쇼핑 38). 클라이언트 사이드 카테고리 필터용. */
+  contentTypeId: string | null;
   imageUrl: string | null;
   overview: string | null;
   tel: string | null;
@@ -40,6 +42,18 @@ const UNMATCHED_SCORE = -1;
 @Injectable()
 export class PlacesService {
   private readonly logger = new Logger(PlacesService.name);
+
+  /**
+   * Google Places 인기도(평점/리뷰수) 인메모리 캐시 — place.id 기준. 같은 장소를
+   * 재조회/다른 트립에서 다시 볼 때마다 Google Places를 다시 호출하지 않도록 TTL
+   * 동안 결과를 재사용해 외부 API 요청을 줄인다(단일 서버 배포 전제, plan.md §14).
+   * 매칭 실패(null)도 캐시해 매칭 안 되는 장소를 반복 조회하지 않는다.
+   */
+  private readonly popularityCache = new Map<
+    string,
+    { value: PlacePopularity | null; expiresAt: number }
+  >();
+  private static readonly POPULARITY_TTL_MS = 24 * 60 * 60 * 1000;
 
   constructor(
     @InjectRepository(Place) private readonly placeRepository: Repository<Place>,
@@ -143,18 +157,25 @@ export class PlacesService {
   }
 
   /** Google Places 매칭 실패는 후보 전체 조회를 막지 않는다 — 미매칭으로 처리하고 계속 진행한다. */
-  private async safeMatchGooglePlace(
-    place: Place,
-  ): Promise<{ rating: number; reviewCount: number } | null> {
+  private async safeMatchGooglePlace(place: Place): Promise<PlacePopularity | null> {
     if (!place.latitude || !place.longitude) {
       return null;
     }
+    const cached = this.popularityCache.get(place.id);
+    if (cached && cached.expiresAt > Date.now()) {
+      return cached.value;
+    }
     try {
-      return await this.googlePlacesClient.matchPlace({
+      const popularity = await this.googlePlacesClient.matchPlace({
         name: place.name,
         latitude: Number(place.latitude),
         longitude: Number(place.longitude),
       });
+      this.popularityCache.set(place.id, {
+        value: popularity,
+        expiresAt: Date.now() + PlacesService.POPULARITY_TTL_MS,
+      });
+      return popularity;
     } catch (error) {
       this.logger.warn(`Google Places 매칭 실패(placeId=${place.id}): ${(error as Error).message}`);
       return null;
@@ -182,6 +203,7 @@ export class PlacesService {
       lat: place.latitude ? Number(place.latitude) : null,
       lng: place.longitude ? Number(place.longitude) : null,
       categoryCode: place.categoryCode,
+      contentTypeId: place.contentTypeId,
       imageUrl: place.imageUrl,
       overview: place.overview,
       tel: place.tel,

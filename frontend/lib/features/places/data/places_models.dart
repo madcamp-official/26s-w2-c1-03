@@ -8,6 +8,7 @@ class PlaceCandidate {
     required this.lat,
     required this.lng,
     required this.categoryCode,
+    required this.contentTypeId,
     required this.imageUrl,
     required this.overview,
     required this.tel,
@@ -22,6 +23,10 @@ class PlaceCandidate {
   final double? lat;
   final double? lng;
   final String? categoryCode;
+
+  /// TourAPI contentTypeId(관광지 12/음식점 39/쇼핑 38). 카테고리 클라이언트 필터에 쓴다.
+  final String? contentTypeId;
+
   final String? imageUrl;
   final String? overview;
   final String? tel;
@@ -39,6 +44,7 @@ class PlaceCandidate {
     lat: (json['lat'] as num?)?.toDouble(),
     lng: (json['lng'] as num?)?.toDouble(),
     categoryCode: json['categoryCode'] as String?,
+    contentTypeId: json['contentTypeId'] as String?,
     imageUrl: json['imageUrl'] as String?,
     overview: json['overview'] as String?,
     tel: json['tel'] as String?,

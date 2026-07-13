@@ -17,6 +17,15 @@ const _categoryFilters = <(String? value, String label)>[
   ('shopping', '쇼핑'),
 ];
 
+/// 카테고리 값 → TourAPI contentTypeId(백엔드 CATEGORY_TO_CONTENT_TYPE_ID와 동일).
+/// 후보를 한 번만 받아두고 칩 전환 시 candidate.contentTypeId를 이 코드로 걸러
+/// 서버 재조회 없이 필터링한다(API 명세서 §2.2).
+const _categoryContentTypeIds = <String, String>{
+  'tourist_spot': '12',
+  'restaurant': '39',
+  'shopping': '38',
+};
+
 /// 대한민국 중심 대략 좌표(초기 카메라). 후보가 로드되면 그 범위로 다시 맞춘다.
 const _koreaCenter = CameraPosition(target: LatLng(36.5, 127.8), zoom: 6.5);
 
@@ -33,9 +42,10 @@ const _focusZoom = 15.0;
 ///  - 시트 크기 변경: 상단 핸들/헤더를 드래그할 때만. 목록 영역을 스와이프하면
 ///    시트 크기는 그대로 두고 관광지 목록만 스크롤된다.
 ///
-/// 카테고리 필터는 서버 재조회 방식이다(§category → TourAPI contentTypeId). 후보
-/// DTO가 contentTypeId를 내려주지 않아 클라이언트 사이드 필터링(명세 §2.2, plan.md
-/// Phase 7의 별도 항목)은 백엔드 DTO 변경이 선행돼야 하므로 이번 스코프에서 제외한다.
+/// 카테고리 필터는 클라이언트 사이드다(API 명세서 §2.2 "후보 목록 범위 내 처리,
+/// 별도 재조회 없음"). 후보를 카테고리 없이 한 번만 받아 두고, 칩 전환 시 서버
+/// 재조회 없이 candidate.contentTypeId로 걸러 표시한다 — 카테고리마다 TourAPI/Google
+/// Places를 다시 호출하지 않아 외부 API 요청도 최소화된다. 검색만 서버를 호출한다.
 ///
 /// "N곳으로 최적 동선 짜기" CTA가 호출할 `POST /trips/{tripId}/schedule/generate`는
 /// 아직 백엔드에 없다(plan.md Phase 8) — 지금은 선택 상태만 유지하고 CTA는 "곧
@@ -50,14 +60,14 @@ class PlaceSelectionScreen extends ConsumerStatefulWidget {
 }
 
 class _PlaceSelectionScreenState extends ConsumerState<PlaceSelectionScreen> {
-  List<PlaceCandidate> _candidates = const [];
+  List<PlaceCandidate> _allCandidates = const [];
   bool _loading = true;
   String? _error;
   String? _category;
   final Set<String> _selectedIds = {};
   GoogleMapController? _mapController;
 
-  // 검색 상태. _searchMode면 _candidates가 지역 후보가 아니라 검색 결과다.
+  // 검색 상태. _searchMode면 _allCandidates가 지역 후보가 아니라 검색 결과다.
   final _searchController = TextEditingController();
   bool _searchMode = false;
   String _searchQuery = '';
@@ -81,12 +91,11 @@ class _PlaceSelectionScreenState extends ConsumerState<PlaceSelectionScreen> {
       _error = null;
     });
     try {
-      final candidates = await ref
-          .read(placesApiProvider)
-          .getCandidates(widget.tripId, category: _category);
+      // 카테고리 없이 전체를 한 번만 받아 두고, 카테고리 전환은 클라이언트에서 거른다.
+      final candidates = await ref.read(placesApiProvider).getCandidates(widget.tripId);
       if (!mounted) return;
       setState(() {
-        _candidates = candidates;
+        _allCandidates = candidates;
         _loading = false;
       });
       _fitCamera();
@@ -102,14 +111,24 @@ class _PlaceSelectionScreenState extends ConsumerState<PlaceSelectionScreen> {
 
   void _selectCategory(String? category) {
     if (category == _category) return;
+    // 서버 재조회 없이 클라이언트에서 걸러 표시하고, 지도만 걸러진 마커에 다시 맞춘다.
     setState(() => _category = category);
-    _load();
+    _fitCamera();
   }
 
   /// 하단 목록 헤더에 쓸 현재 카테고리 라벨. '전체'는 여러 종류가 섞이므로 '장소'로 쓴다.
   String _categoryLabel(String? category) {
     if (category == null) return '장소';
     return _categoryFilters.firstWhere((f) => f.$1 == category).$2;
+  }
+
+  /// 화면에 보여줄 후보. 검색 중이거나 '전체'면 전량, 카테고리가 선택되면
+  /// contentTypeId로 클라이언트 사이드 필터링한다(서버 재조회 없음, §2.2).
+  List<PlaceCandidate> get _visibleCandidates {
+    if (_searchMode || _category == null) return _allCandidates;
+    final wanted = _categoryContentTypeIds[_category];
+    if (wanted == null) return _allCandidates;
+    return _allCandidates.where((c) => c.contentTypeId == wanted).toList();
   }
 
   /// 키워드 검색 → 결과를 하단 목록과 지도 마커에 표시한다(선택 상태는 유지).
@@ -129,7 +148,7 @@ class _PlaceSelectionScreenState extends ConsumerState<PlaceSelectionScreen> {
       final results = await ref.read(placesApiProvider).searchCandidates(widget.tripId, keyword);
       if (!mounted) return;
       setState(() {
-        _candidates = results;
+        _allCandidates = results;
         _loading = false;
       });
       _fitCamera();
@@ -181,7 +200,7 @@ class _PlaceSelectionScreenState extends ConsumerState<PlaceSelectionScreen> {
   Future<void> _fitCamera() async {
     final controller = _mapController;
     if (controller == null) return;
-    final coords = _candidates.where((c) => c.lat != null && c.lng != null).toList();
+    final coords = _visibleCandidates.where((c) => c.lat != null && c.lng != null).toList();
     if (coords.isEmpty) return;
 
     if (coords.length == 1) {
@@ -211,7 +230,7 @@ class _PlaceSelectionScreenState extends ConsumerState<PlaceSelectionScreen> {
 
   Set<Marker> _buildMarkers() {
     return {
-      for (final c in _candidates)
+      for (final c in _visibleCandidates)
         if (c.lat != null && c.lng != null)
           Marker(
             markerId: MarkerId(c.id),
@@ -282,24 +301,26 @@ class _PlaceSelectionScreenState extends ConsumerState<PlaceSelectionScreen> {
                 ],
               ),
             ),
-            if (_loading && _candidates.isEmpty)
+            if (_loading && _allCandidates.isEmpty)
               const Positioned.fill(
                 child: ColoredBox(
                   color: Color(0x66FFFFFF),
                   child: Center(child: CircularProgressIndicator(color: AppColors.ink900)),
                 ),
               ),
-            if (_error != null && _candidates.isEmpty)
+            if (_error != null && _allCandidates.isEmpty)
               _ErrorOverlay(message: _error!, onRetry: _retry),
             // 하단 드래그 목록 시트.
             Positioned.fill(
               child: _PlaceSheet(
-                candidates: _candidates,
+                candidates: _visibleCandidates,
                 selectedIds: _selectedIds,
                 loading: _loading,
                 hasCtaPadding: _selectedIds.isNotEmpty,
                 listLabel: _searchMode ? '검색 결과' : _categoryLabel(_category),
-                emptyText: _searchMode ? '검색 결과가 없어' : '이 지역에서 찾은 장소가 없어',
+                emptyText: _searchMode
+                    ? '검색 결과가 없어'
+                    : (_category != null ? '이 카테고리엔 장소가 없어' : '이 지역에서 찾은 장소가 없어'),
                 onRowTap: _focusPlace,
                 onToggle: (candidate) => _toggleSelected(candidate.id),
               ),

@@ -393,7 +393,7 @@ erDiagram
   - [x] BE: `GET /trips/{tripId}/places/candidates`, `GET /places/{placeId}` 완성
   - [x] BE: 단위테스트 22건(`places.service.spec.ts` 10 + `tour-api.client.spec.ts` 7 + `google-places.client.spec.ts` 5) 전부 통과 확인됨(claim이 아니라 실제로 카운트/실행 검증함)
   - [x] FE: 후보 리스트를 백엔드가 정렬한 순서(인기순) 그대로 렌더링(`place_selection_screen.dart`)
-  - [ ] **[명세 위반, 실제 버그]** FE: 카테고리 선택 시 "클라이언트가 후보 목록 범위 내에서 처리, 별도 재조회 없음"이 API 명세서 §2.2에 명시돼 있는데, 실제로는 `place_selection_screen.dart`의 `_selectCategory()`가 카테고리를 바꿀 때마다 `_load()`를 다시 호출해 `GET .../places/candidates?category=`를 서버에 재조회함. 클라이언트 사이드 필터링으로 고칠 것.
+  - [x] **[해결됨]** FE: 카테고리 선택 시 서버 재조회 없이 클라이언트가 후보 목록 범위 내에서 필터링(API 명세서 §2.2). `_load()`를 카테고리 없이 1회만 호출해 전체 후보를 받아두고, 칩 전환 시 `candidate.contentTypeId`로 걸러 표시(`place_selection_screen.dart`의 `_visibleCandidates`/`_selectCategory`). 이를 위해 BE `PlaceCandidateDto`에 `contentTypeId` 필드 추가. 부수 효과로 카테고리 전환마다 TourAPI/Google Places를 재호출하던 외부 API 낭비가 제거됨. 추가로 `PlacesService`에 Google Places 인기도 인메모리 TTL 캐시(place.id 기준, 24h)를 두어 재조회/재방문 시 Google 호출을 생략.
   - [ ] **[기능 누락, 실제 버그]** FE: 지도 마커 UI 자체가 없음. `google_maps_flutter` 등 지도 패키지가 `pubspec.yaml`에 없고, 화면은 일반 `ListView`(체크박스형 리스트)로만 구현됨. API 명세서 §2.2 "카테고리 선택 시 지도에 마커로 필터링, 마커 클릭으로 선택 가능"이 리스트 UI로 대체된 상태 — 지도 마커 UI를 실제로 구현할지, 아니면 이 문서/기능명세서 쪽에서 "리스트형으로 변경"을 공식 결정으로 남길지 팀 논의 필요.
 - **완료 조건**: 후보 목록이 평점·리뷰수 가중치로 정렬되어 반환되고, Google Places 미매칭 장소는 최하위로 정렬됨 — **BE는 완전히 충족**. FE 완료조건("카테고리 선택 시 지도 마커 필터링")은 **미충족**(리스트+서버 재조회로 구현됨) — 위 두 항목 정리 필요
 - **선행 Phase**: Phase 6
