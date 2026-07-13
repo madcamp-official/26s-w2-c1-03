@@ -30,6 +30,98 @@ class ScheduleApi {
     final schedule = response.data!['schedule'] as Map<String, dynamic>;
     return SchedulePlan.fromJson(schedule);
   }
+
+  /// API 명세서 §2.4 POST /schedule/places — placeId 참조 또는 custom 직접입력 추가.
+  Future<ScheduledTripPlace> addPlace({
+    required String tripId,
+    String? placeId,
+    String? customName,
+    String? customAddress,
+    required int dayNumber,
+    int? orderInDay,
+    String? memo,
+  }) async {
+    final response = await _apiClient.dio.post<Map<String, dynamic>>(
+      '/trips/$tripId/schedule/places',
+      data: {
+        if (placeId != null) 'placeId': placeId,
+        if (customName != null) 'customName': customName,
+        if (customAddress != null) 'customAddress': customAddress,
+        'dayNumber': dayNumber,
+        if (orderInDay != null) 'orderInDay': orderInDay,
+        if (memo != null) 'memo': memo,
+      },
+    );
+    return ScheduledTripPlace.fromJson(
+      response.data!['tripPlace'] as Map<String, dynamic>,
+    );
+  }
+
+  /// API 명세서 §2.4 PATCH — 메모 수정 / 개별 위치 이동.
+  Future<ScheduledTripPlace> updatePlace({
+    required String tripId,
+    required String tripPlaceId,
+    int? dayNumber,
+    int? orderInDay,
+    Object? memo = _unset,
+  }) async {
+    final response = await _apiClient.dio.patch<Map<String, dynamic>>(
+      '/trips/$tripId/schedule/places/$tripPlaceId',
+      data: {
+        if (dayNumber != null) 'dayNumber': dayNumber,
+        if (orderInDay != null) 'orderInDay': orderInDay,
+        // memo는 null 전송(삭제)과 미전송(변경 없음)을 구분해야 해 sentinel을 쓴다.
+        if (!identical(memo, _unset)) 'memo': memo,
+      },
+    );
+    return ScheduledTripPlace.fromJson(
+      response.data!['tripPlace'] as Map<String, dynamic>,
+    );
+  }
+
+  /// API 명세서 §2.4 DELETE — 장소 제거(204).
+  Future<void> removePlace({
+    required String tripId,
+    required String tripPlaceId,
+  }) async {
+    await _apiClient.dio.delete<void>(
+      '/trips/$tripId/schedule/places/$tripPlaceId',
+    );
+  }
+
+  /// API 명세서 §2.4 PATCH /schedule/reorder — 드래그앤드롭 일괄 순서 변경.
+  Future<SchedulePlan> reorder({
+    required String tripId,
+    required List<ReorderOperation> operations,
+  }) async {
+    final response = await _apiClient.dio.patch<Map<String, dynamic>>(
+      '/trips/$tripId/schedule/reorder',
+      data: {'operations': operations.map((op) => op.toJson()).toList()},
+    );
+    final schedule = response.data!['schedule'] as Map<String, dynamic>;
+    return SchedulePlan.fromJson(schedule);
+  }
+}
+
+/// memo 미전송과 null 전송을 구분하기 위한 sentinel.
+const Object _unset = Object();
+
+class ReorderOperation {
+  const ReorderOperation({
+    required this.tripPlaceId,
+    required this.dayNumber,
+    required this.orderInDay,
+  });
+
+  final String tripPlaceId;
+  final int dayNumber;
+  final int orderInDay;
+
+  Map<String, dynamic> toJson() => {
+    'tripPlaceId': tripPlaceId,
+    'dayNumber': dayNumber,
+    'orderInDay': orderInDay,
+  };
 }
 
 final scheduleApiProvider = Provider<ScheduleApi>(

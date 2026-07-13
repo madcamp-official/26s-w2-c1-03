@@ -13,12 +13,14 @@ class TripDetailReadOnlyView extends StatelessWidget {
     required this.schedule,
     required this.hasSchedule,
     required this.onSelectPlaces,
+    required this.onEditSchedule,
   });
 
   final Trip trip;
   final SchedulePlan schedule;
   final bool hasSchedule;
   final VoidCallback onSelectPlaces;
+  final VoidCallback onEditSchedule;
 
   @override
   Widget build(BuildContext context) {
@@ -28,7 +30,7 @@ class TripDetailReadOnlyView extends StatelessWidget {
         _TripHero(trip: trip),
         const SizedBox(height: 22),
         if (hasSchedule)
-          _ScheduleOverview(schedule: schedule)
+          _ScheduleOverview(schedule: schedule, onEditSchedule: onEditSchedule)
         else
           _NoScheduleCard(onSelectPlaces: onSelectPlaces),
       ],
@@ -88,9 +90,10 @@ class _TripHero extends StatelessWidget {
 }
 
 class _ScheduleOverview extends StatelessWidget {
-  const _ScheduleOverview({required this.schedule});
+  const _ScheduleOverview({required this.schedule, required this.onEditSchedule});
 
   final SchedulePlan schedule;
+  final VoidCallback onEditSchedule;
 
   @override
   Widget build(BuildContext context) {
@@ -112,12 +115,16 @@ class _ScheduleOverview extends StatelessWidget {
                 color: AppColors.ink900,
               ),
             ),
-            Text(
-              '$placeCount곳',
-              style: const TextStyle(
-                fontSize: 13,
-                fontWeight: FontWeight.w800,
-                color: AppColors.ink400,
+            TextButton.icon(
+              onPressed: onEditSchedule,
+              style: TextButton.styleFrom(
+                foregroundColor: AppColors.ink900,
+                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+              ),
+              icon: const Icon(Icons.tune, size: 16),
+              label: Text(
+                '편집 · $placeCount곳',
+                style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w800),
               ),
             ),
           ],

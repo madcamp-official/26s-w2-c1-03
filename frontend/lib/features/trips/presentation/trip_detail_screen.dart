@@ -9,6 +9,7 @@ import '../../../core/widgets/app_button.dart';
 import '../../places/presentation/place_selection_screen.dart';
 import '../../schedule/data/schedule_api.dart';
 import '../../schedule/data/schedule_models.dart';
+import '../../schedule/presentation/schedule_edit_screen.dart';
 import '../data/trip_models.dart';
 import 'trip_detail_read_only_view.dart';
 import 'trip_list_controller.dart';
@@ -203,6 +204,17 @@ class _TripDetailScreenState extends ConsumerState<TripDetailScreen> {
     }
   }
 
+  Future<void> _openScheduleEdit(SchedulePlan schedule) async {
+    final changed = await Navigator.of(context).push<bool>(
+      MaterialPageRoute(
+        builder: (_) =>
+            ScheduleEditScreen(tripId: widget.tripId, schedule: schedule),
+      ),
+    );
+    if (!mounted) return;
+    if (changed == true) await _load();
+  }
+
   @override
   Widget build(BuildContext context) {
     final state = _state;
@@ -353,6 +365,7 @@ class _TripDetailScreenState extends ConsumerState<TripDetailScreen> {
         schedule: schedule,
         hasSchedule: _hasSchedule(schedule),
         onSelectPlaces: () => _openPlaceSelection(trip.id),
+        onEditSchedule: () => _openScheduleEdit(schedule),
       ),
     ];
   }
