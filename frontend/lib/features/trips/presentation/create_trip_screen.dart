@@ -8,7 +8,7 @@ import '../../../core/network/api_exception.dart';
 import '../../../core/theme/app_colors.dart';
 import '../../../core/widgets/app_button.dart';
 import 'city_search_sheet.dart';
-import 'trip_detail_screen.dart';
+import '../../places/presentation/place_selection_screen.dart';
 import 'trip_list_controller.dart';
 
 /// 여행 생성 화면(design.md 시안 `3b` 레이아웃 차용). 도시는 자유 텍스트가 아니라
@@ -89,9 +89,11 @@ class _CreateTripScreenState extends ConsumerState<CreateTripScreen> {
       unawaited(ref.read(tripListControllerProvider.notifier).load());
 
       if (!mounted) return;
-      Navigator.of(
-        context,
-      ).pushReplacement(MaterialPageRoute(builder: (_) => TripDetailScreen(tripId: trip.id)));
+      Navigator.of(context).pushReplacement(
+        MaterialPageRoute(
+          builder: (_) => PlaceSelectionScreen(tripId: trip.id),
+        ),
+      );
     } on DioException catch (e) {
       final error = e.error;
       setState(() {
@@ -121,7 +123,11 @@ class _CreateTripScreenState extends ConsumerState<CreateTripScreen> {
               const SizedBox(height: 20),
               const Text(
                 '어디로 떠날 거야?',
-                style: TextStyle(fontSize: 26, fontWeight: FontWeight.w800, color: AppColors.ink900),
+                style: TextStyle(
+                  fontSize: 26,
+                  fontWeight: FontWeight.w800,
+                  color: AppColors.ink900,
+                ),
               ),
               const SizedBox(height: 8),
               const Text(
@@ -157,7 +163,9 @@ class _CreateTripScreenState extends ConsumerState<CreateTripScreen> {
                     style: TextStyle(
                       fontSize: 14.5,
                       fontWeight: FontWeight.w600,
-                      color: _selectedCity == null ? AppColors.ink400 : AppColors.ink900,
+                      color: _selectedCity == null
+                          ? AppColors.ink400
+                          : AppColors.ink900,
                     ),
                   ),
                 ),
@@ -175,7 +183,9 @@ class _CreateTripScreenState extends ConsumerState<CreateTripScreen> {
                     style: TextStyle(
                       fontSize: 14.5,
                       fontWeight: FontWeight.w600,
-                      color: _dateRange == null ? AppColors.ink400 : AppColors.ink900,
+                      color: _dateRange == null
+                          ? AppColors.ink400
+                          : AppColors.ink900,
                     ),
                   ),
                 ),
@@ -198,7 +208,10 @@ class _CreateTripScreenState extends ConsumerState<CreateTripScreen> {
   InputDecoration _fieldDecoration(String hint) {
     return InputDecoration(
       hintText: hint,
-      hintStyle: const TextStyle(color: AppColors.ink400, fontWeight: FontWeight.w600),
+      hintStyle: const TextStyle(
+        color: AppColors.ink400,
+        fontWeight: FontWeight.w600,
+      ),
       border: InputBorder.none,
       isDense: true,
       contentPadding: EdgeInsets.zero,
@@ -244,7 +257,10 @@ class _CloseButton extends StatelessWidget {
       child: Container(
         width: 36,
         height: 36,
-        decoration: const BoxDecoration(color: AppColors.surfaceSubtle, shape: BoxShape.circle),
+        decoration: const BoxDecoration(
+          color: AppColors.surfaceSubtle,
+          shape: BoxShape.circle,
+        ),
         child: const Icon(Icons.close, size: 20, color: AppColors.ink900),
       ),
     );
