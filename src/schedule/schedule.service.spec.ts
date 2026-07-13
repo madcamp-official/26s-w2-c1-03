@@ -45,7 +45,7 @@ function createManagerMock() {
 describe('ScheduleService', () => {
   let tripsService: { getDetail: jest.Mock; assertMember: jest.Mock };
   let placesService: { resolveForSchedule: jest.Mock; getScheduleCandidatePools: jest.Mock };
-  let scheduleAiClient: { requestSchedule: jest.Mock };
+  let scheduleAiClient: { requestSchedule: jest.Mock; requestRevision: jest.Mock };
   let manager: ReturnType<typeof createManagerMock>;
   let dataSource: { transaction: jest.Mock };
   let service: ScheduleService;
@@ -60,7 +60,7 @@ describe('ScheduleService', () => {
       resolveForSchedule: jest.fn(),
       getScheduleCandidatePools: jest.fn(async () => emptyPools),
     };
-    scheduleAiClient = { requestSchedule: jest.fn() };
+    scheduleAiClient = { requestSchedule: jest.fn(), requestRevision: jest.fn() };
     manager = createManagerMock();
     dataSource = { transaction: jest.fn(async (cb: (m: unknown) => unknown) => cb(manager)) };
 
@@ -497,5 +497,135 @@ describe('ScheduleService', () => {
         operations: [{ tripPlaceId: 't1', dayNumber: 9, orderInDay: 1 }],
       }),
     ).rejects.toMatchObject({ code: 'SCHEDULE_PLACE_INPUT_INVALID' });
+  });
+
+  // ── Phase 9 AI 재수정(revise/apply) ─────────────────────────────────────
+
+  function setupReviseRepos(rows: RowLike[]) {
+    const aiRequestRepo = {
+      create: jest.fn((data: Record<string, unknown>) => ({ ...data })),
+      save: jest.fn(async (req: Record<string, unknown>) => ({ id: 'req-1', ...req })),
+    };
+    const tripPlaceRepo = { find: jest.fn(async () => [...rows]) };
+    (dataSource as unknown as { getRepository: jest.Mock }).getRepository = jest.fn(
+      (entity: unknown) =>
+        (entity as { name?: string }).name === 'AiPlanRequest' ? aiRequestRepo : tripPlaceRepo,
+    );
+    return { aiRequestRepo, tripPlaceRepo };
+  }
+
+  it('revise: 저장 없이 제안을 반환하고(placeId/custom/후보 매핑) 이력을 기록한다', async () => {
+    const placeRow = { ...buildRow('t1', 1, 1), placeId: 'pl-a', customName: null };
+    const customRow = buildRow('t2', 1, 2); // placeId 없음 → custom:t2로 참조
+    const { aiRequestRepo } = setupReviseRepos([placeRow, customRow]);
+    placesService.resolveForSchedule.mockResolvedValue([buildInfo('pl-a')]);
+    placesService.getScheduleCandidatePools.mockResolvedValue({
+      attractions: [],
+      restaurants: [buildRestaurant('cand-r')],
+      cafes: [],
+    });
+    scheduleAiClient.requestRevision.mockResolvedValue({
+      days: [
+        {
+          dayNumber: 1,
+          entries: [
+            { placeId: 'pl-a', startTime: '10:00' },
+            { placeId: 'custom:t2', startTime: '12:00' },
+            { placeId: 'cand-r', startTime: '18:00' },
+            { placeId: 'custom:ghost', startTime: '20:00' }, // 사라진 행 → 제안에서 제외
+          ],
+        },
+      ],
+    });
+
+    const { requestId, proposal } = await service.revise('trip-1', 'user-1', {
+      prompt: '저녁에 식당 하나 추가해줘',
+    });
+
+    // 현재 일정이 custom: 접두 id로 AI에 전달된다.
+    expect(scheduleAiClient.requestRevision).toHaveBeenCalledWith(
+      expect.objectContaining({
+        userPrompt: '저녁에 식당 하나 추가해줘',
+        current: expect.arrayContaining([
+          expect.objectContaining({ id: 'pl-a' }),
+          expect.objectContaining({ id: 'custom:t2', name: '이름-t2' }),
+        ]),
+      }),
+    );
+    expect(requestId).toBe('req-1');
+    expect(aiRequestRepo.save).toHaveBeenCalledWith(
+      expect.objectContaining({ promptText: '저녁에 식당 하나 추가해줘' }),
+    );
+    // trip_places 저장(트랜잭션)은 일어나지 않는다 — 미리보기만.
+    expect(dataSource.transaction).not.toHaveBeenCalled();
+
+    expect(proposal.days).toHaveLength(1);
+    expect(proposal.days[0].places.map((p) => [p.placeId, p.customName, p.orderInDay])).toEqual([
+      ['pl-a', null, 1],
+      [null, '이름-t2', 2],
+      ['cand-r', null, 3],
+    ]);
+  });
+
+  it('applyRevision: 확인된 항목으로 전체를 교체하고 day별 1..n으로 재부여한다', async () => {
+    placesService.resolveForSchedule.mockResolvedValue([buildInfo('p1'), buildInfo('p2')]);
+
+    const { schedule } = await service.applyRevision('trip-1', 'user-1', {
+      items: [
+        { placeId: 'p1', dayNumber: 1, orderInDay: 5, startTime: '10:00' },
+        { customName: '내가 아는 맛집', dayNumber: 1, orderInDay: 7 },
+        { placeId: 'p2', dayNumber: 2, orderInDay: 1 },
+      ],
+    });
+
+    expect(manager.delete).toHaveBeenCalledWith(expect.anything(), { tripId: 'trip-1' });
+    expect(schedule.days[0].places.map((p) => [p.placeId, p.name, p.orderInDay, p.startTime])).toEqual([
+      ['p1', 'place-p1', 1, '10:00'],
+      [null, '내가 아는 맛집', 2, null],
+    ]);
+    expect(schedule.days[1].places.map((p) => [p.placeId, p.orderInDay])).toEqual([['p2', 1]]);
+  });
+
+  it('applyRevision: placeId·customName 동시 입력이나 없는 placeId는 거부한다', async () => {
+    await expect(
+      service.applyRevision('trip-1', 'user-1', {
+        items: [{ placeId: 'p1', customName: '둘 다', dayNumber: 1, orderInDay: 1 }],
+      }),
+    ).rejects.toMatchObject({ code: 'SCHEDULE_PLACE_INPUT_INVALID' });
+
+    placesService.resolveForSchedule.mockResolvedValue([]); // p1 조회 실패
+    await expect(
+      service.applyRevision('trip-1', 'user-1', {
+        items: [{ placeId: 'p1', dayNumber: 1, orderInDay: 1 }],
+      }),
+    ).rejects.toMatchObject({ code: 'SELECTED_PLACES_INVALID' });
+    expect(dataSource.transaction).not.toHaveBeenCalled();
+  });
+
+  it('listAiRequests: 이력을 최신순 그대로 매핑해 반환한다', async () => {
+    const createdAt = new Date('2026-07-13T12:00:00Z');
+    (dataSource as unknown as { getRepository: jest.Mock }).getRepository = jest.fn(() => ({
+      find: jest.fn(async () => [
+        {
+          id: 'req-1',
+          promptText: '카페 추가',
+          responseSummary: '2일 / 9곳 수정 제안',
+          requestedBy: 'user-1',
+          createdAt,
+        },
+      ]),
+    }));
+
+    const { items } = await service.listAiRequests('trip-1', 'user-1');
+
+    expect(items).toEqual([
+      {
+        id: 'req-1',
+        promptText: '카페 추가',
+        responseSummary: '2일 / 9곳 수정 제안',
+        requestedBy: 'user-1',
+        createdAt: createdAt.toISOString(),
+      },
+    ]);
   });
 });

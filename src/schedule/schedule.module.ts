@@ -6,6 +6,7 @@ import {
   OpenAiScheduleClient,
   SCHEDULE_AI_CLIENT,
 } from './client/open-ai-schedule.client';
+import { AiRequestsController } from './ai-requests.controller';
 import { AiPlanRequest } from './entities/ai-plan-request.entity';
 import { TripPlace } from './entities/trip-place.entity';
 import { ScheduleController } from './schedule.controller';
@@ -19,7 +20,7 @@ import { ScheduleService } from './schedule.service';
  */
 @Module({
   imports: [TypeOrmModule.forFeature([TripPlace, AiPlanRequest]), TripsModule, PlacesModule],
-  controllers: [ScheduleController],
+  controllers: [ScheduleController, AiRequestsController],
   providers: [
     ScheduleService,
     { provide: SCHEDULE_AI_CLIENT, useClass: OpenAiScheduleClient },

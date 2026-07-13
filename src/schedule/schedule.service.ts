@@ -584,6 +584,36 @@ export class ScheduleService {
     };
   }
 
+  /** API 명세서 §2.5 GET /trips/{tripId}/ai-requests — AI 생성/수정 요청 이력(최신순). */
+  async listAiRequests(
+    tripId: string,
+    userId: string,
+  ): Promise<{
+    items: Array<{
+      id: string;
+      promptText: string;
+      responseSummary: string | null;
+      requestedBy: string;
+      createdAt: string;
+    }>;
+  }> {
+    // 조회는 viewer도 가능 — 멤버십 검증만 한다(getDetail이 TRIP_NOT_FOUND/FORBIDDEN 전파).
+    await this.tripsService.getDetail(tripId, userId);
+    const rows = await this.dataSource.getRepository(AiPlanRequest).find({
+      where: { tripId },
+      order: { createdAt: 'DESC' },
+    });
+    return {
+      items: rows.map((row) => ({
+        id: row.id,
+        promptText: row.promptText,
+        responseSummary: row.responseSummary,
+        requestedBy: row.requestedBy,
+        createdAt: row.createdAt.toISOString(),
+      })),
+    };
+  }
+
   /** 편집 계열 공통 검증 — 트립 존재/멤버십 + owner/editor 역할(viewer는 편집 불가). */
   private async assertEditor(tripId: string, userId: string) {
     const trip = await this.tripsService.getDetail(tripId, userId);
