@@ -34,8 +34,10 @@ export class Place {
   @Column({ type: 'varchar', length: 10, nullable: true })
   contentTypeId: string | null;
 
-  @Column({ type: 'varchar', length: 200 })
-  name: string;
+  // Google Places(source=google) 행은 약관상 place_id만 저장하고 장소명은 저장하지 않아
+  // null이 될 수 있다(표시 시 place_id로 실시간 재조회). TourAPI/custom 행은 항상 값이 있다.
+  @Column({ type: 'varchar', length: 200, nullable: true })
+  name: string | null;
 
   @Column({ type: 'varchar', length: 300, nullable: true })
   address: string | null;

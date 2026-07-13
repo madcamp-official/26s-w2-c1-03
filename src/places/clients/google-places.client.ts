@@ -30,6 +30,15 @@ interface SearchTextResponseBody {
   places?: Array<{ rating?: number; userRatingCount?: number }>;
 }
 
+interface PlaceDetailsResponseBody {
+  id?: string;
+  displayName?: { text?: string };
+  formattedAddress?: string;
+  location?: { latitude?: number; longitude?: number };
+  rating?: number;
+  userRatingCount?: number;
+}
+
 interface SearchTextPlacesResponseBody {
   places?: Array<{
     id?: string;
@@ -42,6 +51,7 @@ interface SearchTextPlacesResponseBody {
 }
 
 const SEARCH_TEXT_URL = 'https://places.googleapis.com/v1/places:searchText';
+const PLACE_DETAILS_BASE_URL = 'https://places.googleapis.com/v1/places';
 const LOCATION_BIAS_RADIUS_METERS = 1500;
 
 /**
@@ -152,5 +162,52 @@ export class GooglePlacesClient {
         reviewCount: p.userRatingCount ?? null,
       }))
       .filter((p) => p.externalId !== '' && p.name !== '');
+  }
+
+  /**
+   * place_id로 장소 상세(장소명·주소·좌표·평점)를 실시간 조회한다(Place Details). Google
+   * Places 콘텐츠는 약관상 DB에 저장할 수 없어(place_id만 저장 허용), 저장해 둔 place_id로
+   * 표시 시점에 다시 받아온다. 매칭 결과가 없으면 null.
+   */
+  async getPlaceDetails(placeId: string): Promise<GooglePlaceResult | null> {
+    let response: globalThis.Response;
+    try {
+      response = await fetch(`${PLACE_DETAILS_BASE_URL}/${encodeURIComponent(placeId)}`, {
+        method: 'GET',
+        headers: {
+          'X-Goog-Api-Key': this.apiKey,
+          'X-Goog-FieldMask':
+            'id,displayName,formattedAddress,location,rating,userRatingCount',
+          'Accept-Language': 'ko',
+        },
+      });
+    } catch (error) {
+      if (isNetworkError(error)) {
+        throw new BusinessException(PlacesErrorCode.GOOGLE_PLACES_REQUEST_FAILED);
+      }
+      throw new BusinessException(
+        PlacesErrorCode.GOOGLE_PLACES_REQUEST_FAILED,
+        error instanceof Error ? error.message : undefined,
+      );
+    }
+
+    if (!response.ok) {
+      this.logger.warn(`Google Places 상세 조회 실패: status=${response.status}`);
+      throw new BusinessException(PlacesErrorCode.GOOGLE_PLACES_REQUEST_FAILED);
+    }
+
+    const p = (await response.json()) as PlaceDetailsResponseBody;
+    if (!p.id || !p.displayName?.text) {
+      return null;
+    }
+    return {
+      externalId: p.id,
+      name: p.displayName.text,
+      address: p.formattedAddress ?? null,
+      latitude: p.location?.latitude ?? null,
+      longitude: p.location?.longitude ?? null,
+      rating: p.rating ?? null,
+      reviewCount: p.userRatingCount ?? null,
+    };
   }
 }

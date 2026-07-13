@@ -30,6 +30,11 @@ export const envValidationSchema = Joi.object({
   // Phase 7(Place 후보 추천) — TourAPI(국내 전용, §areaCode2 확인 완료)
   TOUR_API_SERVICE_KEY: Joi.string().required(),
   TOUR_API_BASE_URL: Joi.string().uri().required(),
+  // 관광지 집중률(방문 추이 예측) 빅데이터 서비스 — 같은 공공데이터포털 인증키를 쓰고
+  // 서비스 경로만 다르다. 미설정 시 운영 엔드포인트를 기본값으로 사용한다.
+  TOUR_API_BIGDATA_BASE_URL: Joi.string()
+    .uri()
+    .default('https://apis.data.go.kr/B551011/TatsCnctrRateService'),
   // 인기순 정렬용 평점/리뷰수 — Kakao 로컬 API는 이 데이터를 제공하지 않아(카카오 공식
   // 정책) Google Places API (New)로 대체했다.
   GOOGLE_PLACES_API_KEY: Joi.string().required(),

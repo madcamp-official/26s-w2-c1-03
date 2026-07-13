@@ -2,6 +2,7 @@ import { Module } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { TripsModule } from '../trips/trips.module';
 import { GooglePlacesClient } from './clients/google-places.client';
+import { TatsCnctrRateClient } from './clients/tats-cnctr-rate.client';
 import { TourApiClient } from './clients/tour-api.client';
 import { Place } from './entities/place.entity';
 import { PlacesController } from './places.controller';
@@ -17,7 +18,7 @@ import { TripPlacesController } from './trip-places.controller';
 @Module({
   imports: [TypeOrmModule.forFeature([Place]), TripsModule],
   controllers: [TripPlacesController, PlacesController],
-  providers: [PlacesService, TourApiClient, GooglePlacesClient],
+  providers: [PlacesService, TourApiClient, GooglePlacesClient, TatsCnctrRateClient],
   exports: [TypeOrmModule],
 })
 export class PlacesModule {}
