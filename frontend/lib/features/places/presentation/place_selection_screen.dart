@@ -222,13 +222,9 @@ class _PlaceSelectionScreenState extends ConsumerState<PlaceSelectionScreen> {
   Future<void> _fitCamera() async {
     final controller = _mapController;
     if (controller == null) return;
-<<<<<<< HEAD
-    final coords = _visibleCandidates
+    final coords = _markerCandidates
         .where((c) => c.lat != null && c.lng != null)
         .toList();
-=======
-    final coords = _markerCandidates.where((c) => c.lat != null && c.lng != null).toList();
->>>>>>> 79c08411512080f35a42759da2d6b04180376d19
     if (coords.isEmpty) return;
 
     if (coords.length == 1) {
