@@ -64,7 +64,7 @@ class _PlaceSelectionScreenState extends ConsumerState<PlaceSelectionScreen> {
   bool _loading = true;
   String? _error;
   String? _category;
-  final Set<String> _selectedIds = {};
+  final Map<String, PlaceCandidate> _selectedCandidates = {};
   GoogleMapController? _mapController;
 
   // 검색 상태. _searchMode면 _allCandidates가 지역 후보가 아니라 검색 결과다.
@@ -131,6 +131,18 @@ class _PlaceSelectionScreenState extends ConsumerState<PlaceSelectionScreen> {
     return _allCandidates.where((c) => c.contentTypeId == wanted).toList();
   }
 
+  Set<String> get _selectedIds => _selectedCandidates.keys.toSet();
+
+  /// 지도에 보여줄 후보. 현재 카테고리 후보에 이미 선택한 장소를 합쳐,
+  /// 선택된 곳은 카테고리 필터와 관계없이 계속 지도에서 볼 수 있게 한다.
+  List<PlaceCandidate> get _markerCandidates {
+    final byId = <String, PlaceCandidate>{
+      for (final candidate in _visibleCandidates) candidate.id: candidate,
+    };
+    byId.addAll(_selectedCandidates);
+    return byId.values.toList();
+  }
+
   /// 키워드 검색 → 결과를 하단 목록과 지도 마커에 표시한다(선택 상태는 유지).
   Future<void> _search(String rawKeyword) async {
     final keyword = rawKeyword.trim();
@@ -174,10 +186,12 @@ class _PlaceSelectionScreenState extends ConsumerState<PlaceSelectionScreen> {
 
   void _retry() => _searchMode ? _search(_searchQuery) : _load();
 
-  void _toggleSelected(String placeId) {
+  void _toggleSelected(PlaceCandidate candidate) {
     setState(() {
-      if (!_selectedIds.remove(placeId)) {
-        _selectedIds.add(placeId);
+      if (_selectedCandidates.containsKey(candidate.id)) {
+        _selectedCandidates.remove(candidate.id);
+      } else {
+        _selectedCandidates[candidate.id] = candidate;
       }
     });
   }
@@ -200,7 +214,7 @@ class _PlaceSelectionScreenState extends ConsumerState<PlaceSelectionScreen> {
   Future<void> _fitCamera() async {
     final controller = _mapController;
     if (controller == null) return;
-    final coords = _visibleCandidates.where((c) => c.lat != null && c.lng != null).toList();
+    final coords = _markerCandidates.where((c) => c.lat != null && c.lng != null).toList();
     if (coords.isEmpty) return;
 
     if (coords.length == 1) {
@@ -230,7 +244,7 @@ class _PlaceSelectionScreenState extends ConsumerState<PlaceSelectionScreen> {
 
   Set<Marker> _buildMarkers() {
     return {
-      for (final c in _visibleCandidates)
+      for (final c in _markerCandidates)
         if (c.lat != null && c.lng != null)
           Marker(
             markerId: MarkerId(c.id),
@@ -243,7 +257,7 @@ class _PlaceSelectionScreenState extends ConsumerState<PlaceSelectionScreen> {
             // 마커 탭은 선택 토글(API 명세서 §2.2 "마커 클릭으로 선택 가능").
             // 목록 행 탭은 지도 이동, 마커 탭은 선택 — 각자 반대편에서 하기 어려운
             // 동작을 맡는다(목록엔 선택 버튼이 따로 있고, 지도엔 그게 없으니 탭=선택).
-            onTap: () => _toggleSelected(c.id),
+            onTap: () => _toggleSelected(c),
           ),
     };
   }
@@ -322,7 +336,7 @@ class _PlaceSelectionScreenState extends ConsumerState<PlaceSelectionScreen> {
                     ? '검색 결과가 없어'
                     : (_category != null ? '이 카테고리엔 장소가 없어' : '이 지역에서 찾은 장소가 없어'),
                 onRowTap: _focusPlace,
-                onToggle: (candidate) => _toggleSelected(candidate.id),
+                onToggle: _toggleSelected,
               ),
             ),
           ],
