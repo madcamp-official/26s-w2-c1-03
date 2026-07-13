@@ -13,8 +13,11 @@ export class MakePlaceNameNullableAndScrubGoogle1784300000000 implements Migrati
 
   public async up(queryRunner: QueryRunner): Promise<void> {
     await queryRunner.query(`ALTER TABLE "places" ALTER COLUMN "name" DROP NOT NULL`);
+    // source::text로 비교한다 — 'google'을 enum 리터럴로 쓰면 (같은 트랜잭션에서 방금
+    // ADD VALUE된 값이라) PG가 55P04 "unsafe use of new enum value"로 거부한다. 텍스트
+    // 비교는 enum 리터럴을 만들지 않아 안전하고, 매칭 결과도 동일하다.
     await queryRunner.query(
-      `UPDATE "places" SET "name" = NULL, "address" = NULL, "latitude" = NULL, "longitude" = NULL WHERE "source" = 'google'`,
+      `UPDATE "places" SET "name" = NULL, "address" = NULL, "latitude" = NULL, "longitude" = NULL WHERE "source"::text = 'google'`,
     );
   }
 

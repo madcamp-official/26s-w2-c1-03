@@ -18,8 +18,8 @@
     "test:db": "jest --config ./test/jest-integration.json --runInBand",
     "typeorm": "ts-node -r tsconfig-paths/register ./node_modules/typeorm/cli.js -d src/database/data-source.ts",
     "migration:generate": "npm run typeorm -- migration:generate",
-    "migration:run": "npm run typeorm -- migration:run",
-    "migration:revert": "npm run typeorm -- migration:revert"
+    "migration:run": "ts-node -r tsconfig-paths/register src/database/run-migrations.ts",
+    "migration:revert": "ts-node -r tsconfig-paths/register src/database/revert-migration.ts"
   },
   "dependencies": {
     "@nestjs/common": "^10.4.0",
