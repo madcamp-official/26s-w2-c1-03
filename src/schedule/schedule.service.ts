@@ -10,6 +10,11 @@ import {
   ScheduleAiClient,
   ScheduleAiResult,
 } from './client/open-ai-schedule.client';
+import {
+  AddSchedulePlaceDto,
+  ReorderScheduleDto,
+  UpdateSchedulePlaceDto,
+} from './dto/edit-schedule.dto';
 import { GenerateScheduleDto } from './dto/generate-schedule.dto';
 import { TripPlace } from './entities/trip-place.entity';
 import { ScheduleErrorCode } from './exceptions/schedule-error-code';
@@ -86,13 +91,7 @@ export class ScheduleService {
     userId: string,
     dto: GenerateScheduleDto,
   ): Promise<{ schedule: ScheduleView }> {
-    // getDetail이 트립 존재(TRIP_NOT_FOUND) + 멤버십을 함께 확인한다. 편집 동작이므로
-    // 그 뒤에 owner/editor 역할까지 검증한다(viewer는 스케줄 생성 불가).
-    const trip = await this.tripsService.getDetail(tripId, userId);
-    await this.tripsService.assertMember(tripId, userId, [
-      TripMemberRole.OWNER,
-      TripMemberRole.EDITOR,
-    ]);
+    const trip = await this.assertEditor(tripId, userId);
 
     const selectedInfos = await this.placesService.resolveForSchedule(dto.selectedPlaceIds);
     const requestedCount = new Set(dto.selectedPlaceIds).size;
@@ -192,6 +191,189 @@ export class ScheduleService {
     const infoById = new Map(infos.map((info) => [info.id, info]));
 
     return { schedule: this.buildView(rows, infoById) };
+  }
+
+  /**
+   * API 명세서 §2.4 POST /schedule/places — placeId 참조 또는 customName 직접입력으로
+   * 장소를 수동 추가한다. orderInDay를 생략하면 그날 맨 뒤, 지정하면 그 위치에 끼워
+   * 넣고 이후 항목을 밀어낸다.
+   */
+  async addPlace(
+    tripId: string,
+    userId: string,
+    dto: AddSchedulePlaceDto,
+  ): Promise<{ tripPlace: ScheduledTripPlaceDto }> {
+    const trip = await this.assertEditor(tripId, userId);
+    const hasPlaceId = dto.placeId !== undefined;
+    const hasCustom = Boolean(dto.customName?.trim());
+    if (hasPlaceId === hasCustom) {
+      // 두 경로 중 정확히 하나만 허용한다(§4.4 ERD: place_id 또는 custom_name).
+      throw new BusinessException(ScheduleErrorCode.SCHEDULE_PLACE_INPUT_INVALID);
+    }
+    this.assertDayInRange(dto.dayNumber, trip.startDate, trip.endDate);
+
+    let info: ScheduledPlaceInfo | undefined;
+    if (hasPlaceId) {
+      [info] = await this.placesService.resolveForSchedule([dto.placeId!]);
+      if (!info) {
+        throw new BusinessException(ScheduleErrorCode.SELECTED_PLACES_INVALID);
+      }
+    }
+
+    const saved = await this.dataSource.transaction(async (manager) => {
+      const repo = manager.getRepository(TripPlace);
+      const rows = await repo.find({ where: { tripId } });
+      const created = repo.create({
+        tripId,
+        placeId: dto.placeId ?? null,
+        customName: hasCustom ? dto.customName!.trim() : null,
+        customAddress: hasCustom ? dto.customAddress?.trim() || null : null,
+        memo: dto.memo ?? null,
+        dayNumber: dto.dayNumber,
+        // 임시 소수 order — renumber가 이 위치 기준으로 1..n 정수를 재부여한다.
+        orderInDay: (dto.orderInDay ?? Number.MAX_SAFE_INTEGER) - 0.5,
+        startTime: null,
+        addedBy: userId,
+      });
+      rows.push(created);
+      await repo.save(this.renumber(rows));
+      return created;
+    });
+    return { tripPlace: this.toPlaceDto(saved, info) };
+  }
+
+  /** API 명세서 §2.4 PATCH — 메모 수정(null이면 삭제) 및 개별 위치 이동. */
+  async updatePlace(
+    tripId: string,
+    userId: string,
+    tripPlaceId: string,
+    dto: UpdateSchedulePlaceDto,
+  ): Promise<{ tripPlace: ScheduledTripPlaceDto }> {
+    const trip = await this.assertEditor(tripId, userId);
+    if (dto.dayNumber !== undefined) {
+      this.assertDayInRange(dto.dayNumber, trip.startDate, trip.endDate);
+    }
+
+    const saved = await this.dataSource.transaction(async (manager) => {
+      const repo = manager.getRepository(TripPlace);
+      const rows = await repo.find({ where: { tripId } });
+      const target = rows.find((row) => row.id === tripPlaceId);
+      if (!target) {
+        throw new BusinessException(ScheduleErrorCode.TRIP_PLACE_NOT_FOUND);
+      }
+      const toSave = new Set<TripPlace>([target]);
+      if (dto.memo !== undefined) {
+        target.memo = dto.memo;
+      }
+      if (dto.dayNumber !== undefined || dto.orderInDay !== undefined) {
+        target.dayNumber = dto.dayNumber ?? target.dayNumber;
+        target.orderInDay = (dto.orderInDay ?? Number.MAX_SAFE_INTEGER) - 0.5;
+        for (const row of this.renumber(rows)) {
+          toSave.add(row);
+        }
+      }
+      await repo.save([...toSave]);
+      return target;
+    });
+
+    const infos = saved.placeId
+      ? await this.placesService.resolveForSchedule([saved.placeId])
+      : [];
+    return { tripPlace: this.toPlaceDto(saved, infos[0]) };
+  }
+
+  /** API 명세서 §2.4 DELETE — 장소 제거 후 그날 orderInDay를 1..n으로 당긴다. */
+  async removePlace(tripId: string, userId: string, tripPlaceId: string): Promise<void> {
+    await this.assertEditor(tripId, userId);
+    await this.dataSource.transaction(async (manager) => {
+      const repo = manager.getRepository(TripPlace);
+      const rows = await repo.find({ where: { tripId } });
+      const target = rows.find((row) => row.id === tripPlaceId);
+      if (!target) {
+        throw new BusinessException(ScheduleErrorCode.TRIP_PLACE_NOT_FOUND);
+      }
+      await repo.remove(target);
+      const changed = this.renumber(rows.filter((row) => row !== target));
+      if (changed.length > 0) {
+        await repo.save(changed);
+      }
+    });
+  }
+
+  /**
+   * API 명세서 §2.4 PATCH /schedule/reorder — 드래그앤드롭 일괄 순서 변경. operations를
+   * 전부 적용한 뒤 day별로 1..n 재부여하므로, 프론트가 이동 항목만 보내도(빈 슬롯·중복
+   * 순번 걱정 없이) 항상 정합한 상태가 된다. 전체를 한 트랜잭션으로 묶어 부분 실패를 막는다.
+   */
+  async reorder(
+    tripId: string,
+    userId: string,
+    dto: ReorderScheduleDto,
+  ): Promise<{ schedule: ScheduleView }> {
+    const trip = await this.assertEditor(tripId, userId);
+    for (const op of dto.operations) {
+      this.assertDayInRange(op.dayNumber, trip.startDate, trip.endDate);
+    }
+
+    await this.dataSource.transaction(async (manager) => {
+      const repo = manager.getRepository(TripPlace);
+      const rows = await repo.find({ where: { tripId } });
+      const byId = new Map(rows.map((row) => [row.id, row]));
+      for (const op of dto.operations) {
+        const row = byId.get(op.tripPlaceId);
+        if (!row) {
+          throw new BusinessException(ScheduleErrorCode.TRIP_PLACE_NOT_FOUND);
+        }
+        row.dayNumber = op.dayNumber;
+        row.orderInDay = op.orderInDay - 0.5;
+      }
+      const changed = this.renumber(rows);
+      if (changed.length > 0) {
+        await repo.save(changed);
+      }
+    });
+    return this.getSchedule(tripId, userId);
+  }
+
+  /** 편집 계열 공통 검증 — 트립 존재/멤버십 + owner/editor 역할(viewer는 편집 불가). */
+  private async assertEditor(tripId: string, userId: string) {
+    const trip = await this.tripsService.getDetail(tripId, userId);
+    await this.tripsService.assertMember(tripId, userId, [
+      TripMemberRole.OWNER,
+      TripMemberRole.EDITOR,
+    ]);
+    return trip;
+  }
+
+  private assertDayInRange(dayNumber: number, startDate: string, endDate: string): void {
+    if (dayNumber > this.computeDurationDays(startDate, endDate)) {
+      throw new BusinessException(ScheduleErrorCode.SCHEDULE_PLACE_INPUT_INVALID);
+    }
+  }
+
+  /**
+   * day별로 orderInDay 순 정렬 후 1..n 정수를 재부여한다. 이동/삽입은 대상 행에 임시
+   * 소수 orderInDay(목표순번−0.5)를 준 뒤 이 메서드를 부르는 방식으로 구현한다.
+   * 값이 실제로 바뀐 행만 반환한다(저장 최소화).
+   */
+  private renumber(rows: TripPlace[]): TripPlace[] {
+    const byDay = new Map<number, TripPlace[]>();
+    for (const row of rows) {
+      const list = byDay.get(row.dayNumber) ?? [];
+      list.push(row);
+      byDay.set(row.dayNumber, list);
+    }
+    const changed: TripPlace[] = [];
+    for (const list of byDay.values()) {
+      list.sort((a, b) => a.orderInDay - b.orderInDay);
+      list.forEach((row, index) => {
+        if (row.orderInDay !== index + 1) {
+          row.orderInDay = index + 1;
+          changed.push(row);
+        }
+      });
+    }
+    return changed;
   }
 
   /** startDate/endDate('YYYY-MM-DD')로 여행 일수를 센다(양끝 포함, 최소 1일). */
@@ -352,19 +534,7 @@ export class ScheduleService {
     const dayMap = new Map<number, ScheduledTripPlaceDto[]>();
     for (const row of sorted) {
       const info = row.placeId ? infoById.get(row.placeId) : undefined;
-      const dto: ScheduledTripPlaceDto = {
-        id: row.id,
-        placeId: row.placeId,
-        dayNumber: row.dayNumber,
-        orderInDay: row.orderInDay,
-        startTime: row.startTime ?? null,
-        name: info?.name ?? row.customName ?? '',
-        address: info?.address ?? row.customAddress ?? null,
-        lat: info?.lat ?? null,
-        lng: info?.lng ?? null,
-        imageUrl: info?.imageUrl ?? null,
-        memo: row.memo,
-      };
+      const dto = this.toPlaceDto(row, info);
       const list = dayMap.get(row.dayNumber) ?? [];
       list.push(dto);
       dayMap.set(row.dayNumber, list);
@@ -374,5 +544,21 @@ export class ScheduleService {
       .sort((a, b) => a - b)
       .map((dayNumber) => ({ dayNumber, places: dayMap.get(dayNumber)! }));
     return { days };
+  }
+
+  private toPlaceDto(row: TripPlace, info?: ScheduledPlaceInfo): ScheduledTripPlaceDto {
+    return {
+      id: row.id,
+      placeId: row.placeId,
+      dayNumber: row.dayNumber,
+      orderInDay: row.orderInDay,
+      startTime: row.startTime ?? null,
+      name: info?.name ?? row.customName ?? '',
+      address: info?.address ?? row.customAddress ?? null,
+      lat: info?.lat ?? null,
+      lng: info?.lng ?? null,
+      imageUrl: info?.imageUrl ?? null,
+      memo: row.memo ?? null,
+    };
   }
 }
