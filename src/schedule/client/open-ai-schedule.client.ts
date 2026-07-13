@@ -38,12 +38,27 @@ export interface ScheduleAiResult {
   days: ScheduleAiDay[];
 }
 
+/** 재수정(revise) 입력 — 현재 일정 항목. 커스텀 장소는 Service가 `custom:` 접두 id를 부여한다. */
+export interface ScheduleAiCurrentItem extends ScheduleAiPlaceInput {
+  dayNumber: number;
+  startTime: string | null;
+}
+
+/** Phase 9 자연어 재수정 요청 — 현재 일정 + 추가 가능 후보 + 사용자 요청. */
+export interface ScheduleReviseAiRequest {
+  durationDays: number;
+  userPrompt: string;
+  current: ScheduleAiCurrentItem[];
+  candidates: ScheduleAiPlaceInput[];
+}
+
 /**
  * 스케줄 생성 AI의 추상 인터페이스(plan.md §9.1: "인터페이스로 추상화해 이후 모델/제공자
  * 교체가 가능하도록"). Service는 이 토큰으로 주입받아 테스트에서 Mock으로 대체한다(§13).
  */
 export interface ScheduleAiClient {
   requestSchedule(request: ScheduleAiRequest): Promise<ScheduleAiResult>;
+  requestRevision(request: ScheduleReviseAiRequest): Promise<ScheduleAiResult>;
 }
 
 export const SCHEDULE_AI_CLIENT = Symbol('SCHEDULE_AI_CLIENT');
@@ -68,11 +83,26 @@ export class OpenAiScheduleClient implements ScheduleAiClient {
   }
 
   async requestSchedule(request: ScheduleAiRequest): Promise<ScheduleAiResult> {
-    const content = await this.callChatCompletion(request);
-    return this.parseResult(content, request);
+    const content = await this.callChatCompletion(
+      this.buildSystemPrompt(),
+      this.buildUserPrompt(request),
+    );
+    return this.parseResult(content, new Set(request.places.map((place) => place.id)));
   }
 
-  private async callChatCompletion(request: ScheduleAiRequest): Promise<string> {
+  async requestRevision(request: ScheduleReviseAiRequest): Promise<ScheduleAiResult> {
+    const content = await this.callChatCompletion(
+      this.buildReviseSystemPrompt(),
+      this.buildReviseUserPrompt(request),
+    );
+    const validIds = new Set([
+      ...request.current.map((item) => item.id),
+      ...request.candidates.map((item) => item.id),
+    ]);
+    return this.parseResult(content, validIds);
+  }
+
+  private async callChatCompletion(systemPrompt: string, userPrompt: string): Promise<string> {
     let response: globalThis.Response;
     try {
       response = await fetch(`${this.config.baseUrl}/chat/completions`, {
@@ -86,8 +116,8 @@ export class OpenAiScheduleClient implements ScheduleAiClient {
           temperature: 0.3,
           response_format: { type: 'json_object' },
           messages: [
-            { role: 'system', content: this.buildSystemPrompt() },
-            { role: 'user', content: this.buildUserPrompt(request) },
+            { role: 'system', content: systemPrompt },
+            { role: 'user', content: userPrompt },
           ],
         }),
       });
@@ -198,7 +228,55 @@ export class OpenAiScheduleClient implements ScheduleAiClient {
     return lines.join('\n');
   }
 
-  private parseResult(content: string, request: ScheduleAiRequest): ScheduleAiResult {
+  private buildReviseSystemPrompt(): string {
+    return [
+      '당신은 국내 여행 일정을 다듬는 전문 플래너다. [현재 일정]과 [사용자 요청]이 주어지면, 요청을 반영해 전체 일정을 다시 설계한다.',
+      '',
+      '가장 중요한 원칙:',
+      'A) 사용자 요청과 무관한 부분은 최대한 현재 일정을 유지한다(같은 날, 비슷한 시간). 요청이 닿는 부분만 바꾼다.',
+      'B) 장소가 더 필요하면 [추가 가능 후보]에서만 고른다. 존재하지 않는 placeId를 지어내지 않는다.',
+      'C) 같은 placeId는 전체 일정을 통틀어 최대 한 번만 사용한다.',
+      'D) 하루는 하나의 권역이다: 좌표와 거리(km)를 근거로 가까운 장소끼리 같은 날에 묶고, 하루 안에서는 총 이동 거리가 최소가 되는 순서로 방문한다.',
+      'E) 매일 점심(12:00~13:00)과 저녁(18:00~19:30)에 식당이 1곳씩 있도록 유지한다. 사용자가 뺀 식당은 다른 식당으로 채운다.',
+      'F) 각 장소의 startTime("HH:MM")은 이동시간과 체류시간을 감안해 현실적으로 부여한다.',
+      '',
+      '반드시 아래 JSON 스키마로만 답한다. 설명 문장은 넣지 않는다.',
+      '{ "days": [ { "dayNumber": <1부터 durationDays까지의 정수>, "places": [ { "placeId": "<place id>", "startTime": "HH:MM" } ] } ] }',
+    ].join('\n');
+  }
+
+  private buildReviseUserPrompt(request: ScheduleReviseAiRequest): string {
+    const currentByDay = new Map<number, ScheduleAiCurrentItem[]>();
+    for (const item of request.current) {
+      const list = currentByDay.get(item.dayNumber) ?? [];
+      list.push(item);
+      currentByDay.set(item.dayNumber, list);
+    }
+    const lines: string[] = [`여행 일수: ${request.durationDays}일`, '', '[현재 일정]'];
+    for (const dayNumber of [...currentByDay.keys()].sort((a, b) => a - b)) {
+      lines.push(`Day ${dayNumber}:`);
+      for (const item of currentByDay.get(dayNumber)!) {
+        lines.push(
+          `- id=${item.id} | ${item.startTime ?? '시간미정'} | category=${item.category} | ${item.name}` +
+            (item.lat !== null && item.lng !== null ? ` | (${item.lat}, ${item.lng})` : ''),
+        );
+      }
+    }
+    if (request.candidates.length > 0) {
+      lines.push('', `[추가 가능 후보] (${request.candidates.length}곳)`);
+      for (const place of request.candidates) {
+        lines.push(
+          `- id=${place.id} | category=${place.category} | ${place.name}` +
+            (place.address ? ` | ${place.address}` : '') +
+            (place.lat !== null && place.lng !== null ? ` | (${place.lat}, ${place.lng})` : ''),
+        );
+      }
+    }
+    lines.push('', '[사용자 요청]', request.userPrompt);
+    return lines.join('\n');
+  }
+
+  private parseResult(content: string, validIds: Set<string>): ScheduleAiResult {
     let parsed: unknown;
     try {
       parsed = JSON.parse(content);
@@ -213,7 +291,6 @@ export class OpenAiScheduleClient implements ScheduleAiClient {
       throw new BusinessException(ScheduleErrorCode.OPENAI_REQUEST_FAILED);
     }
 
-    const validIds = new Set(request.places.map((place) => place.id));
     const timePattern = /^([01]\d|2[0-3]):[0-5]\d$/;
     const result: ScheduleAiDay[] = [];
     for (const day of days) {
