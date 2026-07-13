@@ -18,13 +18,15 @@ const _categoryFilters = <(String? value, String label)>[
 ];
 
 /// 카테고리 값 → TourAPI contentTypeId(백엔드 CATEGORY_TO_CONTENT_TYPE_ID와 동일).
-/// 후보를 한 번만 받아두고 칩 전환 시 candidate.contentTypeId를 이 코드로 걸러
-/// 서버 재조회 없이 필터링한다(API 명세서 §2.2).
+/// 전체 후보에서 이미 받은 장소를 카테고리별로 먼저 걸러낸 뒤, 카테고리 전용
+/// 추가 조회 결과를 합쳐 30곳까지 채운다(API 명세서 §2.2).
 const _categoryContentTypeIds = <String, String>{
   'tourist_spot': '12',
   'restaurant': '39',
   'shopping': '38',
 };
+
+const _candidatePageSize = 30;
 
 /// 대한민국 중심 대략 좌표(초기 카메라). 후보가 로드되면 그 범위로 다시 맞춘다.
 const _koreaCenter = CameraPosition(target: LatLng(36.5, 127.8), zoom: 6.5);
@@ -42,10 +44,10 @@ const _focusZoom = 15.0;
 ///  - 시트 크기 변경: 상단 핸들/헤더를 드래그할 때만. 목록 영역을 스와이프하면
 ///    시트 크기는 그대로 두고 관광지 목록만 스크롤된다.
 ///
-/// 카테고리 필터는 클라이언트 사이드다(API 명세서 §2.2 "후보 목록 범위 내 처리,
-/// 별도 재조회 없음"). 후보를 카테고리 없이 한 번만 받아 두고, 칩 전환 시 서버
-/// 재조회 없이 candidate.contentTypeId로 걸러 표시한다 — 카테고리마다 TourAPI/Google
-/// Places를 다시 호출하지 않아 외부 API 요청도 최소화된다. 검색만 서버를 호출한다.
+/// 최초에는 카테고리 없이 전체 후보 30곳을 받아 둔다. 카테고리를 선택하면 전체
+/// 후보 안의 해당 카테고리를 먼저 보여주고, 부족한 수량은 카테고리 전용 후보
+/// 조회 결과를 합쳐 30곳까지 채운다. 카테고리별 추가 조회는 한 번만 수행하고
+/// 캐시에 보관해 같은 칩을 다시 눌러도 서버를 재호출하지 않는다.
 ///
 /// "N곳으로 최적 동선 짜기" CTA가 호출할 `POST /trips/{tripId}/schedule/generate`는
 /// 아직 백엔드에 없다(plan.md Phase 8) — 지금은 선택 상태만 유지하고 CTA는 "곧
@@ -65,6 +67,8 @@ class _PlaceSelectionScreenState extends ConsumerState<PlaceSelectionScreen> {
   bool _loading = true;
   String? _error;
   String? _category;
+  final Map<String, List<PlaceCandidate>> _categoryCandidates = {};
+  final Set<String> _loadingCategoryCandidates = {};
   final Map<String, PlaceCandidate> _selectedCandidates = {};
   GoogleMapController? _mapController;
 
@@ -92,7 +96,7 @@ class _PlaceSelectionScreenState extends ConsumerState<PlaceSelectionScreen> {
       _error = null;
     });
     try {
-      // 카테고리 없이 전체를 한 번만 받아 두고, 카테고리 전환은 클라이언트에서 거른다.
+      // 카테고리 없이 전체 30곳을 먼저 받아 두고, 카테고리 선택 시 부족분만 추가 조회한다.
       final candidates = await ref
           .read(placesApiProvider)
           .getCandidates(widget.tripId);
@@ -113,10 +117,17 @@ class _PlaceSelectionScreenState extends ConsumerState<PlaceSelectionScreen> {
   }
 
   void _selectCategory(String? category) {
-    if (category == _category) return;
-    // 서버 재조회 없이 클라이언트에서 걸러 표시하고, 지도만 걸러진 마커에 다시 맞춘다.
+    if (category == _category) {
+      if (category != null) {
+        _loadCategoryCandidates(category);
+      }
+      return;
+    }
     setState(() => _category = category);
     _fitCamera();
+    if (category != null) {
+      _loadCategoryCandidates(category);
+    }
   }
 
   /// 하단 목록 헤더에 쓸 현재 카테고리 라벨. '전체'는 여러 종류가 섞이므로 '장소'로 쓴다.
@@ -126,12 +137,15 @@ class _PlaceSelectionScreenState extends ConsumerState<PlaceSelectionScreen> {
   }
 
   /// 화면에 보여줄 후보. 검색 중이거나 '전체'면 전량, 카테고리가 선택되면
-  /// contentTypeId로 클라이언트 사이드 필터링한다(서버 재조회 없음, §2.2).
+  /// 전체 후보 중 해당 카테고리를 먼저 쓰고 카테고리 전용 조회 결과를 합쳐 30곳까지 채운다.
   List<PlaceCandidate> get _visibleCandidates {
     if (_searchMode || _category == null) return _allCandidates;
     final wanted = _categoryContentTypeIds[_category];
     if (wanted == null) return _allCandidates;
-    return _allCandidates.where((c) => c.contentTypeId == wanted).toList();
+    return _dedupeCandidates([
+      ..._allCandidates.where((c) => c.contentTypeId == wanted),
+      ...?_categoryCandidates[_category],
+    ]).take(_candidatePageSize).toList();
   }
 
   Set<String> get _selectedIds => _selectedCandidates.keys.toSet();
@@ -144,6 +158,46 @@ class _PlaceSelectionScreenState extends ConsumerState<PlaceSelectionScreen> {
     };
     byId.addAll(_selectedCandidates);
     return byId.values.toList();
+  }
+
+  List<PlaceCandidate> _dedupeCandidates(Iterable<PlaceCandidate> candidates) {
+    final byId = <String, PlaceCandidate>{};
+    for (final candidate in candidates) {
+      byId.putIfAbsent(candidate.id, () => candidate);
+    }
+    return byId.values.toList();
+  }
+
+  Future<void> _loadCategoryCandidates(String category) async {
+    if (_categoryCandidates.containsKey(category)) return;
+    if (_loadingCategoryCandidates.contains(category)) return;
+    _loadingCategoryCandidates.add(category);
+    setState(() {
+      _loading = true;
+      _error = null;
+    });
+    try {
+      final candidates = await ref
+          .read(placesApiProvider)
+          .getCandidates(widget.tripId, category: category);
+      if (!mounted) return;
+      setState(() {
+        _loadingCategoryCandidates.remove(category);
+        _categoryCandidates[category] = candidates;
+        _loading = _loadingCategoryCandidates.isNotEmpty;
+      });
+      if (_category == category) {
+        _fitCamera();
+      }
+    } on DioException catch (e) {
+      if (!mounted) return;
+      final error = e.error;
+      setState(() {
+        _loadingCategoryCandidates.remove(category);
+        _loading = _loadingCategoryCandidates.isNotEmpty;
+        _error = error is ApiException ? error.message : '네트워크 연결을 확인해줘';
+      });
+    }
   }
 
   /// 키워드 검색 → 결과를 하단 목록과 지도 마커에 표시한다(선택 상태는 유지).
