@@ -38,4 +38,10 @@ export const envValidationSchema = Joi.object({
   // 인기순 정렬용 평점/리뷰수 — Kakao 로컬 API는 이 데이터를 제공하지 않아(카카오 공식
   // 정책) Google Places API (New)로 대체했다.
   GOOGLE_PLACES_API_KEY: Joi.string().required(),
+
+  // Phase 8(AI 여행 계획 생성) — OpenAI. Key는 환경변수로만 주입하고 코드/설정에
+  // 하드코딩하지 않는다(plan.md §9.1). BASE_URL/MODEL은 미설정 시 공식 기본값을 쓴다.
+  OPENAI_API_KEY: Joi.string().required(),
+  OPENAI_BASE_URL: Joi.string().uri().default('https://api.openai.com/v1'),
+  OPENAI_SCHEDULE_MODEL: Joi.string().default('gpt-4o-mini'),
 });

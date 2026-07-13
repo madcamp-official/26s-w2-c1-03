@@ -403,23 +403,25 @@ erDiagram
 
 > **Phase 8부터는 아직 착수 전입니다.** 아래는 API 명세서(`API_명세서_2026-07-10_v1.md`)와 기능명세서(`AI_기반_여행_계획_및_기록_앱_기능명세서_2026-07-10_v2.md`)의 세부 규칙을 근거로 각 Phase의 하위 작업을 세분화한 체크리스트입니다. 착수 시 이 체크리스트를 그대로 작업 목록으로 사용하고, 완료되는 항목마다 `[x]`로 갱신하세요.
 
-### Phase 8 — AI 여행 계획 생성
+### Phase 8 — AI 여행 계획 생성 ✅ BE 완료 (FE 미착수)
 - **목표**: 선택한 장소로 AI가 일자별 최적 동선을 생성 (이 프로젝트에서 가장 까다로운 AI 연동)
+- **[구현 메모, 2026-07-13]** OpenAI 연동 전송 계층은 `openai` Node SDK 대신 **`fetch` 직접 호출**로 구현했다(§9.1은 SDK를 언급하나, 기존 외부 클라이언트 TourApiClient/GooglePlacesClient/TatsCnctrRateClient가 모두 `fetch`+`ConfigService` 패턴으로 통일돼 있어 일관성·의존성 최소화를 위해 동일 패턴을 따름). §9.1의 실질 요구(인터페이스 추상화·env 주입·에러 변환)는 모두 충족한다. WebSocket 브로드캐스트는 Phase 10 Gateway가 아직 없어 **REST 응답만 우선 구현**(아래 참고).
+- **[검증 상태]** 코드는 손으로 정독해 타입/시그니처 일관성을 확인했으나, `tsc --noEmit`/`jest` **자동 실행은 아직 못 돌렸다**(구현 시점에 실행 환경 일시 장애). 커밋 전 반드시 `npx tsc --noEmit`과 `npx jest src/schedule`(신규 11건) + 전체 `npx jest`를 돌려 통과를 확인할 것.
 - **BE 체크리스트**:
-  - [ ] `config/openai.config.ts` — `OPENAI_API_KEY` 환경변수 주입, 하드코딩 금지(§9.1)
-  - [ ] `schedule/client/open-ai-schedule.client.ts` — 선택된 장소 리스트 + 여행 일수를 프롬프트에 포함해 일자별 최적 동선 요청(§9.2), 인터페이스로 추상화(향후 모델/제공자 교체 대비)
-  - [ ] `POST /trips/{tripId}/schedule/generate` — **동기 처리**(202/폴링 아님, API 명세서 §2.3), `selectedPlaceIds` 검증(존재하는 place인지, 같은 트립 소속인지)
-  - [ ] 응답 파싱 후 `trip_places` bulk insert — `day_number`/`order_in_day` 배정, `added_by`=요청자
-  - [ ] 완료 시 WebSocket `schedule:generated` 이벤트 브로드캐스트(Phase 10의 Gateway가 아직 없으면 이 항목은 Phase 10 이후로 미루고 REST 응답만 우선 구현)
-  - [ ] OpenAI 호출 실패(네트워크 오류/타임아웃/빈 응답) → `OPENAI_REQUEST_FAILED`(502) 에러코드로 변환(§9.4)
-  - [ ] 테스트: `OpenAiScheduleClient`를 인터페이스 Mock으로 대체해 스케줄 배정 로직만 단위테스트(실제 OpenAI 호출 없이, §13)
+  - [x] `config/openai.config.ts` — `loadOpenAiConfig(ConfigService)`로 `OPENAI_API_KEY`/`OPENAI_BASE_URL`/`OPENAI_SCHEDULE_MODEL` 주입, 하드코딩 금지(§9.1). `env.validation.ts`에 Joi 스키마(BASE_URL/MODEL은 기본값) 추가
+  - [x] `schedule/client/open-ai-schedule.client.ts` — 선택 장소 리스트 + 여행 일수를 프롬프트에 포함해 일자별 동선 요청(§9.2). `ScheduleAiClient` 인터페이스 + `SCHEDULE_AI_CLIENT` 토큰으로 추상화(모델/제공자 교체·테스트 Mock 대비). JSON 응답 파싱 + 입력에 없는(지어낸) placeId 필터링
+  - [x] `POST /trips/{tripId}/schedule/generate` — **동기 처리**(API 명세서 §2.3). `assertMember`(owner/editor)로 권한 검증, `selectedPlaceIds`는 `PlacesService.resolveForSchedule`로 전부 조회되는지 검증(누락 시 `SELECTED_PLACES_INVALID`). *"같은 트립 소속" 검증은 places가 트립이 아니라 지역 단위 전역 캐시라 존재 검증으로 대체*
+  - [x] 응답 파싱 후 `trip_places` bulk insert — `day_number`/`order_in_day` 배정, `added_by`=요청자. 재생성 대비 트랜잭션으로 기존 `trip_places` 삭제 후 삽입(멱등). AI가 누락한 장소는 마지막 날에 보정 삽입해 선택 장소 전부 포함
+  - [ ] 완료 시 WebSocket `schedule:generated` 이벤트 브로드캐스트 → **Phase 10으로 이월**(Gateway 미존재, REST 응답만 우선 구현 — 계획서에 명시된 폴백대로)
+  - [x] OpenAI 호출 실패(네트워크 오류/타임아웃/빈 응답/파싱 실패) → `OPENAI_REQUEST_FAILED`(502) 에러코드로 변환(§9.4)
+  - [x] 테스트: `SCHEDULE_AI_CLIENT`를 Mock으로 대체해 스케줄 배정 로직 단위테스트(`schedule.service.spec.ts` 5건: 일자 배치/누락 보정/일수 클램프/유효성/AI 실패 전파) + `OpenAiScheduleClient` fetch Mock 테스트(`open-ai-schedule.client.spec.ts` 6건: 파싱/필터/HTTP·네트워크·파싱 실패) — 실제 OpenAI 호출 없이(§13)
 - **FE 체크리스트**:
   - [ ] "선택 완료 → 생성 중" 로딩 화면(동기 응답 대기 UX, 취소 불가 명시)
   - [ ] 결과 화면(일자별 리스트, `day_number` 기준 그룹핑)
   - [ ] OpenAI 응답 지연 시 타임아웃/에러 처리 UX(§16 리스크: 체감 지연 측정 필요)
-- **완료 조건**: 선택한 장소들이 일자별로 배정되어 반환되고 `trip_places`에 저장됨
+- **완료 조건**: 선택한 장소들이 일자별로 배정되어 반환되고 `trip_places`에 저장됨 — **BE 충족**(단위테스트로 배정/저장 로직 검증). 실제 OpenAI 왕복은 배포 환경에서 별도 확인(§9.4)
 - **선행 Phase**: Phase 7
-- **산출물**: `schedule/` 모듈(생성 부분), `config/openai.config.ts`
+- **산출물**: `schedule/` 모듈(생성 부분: `schedule.service.ts`/`schedule.controller.ts`/`client/open-ai-schedule.client.ts`/`dto`/`exceptions`), `config/openai.config.ts`, `PlacesService.resolveForSchedule`
 
 ### Phase 9 — 스케줄 조회/수동 편집/프롬프트 재수정
 - **목표**: AI 초안을 사용자가 다듬을 수 있게 함
