@@ -106,6 +106,12 @@ class _PlaceSelectionScreenState extends ConsumerState<PlaceSelectionScreen> {
     _load();
   }
 
+  /// 하단 목록 헤더에 쓸 현재 카테고리 라벨. '전체'는 여러 종류가 섞이므로 '장소'로 쓴다.
+  String _categoryLabel(String? category) {
+    if (category == null) return '장소';
+    return _categoryFilters.firstWhere((f) => f.$1 == category).$2;
+  }
+
   /// 키워드 검색 → 결과를 하단 목록과 지도 마커에 표시한다(선택 상태는 유지).
   Future<void> _search(String rawKeyword) async {
     final keyword = rawKeyword.trim();
@@ -292,7 +298,7 @@ class _PlaceSelectionScreenState extends ConsumerState<PlaceSelectionScreen> {
                 selectedIds: _selectedIds,
                 loading: _loading,
                 hasCtaPadding: _selectedIds.isNotEmpty,
-                listLabel: _searchMode ? '검색 결과' : '관광지',
+                listLabel: _searchMode ? '검색 결과' : _categoryLabel(_category),
                 emptyText: _searchMode ? '검색 결과가 없어' : '이 지역에서 찾은 장소가 없어',
                 onRowTap: _focusPlace,
                 onToggle: (candidate) => _toggleSelected(candidate.id),
