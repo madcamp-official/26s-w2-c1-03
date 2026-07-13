@@ -20,10 +20,18 @@ const _categoryFilters = <(String? value, String label)>[
 /// 대한민국 중심 대략 좌표(초기 카메라). 후보가 로드되면 그 범위로 다시 맞춘다.
 const _koreaCenter = CameraPosition(target: LatLng(36.5, 127.8), zoom: 6.5);
 
+/// 목록 행을 눌렀을 때 지도가 그 장소로 확대되는 줌 레벨(축척 확대, 요구사항 3).
+const _focusZoom = 15.0;
+
 /// API 명세서 §2.2 "카테고리 선택 시 지도에 마커로 필터링, 마커 클릭으로 선택".
 /// 지도 위에 후보를 마커로 찍고, 하단에 드래그로 여닫는 목록 시트를 함께 둔다.
 /// 시트를 위로 끌어올리면 목록이 지도를 덮고, 아래로 내리면 지도만 보인다.
-/// 마커 탭 / 목록 행 탭 모두 선택을 토글하며, 선택된 곳은 초록 마커로 구분된다.
+///
+/// 상호작용 규칙:
+///  - 목록 행 탭 / 마커 탭: 지도를 그 장소로 확대 이동(선택은 바뀌지 않음).
+///  - 목록 행 오른쪽 원 버튼: 선택 토글(선택된 곳은 초록 마커로 구분).
+///  - 시트 크기 변경: 상단 핸들/헤더를 드래그할 때만. 목록 영역을 스와이프하면
+///    시트 크기는 그대로 두고 관광지 목록만 스크롤된다.
 ///
 /// 카테고리 필터는 서버 재조회 방식이다(§category → TourAPI contentTypeId). 후보
 /// DTO가 contentTypeId를 내려주지 않아 클라이언트 사이드 필터링(명세 §2.2, plan.md
@@ -100,14 +108,12 @@ class _PlaceSelectionScreenState extends ConsumerState<PlaceSelectionScreen> {
     });
   }
 
-  /// 목록 행을 누르면 선택을 토글하고 지도를 그 장소로 이동시킨다.
-  void _onRowTap(PlaceCandidate candidate) {
-    _toggleSelected(candidate.id);
-    if (candidate.lat != null && candidate.lng != null) {
-      _mapController?.animateCamera(
-        CameraUpdate.newLatLng(LatLng(candidate.lat!, candidate.lng!)),
-      );
-    }
+  /// 지도를 해당 장소로 확대 이동한다(선택 상태는 건드리지 않음).
+  void _focusPlace(PlaceCandidate candidate) {
+    if (candidate.lat == null || candidate.lng == null) return;
+    _mapController?.animateCamera(
+      CameraUpdate.newLatLngZoom(LatLng(candidate.lat!, candidate.lng!), _focusZoom),
+    );
   }
 
   void _showComingSoon() {
@@ -160,6 +166,9 @@ class _PlaceSelectionScreenState extends ConsumerState<PlaceSelectionScreen> {
                   ? BitmapDescriptor.hueGreen
                   : BitmapDescriptor.hueRose,
             ),
+            // 마커 탭은 선택 토글(API 명세서 §2.2 "마커 클릭으로 선택 가능").
+            // 목록 행 탭은 지도 이동, 마커 탭은 선택 — 각자 반대편에서 하기 어려운
+            // 동작을 맡는다(목록엔 선택 버튼이 따로 있고, 지도엔 그게 없으니 탭=선택).
             onTap: () => _toggleSelected(c.id),
           ),
     };
@@ -211,12 +220,15 @@ class _PlaceSelectionScreenState extends ConsumerState<PlaceSelectionScreen> {
             if (_error != null && _candidates.isEmpty)
               _ErrorOverlay(message: _error!, onRetry: _load),
             // 하단 드래그 목록 시트.
-            _PlaceSheet(
-              candidates: _candidates,
-              selectedIds: _selectedIds,
-              loading: _loading,
-              hasCtaPadding: _selectedIds.isNotEmpty,
-              onRowTap: _onRowTap,
+            Positioned.fill(
+              child: _PlaceSheet(
+                candidates: _candidates,
+                selectedIds: _selectedIds,
+                loading: _loading,
+                hasCtaPadding: _selectedIds.isNotEmpty,
+                onRowTap: _focusPlace,
+                onToggle: (candidate) => _toggleSelected(candidate.id),
+              ),
             ),
           ],
         ),
@@ -228,15 +240,19 @@ class _PlaceSelectionScreenState extends ConsumerState<PlaceSelectionScreen> {
   }
 }
 
-/// 지도 위에 겹쳐 여닫는 관광지 목록. 위로 끌면 지도를 덮고(목록만), 아래로 내리면
-/// 지도만 보인다(핸들만 남음). 시트 전체가 하나의 스크롤뷰라 어디를 잡아 끌든 여닫힌다.
-class _PlaceSheet extends StatelessWidget {
+/// 지도 위에 겹쳐 여닫는 관광지 목록.
+///
+/// 크기 조절과 목록 스크롤을 분리한다:
+///  - 상단(핸들/헤더)을 세로로 드래그 → 시트 높이 변경(3단 스냅).
+///  - 목록 영역 스와이프 → 시트 크기는 그대로, 관광지 목록만 자체 스크롤.
+class _PlaceSheet extends StatefulWidget {
   const _PlaceSheet({
     required this.candidates,
     required this.selectedIds,
     required this.loading,
     required this.hasCtaPadding,
     required this.onRowTap,
+    required this.onToggle,
   });
 
   final List<PlaceCandidate> candidates;
@@ -244,69 +260,145 @@ class _PlaceSheet extends StatelessWidget {
   final bool loading;
   final bool hasCtaPadding;
   final ValueChanged<PlaceCandidate> onRowTap;
+  final ValueChanged<PlaceCandidate> onToggle;
+
+  @override
+  State<_PlaceSheet> createState() => _PlaceSheetState();
+}
+
+class _PlaceSheetState extends State<_PlaceSheet> {
+  // 시트 높이 비율 스냅 3단계: 지도만(핸들만) / 반반 / 목록만(지도 덮음).
+  static const double _min = 0.12;
+  static const double _mid = 0.42;
+  static const double _max = 0.92;
+  static const List<double> _snaps = [_min, _mid, _max];
+
+  double _extent = _mid;
+  bool _dragging = false;
+  final _listController = ScrollController();
+
+  @override
+  void dispose() {
+    _listController.dispose();
+    super.dispose();
+  }
+
+  void _onDragUpdate(DragUpdateDetails details, double maxHeight) {
+    setState(() {
+      _dragging = true;
+      // 위로 끌면(delta 음수) 시트가 커진다.
+      _extent = (_extent - details.primaryDelta! / maxHeight).clamp(_min, _max);
+    });
+  }
+
+  void _onDragEnd(DragEndDetails details) {
+    final velocity = details.primaryVelocity ?? 0;
+    double target;
+    if (velocity < -300) {
+      // 빠르게 위로 → 한 단계 위 스냅.
+      target = _snaps.firstWhere((s) => s > _extent + 0.001, orElse: () => _max);
+    } else if (velocity > 300) {
+      // 빠르게 아래로 → 한 단계 아래 스냅.
+      target = _snaps.lastWhere((s) => s < _extent - 0.001, orElse: () => _min);
+    } else {
+      target = _nearestSnap(_extent);
+    }
+    setState(() {
+      _dragging = false;
+      _extent = target;
+    });
+  }
+
+  double _nearestSnap(double value) =>
+      _snaps.reduce((a, b) => (value - a).abs() < (value - b).abs() ? a : b);
 
   @override
   Widget build(BuildContext context) {
-    return DraggableScrollableSheet(
-      initialChildSize: 0.4,
-      minChildSize: 0.12,
-      maxChildSize: 0.92,
-      snap: true,
-      snapSizes: const [0.12, 0.4, 0.92],
-      builder: (context, scrollController) {
-        return DecoratedBox(
-          decoration: BoxDecoration(
-            color: Colors.white,
-            borderRadius: const BorderRadius.vertical(top: Radius.circular(24)),
-            boxShadow: [
-              BoxShadow(
-                color: Colors.black.withValues(alpha: 0.12),
-                blurRadius: 24,
-                offset: const Offset(0, -6),
-              ),
-            ],
-          ),
-          child: ListView(
-            controller: scrollController,
-            padding: EdgeInsets.only(bottom: hasCtaPadding ? 24 : 12),
-            children: [
-              const _SheetHandle(),
-              _SheetHeader(total: candidates.length, selectedCount: selectedIds.length),
-              ..._buildRows(context),
-            ],
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final maxHeight = constraints.maxHeight;
+        return Align(
+          alignment: Alignment.bottomCenter,
+          child: AnimatedContainer(
+            // 드래그 중엔 손가락을 즉시 따라오고, 손을 떼면 스냅 위치로 부드럽게 이동.
+            duration: _dragging ? Duration.zero : const Duration(milliseconds: 220),
+            curve: Curves.easeOut,
+            height: _extent * maxHeight,
+            clipBehavior: Clip.antiAlias,
+            decoration: BoxDecoration(
+              color: Colors.white,
+              borderRadius: const BorderRadius.vertical(top: Radius.circular(24)),
+              boxShadow: [
+                BoxShadow(
+                  color: Colors.black.withValues(alpha: 0.12),
+                  blurRadius: 24,
+                  offset: const Offset(0, -6),
+                ),
+              ],
+            ),
+            child: Column(
+              children: [
+                // 상단 핸들/헤더 — 이 영역 드래그만 시트 크기를 바꾼다.
+                GestureDetector(
+                  behavior: HitTestBehavior.opaque,
+                  onVerticalDragUpdate: (d) => _onDragUpdate(d, maxHeight),
+                  onVerticalDragEnd: _onDragEnd,
+                  child: Column(
+                    children: [
+                      const _SheetHandle(),
+                      _SheetHeader(
+                        total: widget.candidates.length,
+                        selectedCount: widget.selectedIds.length,
+                      ),
+                    ],
+                  ),
+                ),
+                // 목록 — 자체 스크롤 컨트롤러라 시트 크기와 독립적으로 스크롤된다.
+                Expanded(
+                  child: _buildList(),
+                ),
+              ],
+            ),
           ),
         );
       },
     );
   }
 
-  List<Widget> _buildRows(BuildContext context) {
-    if (candidates.isEmpty) {
-      final text = loading
-          ? '장소를 불러오는 중…'
-          : '이 지역에서 찾은 장소가 없어';
-      return [
-        Padding(
-          padding: const EdgeInsets.symmetric(vertical: 48),
-          child: Center(
-            child: Text(
-              text,
-              style: const TextStyle(color: AppColors.ink400, fontWeight: FontWeight.w600),
+  Widget _buildList() {
+    if (widget.candidates.isEmpty) {
+      final text = widget.loading ? '장소를 불러오는 중…' : '이 지역에서 찾은 장소가 없어';
+      return ListView(
+        controller: _listController,
+        children: [
+          Padding(
+            padding: const EdgeInsets.symmetric(vertical: 48),
+            child: Center(
+              child: Text(
+                text,
+                style: const TextStyle(color: AppColors.ink400, fontWeight: FontWeight.w600),
+              ),
             ),
           ),
-        ),
-      ];
+        ],
+      );
     }
 
-    return [
-      for (var i = 0; i < candidates.length; i++)
-        _PlaceListRow(
-          candidate: candidates[i],
-          selected: selectedIds.contains(candidates[i].id),
-          showDivider: i != candidates.length - 1,
-          onTap: () => onRowTap(candidates[i]),
-        ),
-    ];
+    return ListView.builder(
+      controller: _listController,
+      padding: EdgeInsets.only(bottom: widget.hasCtaPadding ? 24 : 12),
+      itemCount: widget.candidates.length,
+      itemBuilder: (context, index) {
+        final candidate = widget.candidates[index];
+        return _PlaceListRow(
+          candidate: candidate,
+          selected: widget.selectedIds.contains(candidate.id),
+          showDivider: index != widget.candidates.length - 1,
+          onTap: () => widget.onRowTap(candidate),
+          onToggle: () => widget.onToggle(candidate),
+        );
+      },
+    );
   }
 }
 
@@ -367,19 +459,21 @@ class _PlaceListRow extends StatelessWidget {
     required this.selected,
     required this.showDivider,
     required this.onTap,
+    required this.onToggle,
   });
 
   final PlaceCandidate candidate;
   final bool selected;
   final bool showDivider;
-  final VoidCallback onTap;
+  final VoidCallback onTap; // 행 탭 = 지도 확대 이동
+  final VoidCallback onToggle; // 오른쪽 원 = 선택 토글
 
   @override
   Widget build(BuildContext context) {
     return InkWell(
       onTap: onTap,
       child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
+        padding: const EdgeInsets.fromLTRB(20, 12, 12, 12),
         decoration: BoxDecoration(
           border: showDivider
               ? const Border(bottom: BorderSide(color: AppColors.border, width: 1))
@@ -420,8 +514,16 @@ class _PlaceListRow extends StatelessWidget {
                 ],
               ),
             ),
-            const SizedBox(width: 10),
-            _SelectionCircle(selected: selected),
+            // 선택 토글 버튼. 행 탭(지도 이동)과 분리하려고 별도 제스처로 감싸고
+            // 패딩으로 탭 영역을 키운다 — 안쪽 제스처가 바깥 InkWell보다 먼저 탭을 가져간다.
+            GestureDetector(
+              onTap: onToggle,
+              behavior: HitTestBehavior.opaque,
+              child: Padding(
+                padding: const EdgeInsets.all(8),
+                child: _SelectionCircleValue(selected: selected),
+              ),
+            ),
           ],
         ),
       ),
@@ -435,6 +537,27 @@ class _PlaceListRow extends StatelessWidget {
     }
     if (candidate.address != null) parts.add(candidate.address!);
     return parts.isEmpty ? null : parts.join(' · ');
+  }
+}
+
+/// design.md §5.7 체크서클. 선택됨 = ink900 배경 + 라임 체크, 미선택 = outline만.
+class _SelectionCircleValue extends StatelessWidget {
+  const _SelectionCircleValue({required this.selected});
+
+  final bool selected;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: 28,
+      height: 28,
+      decoration: BoxDecoration(
+        shape: BoxShape.circle,
+        color: selected ? AppColors.ink900 : Colors.transparent,
+        border: selected ? null : Border.all(color: AppColors.ink200, width: 1.8),
+      ),
+      child: selected ? const Icon(Icons.check, size: 16, color: AppColors.lime) : null,
+    );
   }
 }
 
@@ -516,27 +639,6 @@ class _PlaceThumbnail extends StatelessWidget {
                     Icon(Icons.place_outlined, color: AppColors.ink400, size: size * 0.45),
               ),
       ),
-    );
-  }
-}
-
-/// design.md §5.7 체크서클. 선택됨 = ink900 배경 + 라임 체크, 미선택 = outline만.
-class _SelectionCircle extends StatelessWidget {
-  const _SelectionCircle({required this.selected});
-
-  final bool selected;
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      width: 28,
-      height: 28,
-      decoration: BoxDecoration(
-        shape: BoxShape.circle,
-        color: selected ? AppColors.ink900 : Colors.transparent,
-        border: selected ? null : Border.all(color: AppColors.ink200, width: 1.8),
-      ),
-      child: selected ? const Icon(Icons.check, size: 16, color: AppColors.lime) : null,
     );
   }
 }
