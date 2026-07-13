@@ -21,8 +21,9 @@ const _categoryFilters = <(String? value, String label)>[
 const _koreaCenter = CameraPosition(target: LatLng(36.5, 127.8), zoom: 6.5);
 
 /// API 명세서 §2.2 "카테고리 선택 시 지도에 마커로 필터링, 마커 클릭으로 선택".
-/// TourAPI 후보(§PlacesService)를 지도 위 마커로 찍고, 마커를 누르면 하단 카드가
-/// 떠서 선택/해제할 수 있다. 선택된 마커는 초록으로 구분된다.
+/// 지도 위에 후보를 마커로 찍고, 하단에 드래그로 여닫는 목록 시트를 함께 둔다.
+/// 시트를 위로 끌어올리면 목록이 지도를 덮고, 아래로 내리면 지도만 보인다.
+/// 마커 탭 / 목록 행 탭 모두 선택을 토글하며, 선택된 곳은 초록 마커로 구분된다.
 ///
 /// 카테고리 필터는 서버 재조회 방식이다(§category → TourAPI contentTypeId). 후보
 /// DTO가 contentTypeId를 내려주지 않아 클라이언트 사이드 필터링(명세 §2.2, plan.md
@@ -46,7 +47,6 @@ class _PlaceSelectionScreenState extends ConsumerState<PlaceSelectionScreen> {
   String? _error;
   String? _category;
   final Set<String> _selectedIds = {};
-  PlaceCandidate? _tapped;
   GoogleMapController? _mapController;
 
   @override
@@ -88,10 +88,7 @@ class _PlaceSelectionScreenState extends ConsumerState<PlaceSelectionScreen> {
 
   void _selectCategory(String? category) {
     if (category == _category) return;
-    setState(() {
-      _category = category;
-      _tapped = null;
-    });
+    setState(() => _category = category);
     _load();
   }
 
@@ -101,6 +98,16 @@ class _PlaceSelectionScreenState extends ConsumerState<PlaceSelectionScreen> {
         _selectedIds.add(placeId);
       }
     });
+  }
+
+  /// 목록 행을 누르면 선택을 토글하고 지도를 그 장소로 이동시킨다.
+  void _onRowTap(PlaceCandidate candidate) {
+    _toggleSelected(candidate.id);
+    if (candidate.lat != null && candidate.lng != null) {
+      _mapController?.animateCamera(
+        CameraUpdate.newLatLng(LatLng(candidate.lat!, candidate.lng!)),
+      );
+    }
   }
 
   void _showComingSoon() {
@@ -153,7 +160,7 @@ class _PlaceSelectionScreenState extends ConsumerState<PlaceSelectionScreen> {
                   ? BitmapDescriptor.hueGreen
                   : BitmapDescriptor.hueRose,
             ),
-            onTap: () => setState(() => _tapped = c),
+            onTap: () => _toggleSelected(c.id),
           ),
     };
   }
@@ -173,51 +180,43 @@ class _PlaceSelectionScreenState extends ConsumerState<PlaceSelectionScreen> {
       ),
       body: SafeArea(
         top: false,
-        child: Column(
+        child: Stack(
           children: [
-            const SizedBox(height: 4),
-            _CategoryChipRow(selected: _category, onSelect: _selectCategory),
-            const SizedBox(height: 8),
-            Expanded(
-              child: Stack(
-                children: [
-                  GoogleMap(
-                    initialCameraPosition: _koreaCenter,
-                    markers: _buildMarkers(),
-                    myLocationButtonEnabled: false,
-                    zoomControlsEnabled: false,
-                    onMapCreated: (controller) {
-                      _mapController = controller;
-                      _fitCamera();
-                    },
-                    // 지도 빈 곳을 누르면 열려 있던 정보 카드를 닫는다.
-                    onTap: (_) {
-                      if (_tapped != null) setState(() => _tapped = null);
-                    },
-                  ),
-                  if (_loading)
-                    const Positioned.fill(
-                      child: ColoredBox(
-                        color: Color(0x66FFFFFF),
-                        child: Center(child: CircularProgressIndicator(color: AppColors.ink900)),
-                      ),
-                    ),
-                  if (_error != null) _ErrorOverlay(message: _error!, onRetry: _load),
-                  if (!_loading && _error == null && _candidates.isEmpty)
-                    const _MapMessage(text: '이 지역에서 찾은 장소가 없어'),
-                  if (_tapped != null)
-                    Positioned(
-                      left: 0,
-                      right: 0,
-                      bottom: 0,
-                      child: _PlaceInfoCard(
-                        candidate: _tapped!,
-                        selected: _selectedIds.contains(_tapped!.id),
-                        onToggle: () => _toggleSelected(_tapped!.id),
-                      ),
-                    ),
-                ],
+            GoogleMap(
+              initialCameraPosition: _koreaCenter,
+              markers: _buildMarkers(),
+              myLocationButtonEnabled: false,
+              zoomControlsEnabled: false,
+              // 시트에 가려지지 않게 구글 로고/저작권 표시를 위로 띄운다.
+              padding: const EdgeInsets.only(bottom: 90),
+              onMapCreated: (controller) {
+                _mapController = controller;
+                _fitCamera();
+              },
+            ),
+            // 카테고리 필터 — 지도 위 상단 오버레이(칩 배경이 불투명해 지도 위에서도 잘 보인다).
+            Positioned(
+              top: 8,
+              left: 0,
+              right: 0,
+              child: _CategoryChipRow(selected: _category, onSelect: _selectCategory),
+            ),
+            if (_loading && _candidates.isEmpty)
+              const Positioned.fill(
+                child: ColoredBox(
+                  color: Color(0x66FFFFFF),
+                  child: Center(child: CircularProgressIndicator(color: AppColors.ink900)),
+                ),
               ),
+            if (_error != null && _candidates.isEmpty)
+              _ErrorOverlay(message: _error!, onRetry: _load),
+            // 하단 드래그 목록 시트.
+            _PlaceSheet(
+              candidates: _candidates,
+              selectedIds: _selectedIds,
+              loading: _loading,
+              hasCtaPadding: _selectedIds.isNotEmpty,
+              onRowTap: _onRowTap,
             ),
           ],
         ),
@@ -226,6 +225,216 @@ class _PlaceSelectionScreenState extends ConsumerState<PlaceSelectionScreen> {
           ? null
           : _FloatingCta(count: _selectedIds.length, onTap: _showComingSoon),
     );
+  }
+}
+
+/// 지도 위에 겹쳐 여닫는 관광지 목록. 위로 끌면 지도를 덮고(목록만), 아래로 내리면
+/// 지도만 보인다(핸들만 남음). 시트 전체가 하나의 스크롤뷰라 어디를 잡아 끌든 여닫힌다.
+class _PlaceSheet extends StatelessWidget {
+  const _PlaceSheet({
+    required this.candidates,
+    required this.selectedIds,
+    required this.loading,
+    required this.hasCtaPadding,
+    required this.onRowTap,
+  });
+
+  final List<PlaceCandidate> candidates;
+  final Set<String> selectedIds;
+  final bool loading;
+  final bool hasCtaPadding;
+  final ValueChanged<PlaceCandidate> onRowTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return DraggableScrollableSheet(
+      initialChildSize: 0.4,
+      minChildSize: 0.12,
+      maxChildSize: 0.92,
+      snap: true,
+      snapSizes: const [0.12, 0.4, 0.92],
+      builder: (context, scrollController) {
+        return DecoratedBox(
+          decoration: BoxDecoration(
+            color: Colors.white,
+            borderRadius: const BorderRadius.vertical(top: Radius.circular(24)),
+            boxShadow: [
+              BoxShadow(
+                color: Colors.black.withValues(alpha: 0.12),
+                blurRadius: 24,
+                offset: const Offset(0, -6),
+              ),
+            ],
+          ),
+          child: ListView(
+            controller: scrollController,
+            padding: EdgeInsets.only(bottom: hasCtaPadding ? 24 : 12),
+            children: [
+              const _SheetHandle(),
+              _SheetHeader(total: candidates.length, selectedCount: selectedIds.length),
+              ..._buildRows(context),
+            ],
+          ),
+        );
+      },
+    );
+  }
+
+  List<Widget> _buildRows(BuildContext context) {
+    if (candidates.isEmpty) {
+      final text = loading
+          ? '장소를 불러오는 중…'
+          : '이 지역에서 찾은 장소가 없어';
+      return [
+        Padding(
+          padding: const EdgeInsets.symmetric(vertical: 48),
+          child: Center(
+            child: Text(
+              text,
+              style: const TextStyle(color: AppColors.ink400, fontWeight: FontWeight.w600),
+            ),
+          ),
+        ),
+      ];
+    }
+
+    return [
+      for (var i = 0; i < candidates.length; i++)
+        _PlaceListRow(
+          candidate: candidates[i],
+          selected: selectedIds.contains(candidates[i].id),
+          showDivider: i != candidates.length - 1,
+          onTap: () => onRowTap(candidates[i]),
+        ),
+    ];
+  }
+}
+
+class _SheetHandle extends StatelessWidget {
+  const _SheetHandle();
+
+  @override
+  Widget build(BuildContext context) {
+    return Center(
+      child: Container(
+        margin: const EdgeInsets.only(top: 10, bottom: 6),
+        width: 40,
+        height: 4,
+        decoration: BoxDecoration(
+          color: AppColors.border,
+          borderRadius: BorderRadius.circular(999),
+        ),
+      ),
+    );
+  }
+}
+
+class _SheetHeader extends StatelessWidget {
+  const _SheetHeader({required this.total, required this.selectedCount});
+
+  final int total;
+  final int selectedCount;
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(20, 6, 20, 12),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+        children: [
+          Text(
+            '관광지 $total곳',
+            style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w800, color: AppColors.ink900),
+          ),
+          if (selectedCount > 0)
+            Text(
+              '$selectedCount곳 선택',
+              style: const TextStyle(
+                fontSize: 13,
+                fontWeight: FontWeight.w700,
+                color: AppColors.green800,
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+}
+
+class _PlaceListRow extends StatelessWidget {
+  const _PlaceListRow({
+    required this.candidate,
+    required this.selected,
+    required this.showDivider,
+    required this.onTap,
+  });
+
+  final PlaceCandidate candidate;
+  final bool selected;
+  final bool showDivider;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return InkWell(
+      onTap: onTap,
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
+        decoration: BoxDecoration(
+          border: showDivider
+              ? const Border(bottom: BorderSide(color: AppColors.border, width: 1))
+              : null,
+        ),
+        child: Row(
+          children: [
+            _PlaceThumbnail(candidate: candidate, size: 48),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Text(
+                    candidate.name,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(
+                      fontSize: 14.5,
+                      fontWeight: FontWeight.w700,
+                      color: AppColors.ink900,
+                    ),
+                  ),
+                  if (_subtitle(candidate) != null) ...[
+                    const SizedBox(height: 3),
+                    Text(
+                      _subtitle(candidate)!,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(
+                        fontSize: 12.5,
+                        fontWeight: FontWeight.w600,
+                        color: AppColors.ink400,
+                      ),
+                    ),
+                  ],
+                ],
+              ),
+            ),
+            const SizedBox(width: 10),
+            _SelectionCircle(selected: selected),
+          ],
+        ),
+      ),
+    );
+  }
+
+  String? _subtitle(PlaceCandidate candidate) {
+    final parts = <String>[];
+    if (candidate.rating != null) {
+      parts.add('★${candidate.rating!.toStringAsFixed(1)} (${candidate.reviewCount ?? 0})');
+    }
+    if (candidate.address != null) parts.add(candidate.address!);
+    return parts.isEmpty ? null : parts.join(' · ');
   }
 }
 
@@ -253,8 +462,15 @@ class _CategoryChipRow extends StatelessWidget {
             child: Container(
               padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
               decoration: BoxDecoration(
-                color: isSelected ? AppColors.ink900 : AppColors.surfaceSubtle,
+                color: isSelected ? AppColors.ink900 : Colors.white,
                 borderRadius: BorderRadius.circular(999),
+                border: Border.all(
+                  color: isSelected ? AppColors.ink900 : AppColors.border,
+                  width: 1,
+                ),
+                boxShadow: [
+                  BoxShadow(color: Colors.black.withValues(alpha: 0.06), blurRadius: 8),
+                ],
               ),
               alignment: Alignment.center,
               child: Text(
@@ -270,91 +486,6 @@ class _CategoryChipRow extends StatelessWidget {
         },
       ),
     );
-  }
-}
-
-/// 마커를 눌렀을 때 뜨는 장소 정보 카드. 우측 체크서클로 선택/해제한다.
-class _PlaceInfoCard extends StatelessWidget {
-  const _PlaceInfoCard({
-    required this.candidate,
-    required this.selected,
-    required this.onToggle,
-  });
-
-  final PlaceCandidate candidate;
-  final bool selected;
-  final VoidCallback onToggle;
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      margin: const EdgeInsets.fromLTRB(16, 0, 16, 16),
-      padding: const EdgeInsets.all(14),
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(20),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withValues(alpha: 0.12),
-            blurRadius: 24,
-            offset: const Offset(0, 8),
-          ),
-        ],
-      ),
-      child: Row(
-        children: [
-          _PlaceThumbnail(candidate: candidate, size: 56),
-          const SizedBox(width: 12),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Text(
-                  candidate.name,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: const TextStyle(
-                    fontSize: 15,
-                    fontWeight: FontWeight.w800,
-                    color: AppColors.ink900,
-                  ),
-                ),
-                if (_subtitle(candidate) != null) ...[
-                  const SizedBox(height: 4),
-                  Text(
-                    _subtitle(candidate)!,
-                    maxLines: 2,
-                    overflow: TextOverflow.ellipsis,
-                    style: const TextStyle(
-                      fontSize: 12.5,
-                      fontWeight: FontWeight.w600,
-                      color: AppColors.ink400,
-                      height: 1.3,
-                    ),
-                  ),
-                ],
-              ],
-            ),
-          ),
-          const SizedBox(width: 10),
-          GestureDetector(
-            onTap: onToggle,
-            behavior: HitTestBehavior.opaque,
-            child: _SelectionCircle(selected: selected),
-          ),
-        ],
-      ),
-    );
-  }
-
-  String? _subtitle(PlaceCandidate candidate) {
-    final parts = <String>[];
-    if (candidate.rating != null) {
-      parts.add('★${candidate.rating!.toStringAsFixed(1)} (${candidate.reviewCount ?? 0})');
-    }
-    if (candidate.address != null) parts.add(candidate.address!);
-    return parts.isEmpty ? null : parts.join(' · ');
   }
 }
 
@@ -398,39 +529,14 @@ class _SelectionCircle extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Container(
-      width: 30,
-      height: 30,
+      width: 28,
+      height: 28,
       decoration: BoxDecoration(
         shape: BoxShape.circle,
         color: selected ? AppColors.ink900 : Colors.transparent,
         border: selected ? null : Border.all(color: AppColors.ink200, width: 1.8),
       ),
-      child: selected ? const Icon(Icons.check, size: 17, color: AppColors.lime) : null,
-    );
-  }
-}
-
-class _MapMessage extends StatelessWidget {
-  const _MapMessage({required this.text});
-  final String text;
-
-  @override
-  Widget build(BuildContext context) {
-    return Center(
-      child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
-        decoration: BoxDecoration(
-          color: Colors.white,
-          borderRadius: BorderRadius.circular(999),
-          boxShadow: [
-            BoxShadow(color: Colors.black.withValues(alpha: 0.1), blurRadius: 16),
-          ],
-        ),
-        child: Text(
-          text,
-          style: const TextStyle(color: AppColors.ink600, fontWeight: FontWeight.w600),
-        ),
-      ),
+      child: selected ? const Icon(Icons.check, size: 16, color: AppColors.lime) : null,
     );
   }
 }
