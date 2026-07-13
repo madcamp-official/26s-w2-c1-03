@@ -2,6 +2,11 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
+	<!-- Google Maps 키. frontend/.env의 MAPS_API_KEY와 같은 값을 여기 넣는다
+	     (iOS SDK는 .env를 직접 못 읽음). AppDelegate.swift가 이 값을 읽어
+	     GMSServices.provideAPIKey()에 넘긴다. frontend/.env.example 참고. -->
+	<key>MAPS_API_KEY</key>
+	<string></string>
 	<key>CADisableMinimumFrameDurationOnPhone</key>
 	<true/>
 	<key>CFBundleDevelopmentRegion</key>

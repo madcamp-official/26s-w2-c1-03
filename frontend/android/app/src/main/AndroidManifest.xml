@@ -47,6 +47,12 @@
                 <data android:scheme="kakao${kakaoNativeAppKey}" android:host="oauth"/>
             </intent-filter>
         </activity>
+        <!-- Google Maps SDK for Android 키(장소 후보 지도, plan.md Phase 7).
+             값은 build.gradle.kts의 manifestPlaceholders가 android/local.properties의
+             mapsApiKey로 채운다 — 비어 있으면 지도는 회색으로 뜨지만 앱은 정상 동작. -->
+        <meta-data
+            android:name="com.google.android.geo.API_KEY"
+            android:value="${mapsApiKey}" />
         <!-- Don't delete the meta-data below.
              This is used by the Flutter tool to generate GeneratedPluginRegistrant.java -->
         <meta-data

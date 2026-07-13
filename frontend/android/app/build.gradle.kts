@@ -19,6 +19,19 @@ val localProperties = Properties().apply {
     }
 }
 val kakaoNativeAppKey: String = localProperties.getProperty("kakaoNativeAppKey", "")
+// Google Maps SDK 키. 안드로이드 전용인 local.properties가 아니라, 모든 플랫폼이
+// 공유하는 frontend/.env(.gitignore 대상, .env.example 참고)의 MAPS_API_KEY에서
+// 읽는다 — iOS(Info.plist)/Web(index.html)도 같은 값을 쓴다. .env가 없거나 키가
+// 비어 있으면 예전 방식(local.properties의 mapsApiKey)으로 폴백한다. 비어 있어도
+// 지도만 회색으로 뜨고 앱 자체는 정상 동작한다.
+val dotenv = Properties().apply {
+    val dotenvFile = rootProject.file("../.env")
+    if (dotenvFile.exists()) {
+        dotenvFile.inputStream().use { load(it) }
+    }
+}
+val mapsApiKey: String = dotenv.getProperty("MAPS_API_KEY")?.takeIf { it.isNotBlank() }
+    ?: localProperties.getProperty("mapsApiKey", "")
 
 android {
     namespace = "com.tripandend.app"
@@ -41,6 +54,8 @@ android {
         versionName = flutter.versionName
         // AndroidManifest.xml의 ${kakaoNativeAppKey} 자리에 채워진다(카카오 로그인 리다이렉트 스킴).
         manifestPlaceholders["kakaoNativeAppKey"] = kakaoNativeAppKey
+        // AndroidManifest.xml의 com.google.android.geo.API_KEY(${mapsApiKey})에 채워진다.
+        manifestPlaceholders["mapsApiKey"] = mapsApiKey
     }
 
     buildTypes {
