@@ -3,6 +3,7 @@ import { Column, CreateDateColumn, Entity, Index, PrimaryColumn, UpdateDateColum
 export enum PlaceSource {
   TOURAPI = 'tourapi',
   KAKAO = 'kakao',
+  GOOGLE = 'google',
   CUSTOM = 'custom',
 }
 

@@ -2,7 +2,11 @@ import { Injectable, Logger } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { TripsService } from '../trips/trips.service';
-import { GooglePlacesClient, PlacePopularity } from './clients/google-places.client';
+import {
+  GooglePlaceResult,
+  GooglePlacesClient,
+  PlacePopularity,
+} from './clients/google-places.client';
 import {
   FetchAreaBasedListParams,
   TourApiClient,
@@ -83,24 +87,60 @@ export class PlacesService {
   }
 
   /**
-   * 키워드로 장소를 검색한다(API 명세서 §2.2 확장). 후보 목록(areaBasedList)에 없는
-   * 장소도 찾아 선택할 수 있게 한다. 트립에 areaCode가 있으면 그 지역으로 한정하고,
-   * 없으면 전국에서 검색한다 — areaBasedList와 달리 areaCode를 강제하지 않으므로,
-   * 아직 지역코드가 배정되지 않은 트립에서도 검색은 동작한다.
+   * 키워드로 장소를 검색한다(Google Places Text Search). TourAPI searchKeyword2는
+   * 한국관광공사에 등록된 콘텐츠만 포함해 정확한 지명·식당·카페가 안 잡히는 경우가
+   * 많아 Google Places로 대체했다. 결과는 places 테이블에 source=google로 캐싱해
+   * 선택 시 place_id로 참조할 수 있게 하고, 평점/리뷰수는 검색 응답 값으로 인기순
+   * 정렬한다(검색 1회 = Google 요청 1회, 별도 matchPlace 호출 없음).
    */
   async searchCandidates(
     tripId: string,
     userId: string,
     keyword: string,
   ): Promise<{ candidates: PlaceCandidateDto[] }> {
-    // getDetail이 멤버십 검증까지 함께 해준다(TRIP_NOT_FOUND/TRIP_FORBIDDEN 전파).
-    const trip = await this.tripsService.getDetail(tripId, userId);
-    const rawItems = await this.tourApiClient.searchByKeyword({
-      keyword,
-      areaCode: trip.areaCode ?? undefined,
-      sigunguCode: trip.sigunguCode ?? undefined,
+    // 멤버십 검증(TRIP_NOT_FOUND/TRIP_FORBIDDEN 전파). 검색은 areaCode가 필요 없다.
+    await this.tripsService.getDetail(tripId, userId);
+
+    const results = await this.googlePlacesClient.searchText(keyword);
+    const places = await Promise.all(results.map((result) => this.upsertGooglePlace(result)));
+
+    const withPopularity = results.map((result, index) => ({
+      place: places[index],
+      popularity:
+        result.rating !== null && result.reviewCount !== null
+          ? { rating: result.rating, reviewCount: result.reviewCount }
+          : null,
+    }));
+    withPopularity.sort(
+      (a, b) => this.popularityScore(b.popularity) - this.popularityScore(a.popularity),
+    );
+
+    return {
+      candidates: withPopularity.map(({ place, popularity }) =>
+        this.toCandidateDto(place, popularity),
+      ),
+    };
+  }
+
+  /** Google Places 검색 결과를 places 캐시에 upsert한다(source=google, externalId=Google place id). */
+  private async upsertGooglePlace(result: GooglePlaceResult): Promise<Place> {
+    const existing = await this.placeRepository.findOneBy({
+      source: PlaceSource.GOOGLE,
+      externalId: result.externalId,
     });
-    return { candidates: await this.buildCandidates(rawItems) };
+    const place = existing ?? this.placeRepository.create({ source: PlaceSource.GOOGLE });
+
+    place.externalId = result.externalId;
+    place.name = result.name;
+    place.address = result.address;
+    place.latitude = result.latitude !== null ? String(result.latitude) : null;
+    place.longitude = result.longitude !== null ? String(result.longitude) : null;
+    // Google 검색 결과는 TourAPI 카테고리 체계(contentTypeId/cat)가 없다.
+    place.contentTypeId = null;
+    place.categoryCode = null;
+    place.syncedAt = new Date();
+
+    return this.placeRepository.save(place);
   }
 
   /** rawItems(TourAPI) → places 캐시 upsert → Google Places 인기도 매칭 → 인기순 정렬 → DTO. */
