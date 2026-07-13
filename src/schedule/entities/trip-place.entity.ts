@@ -43,6 +43,10 @@ export class TripPlace {
   @Column({ type: 'int' })
   orderInDay: number;
 
+  /** AI가 배정한 권장 방문 시각('HH:MM'). 수동 추가 항목 등 시간이 없으면 null. */
+  @Column({ type: 'varchar', length: 5, nullable: true })
+  startTime: string | null;
+
   @Column({ type: 'varchar', length: 200, nullable: true })
   customName: string | null;
 

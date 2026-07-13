@@ -407,10 +407,16 @@ erDiagram
 - **목표**: 선택한 장소로 AI가 일자별 최적 동선을 생성 (이 프로젝트에서 가장 까다로운 AI 연동)
 - **[구현 메모, 2026-07-13]** OpenAI 연동 전송 계층은 `openai` Node SDK 대신 **`fetch` 직접 호출**로 구현했다(§9.1은 SDK를 언급하나, 기존 외부 클라이언트 TourApiClient/GooglePlacesClient/TatsCnctrRateClient가 모두 `fetch`+`ConfigService` 패턴으로 통일돼 있어 일관성·의존성 최소화를 위해 동일 패턴을 따름). §9.1의 실질 요구(인터페이스 추상화·env 주입·에러 변환)는 모두 충족한다. WebSocket 브로드캐스트는 Phase 10 Gateway가 아직 없어 **REST 응답만 우선 구현**(아래 참고).
 - **[검증 상태, 2026-07-13]** `npx tsc --noEmit`, `npx jest src/schedule`(2 suites / 12 tests), 전체 `npx jest`(13 suites / 90 tests) 모두 통과. 테스트 로그의 WARN/ERROR는 실패 케이스를 검증하기 위한 의도된 mock 로그이며 테스트 실패는 아님.
+- **[재설계, 2026-07-13 후반]** "일자별 placeId 나열" 수준이던 스케줄링 AI를 **시간표 기반 완전한 여행 플래너**로 재설계함:
+  - 보강 후보를 `PlacesService.getScheduleCandidatePools`로 교체 — TourAPI 관광지(12)/음식점(39)을 각각 조회하고 cat3 `A05020900`으로 카페를 분리한 뒤, **선택 장소 중심좌표에서 가까운 순(haversine)**으로 정렬해 공급(기존 `recommendAdditionalForSchedule`는 거리·카테고리 무관 상위 N개 컷이라 제거)
+  - AI 입력에 `category(attraction/restaurant/cafe)` 부여, 시스템 프롬프트에 하루 구성 규칙(오전 관광 → 점심 12:00~13:00 식당 → 오후 관광 → 여유 시 카페 → 저녁 18:00~19:30 식당)과 동선 최적화 규칙(가까운 장소끼리 같은 날, 하루 안 이동거리 최소 순서, 이동·체류시간 감안한 시간 간격)을 명시
+  - 출력 스키마를 `{ days: [{ dayNumber, places: [{ placeId, startTime("HH:MM") }] }] }`로 확장 — 깨진 startTime은 파싱 단계에서 null 처리, 하루 안은 startTime 순 정렬
+  - **식사 슬롯 보정**: AI가 점심/저녁 식당을 빠뜨린 날은 ScheduleService가 남은 후보 식당(가까운 순)을 12:00/18:00 위치에 결정적으로 삽입
+  - `trip_places.start_time varchar(5)` 컬럼 추가(마이그레이션 `1784400000000-AddTripPlaceStartTime` — **배포 시 마이그레이션 실행 필요**), 응답 DTO·프론트 모델/결과 화면/여행 상세 타임라인에 시간 표시 반영. 재검증: `npx tsc --noEmit` + 전체 `npx jest` 통과, `flutter analyze` 신규 이슈 0건
 - **BE 체크리스트**:
   - [x] `config/openai.config.ts` — `loadOpenAiConfig(ConfigService)`로 `OPENAI_API_KEY`/`OPENAI_BASE_URL`/`OPENAI_SCHEDULE_MODEL` 주입, 하드코딩 금지(§9.1). `env.validation.ts`에 Joi 스키마(BASE_URL/MODEL은 기본값) 추가
-  - [x] `schedule/client/open-ai-schedule.client.ts` — 선택 장소 리스트 + 여행 일수를 프롬프트에 포함해 일자별 동선 요청(§9.2). `ScheduleAiClient` 인터페이스 + `SCHEDULE_AI_CLIENT` 토큰으로 추상화(모델/제공자 교체·테스트 Mock 대비). JSON 응답 파싱 + 입력에 없는(지어낸) placeId 필터링. 2026-07-13 추가: `required=true/false`와 `targetPlaceCount`를 프롬프트에 포함해, 사용자가 고른 장소는 필수 포함하고 지역 추천 후보는 AI가 보강 선택
-  - [x] `POST /trips/{tripId}/schedule/generate` — **동기 처리**(API 명세서 §2.3). `assertMember`(owner/editor)로 권한 검증, `selectedPlaceIds`는 `PlacesService.resolveForSchedule`로 전부 조회되는지 검증(누락 시 `SELECTED_PLACES_INVALID`). *"같은 트립 소속" 검증은 places가 트립이 아니라 지역 단위 전역 캐시라 존재 검증으로 대체*. 2026-07-13 추가: 목표 장소 수는 `여행일수×4`, 최대 16곳이며, 선택 장소 수가 더 많으면 선택 장소 수를 우선
+  - [x] `schedule/client/open-ai-schedule.client.ts` — 선택 장소 리스트 + 여행 일수를 프롬프트에 포함해 일자별 동선 요청(§9.2). `ScheduleAiClient` 인터페이스 + `SCHEDULE_AI_CLIENT` 토큰으로 추상화(모델/제공자 교체·테스트 Mock 대비). JSON 응답 파싱 + 입력에 없는(지어낸) placeId 필터링. `required=true/false`로 사용자가 고른 장소는 필수 포함, 지역 추천 후보는 AI가 보강 선택(현재 스키마·프롬프트는 위 [재설계] 항목 기준)
+  - [x] `POST /trips/{tripId}/schedule/generate` — **동기 처리**(API 명세서 §2.3). `assertMember`(owner/editor)로 권한 검증, `selectedPlaceIds`는 `PlacesService.resolveForSchedule`로 전부 조회되는지 검증(누락 시 `SELECTED_PLACES_INVALID`). *"같은 트립 소속" 검증은 places가 트립이 아니라 지역 단위 전역 캐시라 존재 검증으로 대체*. 후보 풀 크기: 관광지 `일수×3−선택 관광지+2`(최대 15), 식당 `일수×2끼×2배`(최대 16), 카페 `일수+2`(최대 8)
   - [x] 응답 파싱 후 `trip_places` bulk insert — `day_number`/`order_in_day` 배정, `added_by`=요청자. 재생성 대비 트랜잭션으로 기존 `trip_places` 삭제 후 삽입(멱등). AI가 누락한 필수 선택 장소는 마지막 날에 보정 삽입하고, 지역 추천 후보도 목표 장소 수에 맞춰 보강
   - [ ] 완료 시 WebSocket `schedule:generated` 이벤트 브로드캐스트 → **Phase 10으로 이월**(Gateway 미존재, REST 응답만 우선 구현 — 계획서에 명시된 폴백대로)
   - [x] OpenAI 호출 실패(네트워크 오류/타임아웃/빈 응답/파싱 실패) → `OPENAI_REQUEST_FAILED`(502) 에러코드로 변환(§9.4)

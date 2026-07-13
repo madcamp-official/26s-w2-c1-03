@@ -52,7 +52,7 @@ class ScheduleResultScreen extends StatelessWidget {
                     ),
                     const SizedBox(height: 8),
                     Text(
-                      '선택한 장소는 반드시 포함하고, 어울리는 추천 장소를 더해 총 $_placeCount곳을 일자별로 배치했어요.',
+                      '선택한 장소는 반드시 포함하고, 주변 관광지와 식사 시간에 맞춘 식당·카페까지 더해 총 $_placeCount곳을 시간순으로 배치했어요.',
                       style: const TextStyle(
                         fontSize: 14,
                         height: 1.5,
@@ -193,13 +193,31 @@ class _PlaceRow extends StatelessWidget {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Text(
-                place.name.isEmpty ? '이름 없는 장소' : place.name,
-                style: const TextStyle(
-                  fontSize: 15,
-                  fontWeight: FontWeight.w800,
-                  color: AppColors.ink900,
-                ),
+              Row(
+                crossAxisAlignment: CrossAxisAlignment.center,
+                children: [
+                  if (place.startTime != null) ...[
+                    Text(
+                      place.startTime!,
+                      style: const TextStyle(
+                        fontSize: 12,
+                        fontWeight: FontWeight.w800,
+                        color: AppColors.green800,
+                      ),
+                    ),
+                    const SizedBox(width: 7),
+                  ],
+                  Expanded(
+                    child: Text(
+                      place.name.isEmpty ? '이름 없는 장소' : place.name,
+                      style: const TextStyle(
+                        fontSize: 15,
+                        fontWeight: FontWeight.w800,
+                        color: AppColors.ink900,
+                      ),
+                    ),
+                  ),
+                ],
               ),
               if (place.address != null && place.address!.isNotEmpty) ...[
                 const SizedBox(height: 4),

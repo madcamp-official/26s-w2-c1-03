@@ -43,6 +43,9 @@ export interface PlaceCandidateDto {
   concentrationRate: number | null;
 }
 
+/** 스케줄 관점의 장소 분류 — 식사 시간 배치(restaurant/cafe)와 관광 배치(attraction)를 가른다. */
+export type SchedulePlaceCategory = 'attraction' | 'restaurant' | 'cafe';
+
 /**
  * 스케줄 생성(Phase 8)이 필요로 하는 최소 장소 정보. Schedule 도메인은 places
  * 테이블에 직접 접근하지 않고 이 메서드로만 장소를 조회한다(plan.md §3.1 의존 방향).
@@ -54,7 +57,21 @@ export interface ScheduledPlaceInfo {
   lat: number | null;
   lng: number | null;
   categoryCode: string | null;
+  category: SchedulePlaceCategory;
   imageUrl: string | null;
+}
+
+/** 스케줄 생성용 카테고리별 보강 후보 풀 — 선택 장소 중심좌표에서 가까운 순으로 정렬돼 있다. */
+export interface ScheduleCandidatePools {
+  attractions: ScheduledPlaceInfo[];
+  restaurants: ScheduledPlaceInfo[];
+  cafes: ScheduledPlaceInfo[];
+}
+
+export interface ScheduleCandidatePoolLimits {
+  attractions: number;
+  restaurants: number;
+  cafes: number;
 }
 
 const CATEGORY_TO_CONTENT_TYPE_ID: Record<PlaceCategory, string> = {
@@ -62,6 +79,12 @@ const CATEGORY_TO_CONTENT_TYPE_ID: Record<PlaceCategory, string> = {
   restaurant: '39',
   shopping: '38',
 };
+
+/** TourAPI contentTypeId — 스케줄 후보 풀 조회용. */
+const CONTENT_TYPE_TOURIST_SPOT = '12';
+const CONTENT_TYPE_RESTAURANT = '39';
+/** TourAPI 음식점(39) 소분류 중 카페/전통찻집 cat3 코드. */
+const CAT3_CAFE = 'A05020900';
 
 /** 매칭 안 된 장소(rating=null)는 항상 매칭된 장소보다 뒤로 보낸다(API 명세서 §2.2). */
 const UNMATCHED_SCORE = -1;
@@ -315,32 +338,108 @@ export class PlacesService {
   }
 
   /**
-   * 스케줄 생성에서 사용자가 고른 필수 장소 외에 함께 고려할 지역 추천 후보를 가져온다.
-   * 후보 조회 실패가 전체 스케줄 생성을 막지는 않도록 빈 배열로 폴백한다. 사용자가 고른
-   * 장소는 ScheduleService에서 별도로 검증하므로 여기서는 보강 후보만 조용히 줄인다.
+   * 스케줄 생성에서 사용자가 고른 필수 장소 외에 함께 고려할 카테고리별 보강 후보 풀을
+   * 가져온다. 관광지(12)와 음식점(39)을 TourAPI에서 각각 조회하고, 음식점은 cat3로
+   * 식당/카페를 분리한 뒤, 각 풀을 선택 장소 중심좌표(anchors)에서 가까운 순으로 정렬해
+   * 반환한다 — 동선(거리·이동시간)을 실제로 반영하려면 애초에 가까운 후보를 AI에 줘야 한다.
+   * 후보 조회 실패가 전체 스케줄 생성을 막지는 않도록 빈 풀로 폴백한다.
    */
-  async recommendAdditionalForSchedule(
+  async getScheduleCandidatePools(
     tripId: string,
     userId: string,
+    anchors: Array<{ lat: number; lng: number }>,
     excludeIds: string[],
-    limit: number,
-  ): Promise<ScheduledPlaceInfo[]> {
-    if (limit <= 0) {
-      return [];
-    }
-
+    limits: ScheduleCandidatePoolLimits,
+  ): Promise<ScheduleCandidatePools> {
+    const empty: ScheduleCandidatePools = { attractions: [], restaurants: [], cafes: [] };
     try {
+      const trip = await this.tripsService.getDetail(tripId, userId);
+      if (!trip.areaCode) {
+        return empty;
+      }
+
+      const baseParams = {
+        areaCode: trip.areaCode,
+        sigunguCode: trip.sigunguCode ?? undefined,
+      };
+      const [touristItems, foodItems] = await Promise.all([
+        this.tourApiClient.fetchAreaBasedList({
+          ...baseParams,
+          contentTypeId: CONTENT_TYPE_TOURIST_SPOT,
+          numOfRows: 40,
+        }),
+        // 카페가 소분류라 식당 풀과 함께 오도록 넉넉히 받는다.
+        this.tourApiClient.fetchAreaBasedList({
+          ...baseParams,
+          contentTypeId: CONTENT_TYPE_RESTAURANT,
+          numOfRows: 60,
+        }),
+      ]);
+
       const excluded = new Set(excludeIds);
-      const { candidates } = await this.getCandidates(tripId, userId, {});
-      const candidateIds = candidates
-        .map((candidate) => candidate.id)
-        .filter((id) => !excluded.has(id))
-        .slice(0, limit);
-      return this.resolveForSchedule(candidateIds);
+      const toSortedInfos = async (items: TourApiPlaceItem[]): Promise<ScheduledPlaceInfo[]> => {
+        const places = await this.upsertPlaces(items);
+        const infos: ScheduledPlaceInfo[] = [];
+        for (const place of places) {
+          if (excluded.has(place.id)) {
+            continue;
+          }
+          const info = await this.toScheduledInfo(place);
+          if (info) {
+            infos.push(info);
+          }
+        }
+        return this.sortByDistanceToAnchors(infos, anchors);
+      };
+
+      const [attractions, foods] = await Promise.all([
+        toSortedInfos(touristItems),
+        toSortedInfos(foodItems),
+      ]);
+      return {
+        attractions: attractions.slice(0, limits.attractions),
+        restaurants: foods
+          .filter((info) => info.category === 'restaurant')
+          .slice(0, limits.restaurants),
+        cafes: foods.filter((info) => info.category === 'cafe').slice(0, limits.cafes),
+      };
     } catch (error) {
       this.logger.warn(`스케줄 보강 후보 조회 실패: ${(error as Error).message}`);
-      return [];
+      return empty;
     }
+  }
+
+  /**
+   * anchors(선택 장소 좌표들)의 중심점 기준 가까운 순 정렬. 좌표가 없는 장소는 맨 뒤로
+   * 보내되 원래 순서를 유지하고, anchors가 비면 정렬 없이 그대로 반환한다.
+   */
+  private sortByDistanceToAnchors(
+    infos: ScheduledPlaceInfo[],
+    anchors: Array<{ lat: number; lng: number }>,
+  ): ScheduledPlaceInfo[] {
+    if (anchors.length === 0) {
+      return infos;
+    }
+    const centerLat = anchors.reduce((sum, a) => sum + a.lat, 0) / anchors.length;
+    const centerLng = anchors.reduce((sum, a) => sum + a.lng, 0) / anchors.length;
+
+    const distance = (info: ScheduledPlaceInfo): number =>
+      info.lat !== null && info.lng !== null
+        ? PlacesService.haversineKm(centerLat, centerLng, info.lat, info.lng)
+        : Number.POSITIVE_INFINITY;
+
+    // Array.prototype.sort는 안정 정렬 — 좌표 없는 장소들(Infinity)끼리는 원래 순서 유지.
+    return [...infos].sort((a, b) => distance(a) - distance(b));
+  }
+
+  private static haversineKm(lat1: number, lng1: number, lat2: number, lng2: number): number {
+    const toRad = (deg: number): number => (deg * Math.PI) / 180;
+    const dLat = toRad(lat2 - lat1);
+    const dLng = toRad(lng2 - lng1);
+    const a =
+      Math.sin(dLat / 2) ** 2 +
+      Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLng / 2) ** 2;
+    return 6371 * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
   }
 
   private async toScheduledInfo(place: Place): Promise<ScheduledPlaceInfo | null> {
@@ -358,6 +457,8 @@ export class PlacesService {
         lat: details.latitude,
         lng: details.longitude,
         categoryCode: null,
+        // Google 장소는 분류 정보를 저장하지 않아 관광 항목으로 취급한다.
+        category: 'attraction',
         imageUrl: null,
       };
     }
@@ -369,8 +470,20 @@ export class PlacesService {
       lat: place.latitude ? Number(place.latitude) : null,
       lng: place.longitude ? Number(place.longitude) : null,
       categoryCode: place.categoryCode,
+      category: PlacesService.toScheduleCategory(place.contentTypeId, place.categoryCode),
       imageUrl: place.imageUrl,
     };
+  }
+
+  /** TourAPI 분류 → 스케줄 카테고리. 음식점(39)은 cat3로 카페를 분리하고 나머지는 관광 항목. */
+  private static toScheduleCategory(
+    contentTypeId: string | null,
+    categoryCode: string | null,
+  ): SchedulePlaceCategory {
+    if (contentTypeId !== CONTENT_TYPE_RESTAURANT) {
+      return 'attraction';
+    }
+    return categoryCode === CAT3_CAFE ? 'cafe' : 'restaurant';
   }
 
   async getPlaceDetail(placeId: string): Promise<PlaceCandidateDto> {

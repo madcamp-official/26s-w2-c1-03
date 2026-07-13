@@ -19,6 +19,7 @@ export interface ScheduledTripPlaceDto {
   placeId: string | null;
   dayNumber: number;
   orderInDay: number;
+  startTime: string | null;
   name: string;
   address: string | null;
   lat: number | null;
@@ -40,10 +41,28 @@ interface PlaceAssignment {
   placeId: string;
   dayNumber: number;
   orderInDay: number;
+  startTime: string | null;
 }
 
-const TARGET_PLACES_PER_DAY = 4;
-const MAX_AI_SCHEDULE_PLACES = 16;
+interface DayEntry {
+  placeId: string;
+  startTime: string | null;
+}
+
+/** 하루 관광 항목 목표(식사·카페 제외). AI 후보 풀 크기 산정에 쓴다. */
+const ATTRACTIONS_PER_DAY = 3;
+/** 관광지 보강 후보는 목표보다 약간 여유 있게 줘서 AI가 동선에 맞는 것을 고르게 한다. */
+const ATTRACTION_POOL_BUFFER = 2;
+const MAX_ATTRACTION_POOL = 15;
+/** 점심·저녁 각 1곳 × 선택지 2배. */
+const MEALS_PER_DAY = 2;
+const MAX_RESTAURANT_POOL = 16;
+const MAX_CAFE_POOL = 8;
+/** AI가 식당 배치를 빠뜨렸을 때 보정 삽입에 쓰는 기본 식사 시각. */
+const LUNCH_TIME = '12:00';
+const DINNER_TIME = '18:00';
+/** 이 시각 전에 배치된 식당은 점심으로 간주한다(이후면 저녁). */
+const LUNCH_DINNER_BOUNDARY = '15:00';
 
 @Injectable()
 export class ScheduleService {
@@ -83,14 +102,40 @@ export class ScheduleService {
     }
 
     const durationDays = this.computeDurationDays(trip.startDate, trip.endDate);
-    const targetPlaceCount = this.computeTargetPlaceCount(durationDays, selectedInfos.length);
-    const additionalInfos = await this.placesService.recommendAdditionalForSchedule(
+
+    // 선택 장소의 중심좌표에서 가까운 순으로 정렬된 카테고리별 보강 후보 풀. 관광지는
+    // 하루 목표 수만큼, 식당은 매일 점심·저녁을 채울 수 있게, 카페는 하루 1곳 수준으로 준다.
+    const selectedAttractionCount = selectedInfos.filter(
+      (info) => info.category === 'attraction',
+    ).length;
+    const selectedRestaurantCount = selectedInfos.filter(
+      (info) => info.category === 'restaurant',
+    ).length;
+    const anchors = selectedInfos
+      .filter((info) => info.lat !== null && info.lng !== null)
+      .map((info) => ({ lat: info.lat!, lng: info.lng! }));
+    const pools = await this.placesService.getScheduleCandidatePools(
       tripId,
       userId,
+      anchors,
       selectedInfos.map((info) => info.id),
-      targetPlaceCount - selectedInfos.length,
+      {
+        attractions: Math.min(
+          Math.max(
+            durationDays * ATTRACTIONS_PER_DAY - selectedAttractionCount + ATTRACTION_POOL_BUFFER,
+            0,
+          ),
+          MAX_ATTRACTION_POOL,
+        ),
+        restaurants: Math.min(
+          Math.max(durationDays * MEALS_PER_DAY * 2 - selectedRestaurantCount, 0),
+          MAX_RESTAURANT_POOL,
+        ),
+        cafes: Math.min(durationDays + 2, MAX_CAFE_POOL),
+      },
     );
-    const infos = [...selectedInfos, ...additionalInfos].slice(0, targetPlaceCount);
+
+    const infos = [...selectedInfos, ...pools.attractions, ...pools.restaurants, ...pools.cafes];
     const requiredPlaceIds = new Set(selectedInfos.map((info) => info.id));
 
     const aiResult = await this.scheduleAiClient.requestSchedule({
@@ -100,15 +145,20 @@ export class ScheduleService {
         address: info.address,
         lat: info.lat,
         lng: info.lng,
-        categoryCode: info.categoryCode,
+        category: info.category,
         isRequired: requiredPlaceIds.has(info.id),
       })),
       durationDays,
-      targetPlaceCount: infos.length,
     });
 
-    const assignments = this.buildAssignments(aiResult, infos, durationDays, requiredPlaceIds);
     const infoById = new Map(infos.map((info) => [info.id, info]));
+    const assignments = this.buildAssignments(
+      aiResult,
+      infos,
+      durationDays,
+      requiredPlaceIds,
+      infoById,
+    );
 
     const saved = await this.dataSource.transaction(async (manager) => {
       await manager.delete(TripPlace, { tripId });
@@ -118,6 +168,7 @@ export class ScheduleService {
           placeId: assignment.placeId,
           dayNumber: assignment.dayNumber,
           orderInDay: assignment.orderInDay,
+          startTime: assignment.startTime,
           addedBy: userId,
         }),
       );
@@ -153,60 +204,141 @@ export class ScheduleService {
     return Math.max(diffDays + 1, 1);
   }
 
-  private computeTargetPlaceCount(durationDays: number, selectedCount: number): number {
-    const recommended = Math.min(durationDays * TARGET_PLACES_PER_DAY, MAX_AI_SCHEDULE_PLACES);
-    return Math.max(selectedCount, recommended);
-  }
-
   /**
-   * AI 결과(placeIds만)를 trip_places 배치로 변환한다. dayNumber를 [1, durationDays]로
-   * 클램프하고, 중복 배치는 첫 등장만 남긴다. AI가 누락한 장소는 마지막 날에 이어 붙여
-   * 선택한 장소가 모두 스케줄에 포함되도록 보정한다(§2.3: 선택 장소 전부 bulk insert).
+   * AI 결과를 trip_places 배치로 변환한다. dayNumber를 [1, durationDays]로 클램프하고,
+   * 중복 배치는 첫 등장만 남기고, 각 날짜를 startTime 순으로 정렬한다. AI가 누락한
+   * 필수 선택 장소는 마지막 날에 이어 붙이고(§2.3: 선택 장소 전부 bulk insert), AI가
+   * 점심·저녁 식당을 빠뜨린 날은 후보 풀의 남는 식당으로 보정 삽입한다.
    */
   private buildAssignments(
     aiResult: ScheduleAiResult,
     infos: ScheduledPlaceInfo[],
     durationDays: number,
     requiredPlaceIds: Set<string>,
+    infoById: Map<string, ScheduledPlaceInfo>,
   ): PlaceAssignment[] {
-    const dayToPlaceIds = new Map<number, string[]>();
+    const dayToEntries = new Map<number, DayEntry[]>();
     const placed = new Set<string>();
 
     const sortedDays = [...aiResult.days].sort((a, b) => a.dayNumber - b.dayNumber);
     for (const day of sortedDays) {
       const dayNumber = Math.min(Math.max(Math.trunc(day.dayNumber), 1), durationDays);
-      const list = dayToPlaceIds.get(dayNumber) ?? [];
-      for (const placeId of day.placeIds) {
-        if (placed.has(placeId)) {
+      const list = dayToEntries.get(dayNumber) ?? [];
+      for (const entry of day.entries) {
+        if (placed.has(entry.placeId)) {
           continue;
         }
-        placed.add(placeId);
-        list.push(placeId);
+        placed.add(entry.placeId);
+        list.push({ placeId: entry.placeId, startTime: entry.startTime });
       }
-      dayToPlaceIds.set(dayNumber, list);
+      dayToEntries.set(dayNumber, list);
     }
+
+    // 각 날짜를 시간순으로 정리한다(시간이 없는 항목은 AI가 준 순서를 유지하며 뒤로).
+    for (const [dayNumber, entries] of dayToEntries) {
+      dayToEntries.set(dayNumber, this.sortByStartTime(entries));
+    }
+
+    this.fillMissingMeals(dayToEntries, infos, placed, infoById);
 
     const requiredLeftovers = infos
       .filter((info) => requiredPlaceIds.has(info.id) && !placed.has(info.id))
-      .map((info) => info.id);
-    const optionalFallbacks = infos
-      .filter((info) => !requiredPlaceIds.has(info.id) && !placed.has(info.id))
-      .map((info) => info.id)
-      .slice(0, Math.max(infos.length - placed.size - requiredLeftovers.length, 0));
-    const leftovers = [...requiredLeftovers, ...optionalFallbacks];
-    if (leftovers.length > 0) {
-      const lastDay = dayToPlaceIds.get(durationDays) ?? [];
-      lastDay.push(...leftovers);
-      dayToPlaceIds.set(durationDays, lastDay);
+      .map((info): DayEntry => ({ placeId: info.id, startTime: null }));
+    if (requiredLeftovers.length > 0) {
+      const lastDay = dayToEntries.get(durationDays) ?? [];
+      lastDay.push(...requiredLeftovers);
+      dayToEntries.set(durationDays, lastDay);
     }
 
     const assignments: PlaceAssignment[] = [];
-    for (const dayNumber of [...dayToPlaceIds.keys()].sort((a, b) => a - b)) {
-      dayToPlaceIds.get(dayNumber)!.forEach((placeId, index) => {
-        assignments.push({ placeId, dayNumber, orderInDay: index + 1 });
+    for (const dayNumber of [...dayToEntries.keys()].sort((a, b) => a - b)) {
+      dayToEntries.get(dayNumber)!.forEach((entry, index) => {
+        assignments.push({
+          placeId: entry.placeId,
+          dayNumber,
+          orderInDay: index + 1,
+          startTime: entry.startTime,
+        });
       });
     }
     return assignments;
+  }
+
+  /** 'HH:MM' 문자열 비교 정렬 — null은 뒤로 보내되 안정 정렬로 원래 순서를 유지한다. */
+  private sortByStartTime(entries: DayEntry[]): DayEntry[] {
+    return [...entries].sort((a, b) => {
+      if (a.startTime === null && b.startTime === null) return 0;
+      if (a.startTime === null) return 1;
+      if (b.startTime === null) return -1;
+      return a.startTime < b.startTime ? -1 : a.startTime > b.startTime ? 1 : 0;
+    });
+  }
+
+  /**
+   * 매일 점심·저녁 식당이 배치됐는지 검사하고, 빠진 끼니는 후보 풀에 남아 있는 식당을
+   * 시간순 위치에 보정 삽입한다. 그날 이미 있는 식당은 시간(15:00 기준) 또는 순서로
+   * 점심/저녁 중 어느 끼니를 채우는지 판정한다. 항목이 하나도 없는 날은 건드리지 않는다
+   * (그런 날에 식사만 넣으면 오히려 이상한 하루가 된다).
+   */
+  private fillMissingMeals(
+    dayToEntries: Map<number, DayEntry[]>,
+    infos: ScheduledPlaceInfo[],
+    placed: Set<string>,
+    infoById: Map<string, ScheduledPlaceInfo>,
+  ): void {
+    // 풀 순서(선택 장소 중심에서 가까운 순)를 그대로 써서 가까운 식당부터 채운다.
+    const unusedRestaurants = infos.filter(
+      (info) => info.category === 'restaurant' && !placed.has(info.id),
+    );
+
+    const takeRestaurant = (): string | null => {
+      const next = unusedRestaurants.shift();
+      return next ? next.id : null;
+    };
+
+    for (const [dayNumber, entries] of dayToEntries) {
+      if (entries.length === 0) {
+        continue;
+      }
+      const restaurants = entries.filter(
+        (entry) => infoById.get(entry.placeId)?.category === 'restaurant',
+      );
+
+      let hasLunch = false;
+      let hasDinner = false;
+      for (const [index, restaurant] of restaurants.entries()) {
+        const coversLunch =
+          restaurant.startTime !== null
+            ? restaurant.startTime < LUNCH_DINNER_BOUNDARY
+            : index === 0; // 시간이 없으면 첫 식당은 점심, 그 다음은 저녁으로 간주
+        if (coversLunch) {
+          hasLunch = true;
+        } else {
+          hasDinner = true;
+        }
+      }
+
+      const inserts: DayEntry[] = [];
+      if (!hasLunch) {
+        const placeId = takeRestaurant();
+        if (placeId) {
+          inserts.push({ placeId, startTime: LUNCH_TIME });
+        }
+      }
+      if (!hasDinner) {
+        const placeId = takeRestaurant();
+        if (placeId) {
+          inserts.push({ placeId, startTime: DINNER_TIME });
+        }
+      }
+      if (inserts.length === 0) {
+        continue;
+      }
+      for (const insert of inserts) {
+        placed.add(insert.placeId);
+      }
+      dayToEntries.set(dayNumber, this.sortByStartTime([...entries, ...inserts]));
+    }
   }
 
   private buildView(
@@ -225,6 +357,7 @@ export class ScheduleService {
         placeId: row.placeId,
         dayNumber: row.dayNumber,
         orderInDay: row.orderInDay,
+        startTime: row.startTime ?? null,
         name: info?.name ?? row.customName ?? '',
         address: info?.address ?? row.customAddress ?? null,
         lat: info?.lat ?? null,

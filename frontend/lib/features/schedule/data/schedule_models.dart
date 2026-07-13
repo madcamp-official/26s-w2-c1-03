@@ -38,6 +38,7 @@ class ScheduledTripPlace {
     required this.placeId,
     required this.dayNumber,
     required this.orderInDay,
+    required this.startTime,
     required this.name,
     required this.address,
     required this.lat,
@@ -50,6 +51,9 @@ class ScheduledTripPlace {
   final String? placeId;
   final int dayNumber;
   final int orderInDay;
+
+  /// AI가 배정한 권장 방문 시각('HH:MM'). 없으면 null.
+  final String? startTime;
   final String name;
   final String? address;
   final double? lat;
@@ -63,6 +67,7 @@ class ScheduledTripPlace {
         placeId: json['placeId'] as String?,
         dayNumber: json['dayNumber'] as int,
         orderInDay: json['orderInDay'] as int,
+        startTime: json['startTime'] as String?,
         name: json['name'] as String,
         address: json['address'] as String?,
         lat: (json['lat'] as num?)?.toDouble(),

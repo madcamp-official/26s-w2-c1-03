@@ -5,27 +5,32 @@ import { isNetworkError } from '../../common/utils/network-error.util';
 import { loadOpenAiConfig, OpenAiConfig } from '../../config/openai.config';
 import { ScheduleErrorCode } from '../exceptions/schedule-error-code';
 
-/** AI에 넘기는 장소 요약 — 좌표/카테고리는 동선 최적화 힌트로만 쓰인다. */
+/** AI에 넘기는 장소 요약 — 좌표는 동선(거리·이동시간) 최적화, category는 식사 시간 배치에 쓰인다. */
 export interface ScheduleAiPlaceInput {
   id: string;
   name: string;
   address: string | null;
   lat: number | null;
   lng: number | null;
-  categoryCode: string | null;
+  category: 'attraction' | 'restaurant' | 'cafe';
   isRequired: boolean;
 }
 
 export interface ScheduleAiRequest {
   places: ScheduleAiPlaceInput[];
   durationDays: number;
-  targetPlaceCount: number;
 }
 
-/** AI가 돌려준 일자별 배치 결과(placeIds만) — 실제 trip_places 매핑은 Service가 한다. */
+/** AI가 배치한 방문 항목 — startTime('HH:MM')이 형식에 안 맞으면 파싱 단계에서 null 처리. */
+export interface ScheduleAiEntry {
+  placeId: string;
+  startTime: string | null;
+}
+
+/** AI가 돌려준 일자별 배치 결과 — 실제 trip_places 매핑은 Service가 한다. */
 export interface ScheduleAiDay {
   dayNumber: number;
-  placeIds: string[];
+  entries: ScheduleAiEntry[];
 }
 
 export interface ScheduleAiResult {
@@ -111,12 +116,20 @@ export class OpenAiScheduleClient implements ScheduleAiClient {
 
   private buildSystemPrompt(): string {
     return [
-      '당신은 국내 여행 일정을 설계하는 전문 플래너다.',
-      '입력 장소에는 required=true인 필수 장소와 required=false인 선택 후보가 섞여 있다.',
-      '필수 장소는 반드시 모두 포함하고, 선택 후보 중에서는 여행 일수와 동선을 고려해 좋은 장소를 추가로 골라 완성도 있는 일정을 만든다.',
+      '당신은 국내 여행 일정을 설계하는 전문 플래너다. 입력 장소로 시간표가 있는 완성된 일자별 일정을 만든다.',
+      '입력 장소는 category(attraction=관광지, restaurant=식당, cafe=카페)와 required 플래그, 좌표(lat, lng)를 가진다.',
+      '',
+      '하루 일정 구성 규칙:',
+      '1) required=true인 장소는 반드시 전부, 정확히 한 번씩 배치한다.',
+      '2) 각 날짜는 시간순으로 채운다: 오전(09:30~11:30) 관광 1~2곳 → 점심(12:00~13:00) restaurant 1곳 → 오후(13:30~17:30) 관광 1~2곳 → 동선에 여유가 있으면 오후 중간에 cafe 1곳 → 저녁(18:00~19:30) restaurant 1곳.',
+      '3) 매일 점심과 저녁에 restaurant을 각각 1곳씩 반드시 배치한다. 관광 항목(attraction)은 하루 2~4곳으로 유지한다.',
+      '4) 동선 최적화: 좌표가 서로 가까운 장소끼리 같은 날에 묶고, 하루 안에서는 총 이동 거리가 최소가 되는 방문 순서로 정렬한다. 좌표 기준 멀리 떨어진 장소를 하루 안에서 왔다갔다하지 않는다.',
+      '5) 식당과 카페는 직전·직후에 방문하는 장소에서 가까운 곳을 고른다.',
+      '6) 각 장소에 startTime("HH:MM", 24시간제)을 부여한다. 장소 간 이동시간(가까우면 10~20분, 멀면 30~60분)과 체류시간(관광지 1~2시간, 식사 1시간, 카페 40분)을 감안해 현실적인 간격을 둔다.',
+      '7) 존재하지 않는 placeId를 지어내지 않고, 같은 placeId를 두 번 쓰지 않는다.',
+      '',
       '반드시 아래 JSON 스키마로만 답한다. 설명 문장은 넣지 않는다.',
-      '{ "days": [ { "dayNumber": <1부터 durationDays까지의 정수>, "placeIds": [<place id 문자열> ...] } ] }',
-      '규칙: required=true인 placeId는 정확히 한 번씩 모두 사용한다. required=false인 placeId는 필요할 때만 사용하되, 전체 사용 장소 수는 targetPlaceCount에 가깝게 한다. 존재하지 않는 id를 지어내지 않는다. 장소 수는 각 날짜에 가급적 고르게 배분한다.',
+      '{ "days": [ { "dayNumber": <1부터 durationDays까지의 정수>, "places": [ { "placeId": "<place id>", "startTime": "HH:MM" } ] } ] }',
     ].join('\n');
   }
 
@@ -124,14 +137,15 @@ export class OpenAiScheduleClient implements ScheduleAiClient {
     const placeLines = request.places
       .map(
         (place) =>
-          `- id=${place.id} | required=${place.isRequired ? 'true' : 'false'} | ${place.name}` +
+          `- id=${place.id} | category=${place.category} | required=${
+            place.isRequired ? 'true' : 'false'
+          } | ${place.name}` +
           (place.address ? ` | ${place.address}` : '') +
           (place.lat !== null && place.lng !== null ? ` | (${place.lat}, ${place.lng})` : ''),
       )
       .join('\n');
     return [
       `여행 일수: ${request.durationDays}일`,
-      `목표 방문 장소 수: ${request.targetPlaceCount}곳`,
       `장소 목록(${request.places.length}곳):`,
       placeLines,
     ].join('\n');
@@ -153,18 +167,28 @@ export class OpenAiScheduleClient implements ScheduleAiClient {
     }
 
     const validIds = new Set(request.places.map((place) => place.id));
+    const timePattern = /^([01]\d|2[0-3]):[0-5]\d$/;
     const result: ScheduleAiDay[] = [];
     for (const day of days) {
       const dayNumber = (day as { dayNumber?: unknown }).dayNumber;
-      const placeIds = (day as { placeIds?: unknown }).placeIds;
-      if (typeof dayNumber !== 'number' || !Array.isArray(placeIds)) {
+      const placesRaw = (day as { places?: unknown }).places;
+      if (typeof dayNumber !== 'number' || !Array.isArray(placesRaw)) {
         continue;
       }
-      // AI가 지어낸/중복 id는 버린다 — 최종 누락 보정은 Service가 담당한다.
-      const filtered = placeIds.filter(
-        (id): id is string => typeof id === 'string' && validIds.has(id),
-      );
-      result.push({ dayNumber, placeIds: filtered });
+      // AI가 지어낸 id는 버리고(중복 제거·누락 보정은 Service 담당), 형식이 깨진 startTime은 null 처리.
+      const entries: ScheduleAiEntry[] = [];
+      for (const entry of placesRaw) {
+        const placeId = (entry as { placeId?: unknown }).placeId;
+        if (typeof placeId !== 'string' || !validIds.has(placeId)) {
+          continue;
+        }
+        const startTime = (entry as { startTime?: unknown }).startTime;
+        entries.push({
+          placeId,
+          startTime: typeof startTime === 'string' && timePattern.test(startTime) ? startTime : null,
+        });
+      }
+      result.push({ dayNumber, entries });
     }
 
     if (result.length === 0) {

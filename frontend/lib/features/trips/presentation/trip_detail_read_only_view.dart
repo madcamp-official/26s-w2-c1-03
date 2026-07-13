@@ -238,13 +238,31 @@ class _SchedulePlaceTile extends StatelessWidget {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Text(
-                place.name.isEmpty ? '이름 없는 장소' : place.name,
-                style: const TextStyle(
-                  fontSize: 15,
-                  fontWeight: FontWeight.w800,
-                  color: AppColors.ink900,
-                ),
+              Row(
+                crossAxisAlignment: CrossAxisAlignment.center,
+                children: [
+                  if (place.startTime != null) ...[
+                    Text(
+                      place.startTime!,
+                      style: const TextStyle(
+                        fontSize: 12,
+                        fontWeight: FontWeight.w800,
+                        color: AppColors.green800,
+                      ),
+                    ),
+                    const SizedBox(width: 7),
+                  ],
+                  Expanded(
+                    child: Text(
+                      place.name.isEmpty ? '이름 없는 장소' : place.name,
+                      style: const TextStyle(
+                        fontSize: 15,
+                        fontWeight: FontWeight.w800,
+                        color: AppColors.ink900,
+                      ),
+                    ),
+                  ),
+                ],
               ),
               if (place.address != null && place.address!.isNotEmpty) ...[
                 const SizedBox(height: 3),

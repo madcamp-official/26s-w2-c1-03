@@ -30,20 +30,19 @@ function buildRequest(): ScheduleAiRequest {
         address: '주소1',
         lat: 37.5,
         lng: 127,
-        categoryCode: 'A01',
+        category: 'attraction',
         isRequired: true,
       },
       {
         id: 'p2',
-        name: '장소2',
+        name: '식당2',
         address: null,
         lat: null,
         lng: null,
-        categoryCode: null,
+        category: 'restaurant',
         isRequired: false,
       },
     ],
-    targetPlaceCount: 2,
   };
 }
 
@@ -60,18 +59,36 @@ describe('OpenAiScheduleClient', () => {
     jest.restoreAllMocks();
   });
 
-  it('정상 JSON 응답을 파싱해 days를 반환한다', async () => {
+  it('정상 JSON 응답을 파싱해 days(placeId+startTime)를 반환한다', async () => {
     global.fetch = jest.fn().mockResolvedValue(
       mockChatResponse({
         ok: true,
         status: 200,
-        content: JSON.stringify({ days: [{ dayNumber: 1, placeIds: ['p1', 'p2'] }] }),
+        content: JSON.stringify({
+          days: [
+            {
+              dayNumber: 1,
+              places: [
+                { placeId: 'p1', startTime: '10:00' },
+                { placeId: 'p2', startTime: '12:00' },
+              ],
+            },
+          ],
+        }),
       }),
     );
 
     const result = await client.requestSchedule(buildRequest());
 
-    expect(result.days).toEqual([{ dayNumber: 1, placeIds: ['p1', 'p2'] }]);
+    expect(result.days).toEqual([
+      {
+        dayNumber: 1,
+        entries: [
+          { placeId: 'p1', startTime: '10:00' },
+          { placeId: 'p2', startTime: '12:00' },
+        ],
+      },
+    ]);
     expect(global.fetch).toHaveBeenCalledWith(
       'https://api.openai.com/v1/chat/completions',
       expect.objectContaining({ method: 'POST' }),
@@ -83,13 +100,51 @@ describe('OpenAiScheduleClient', () => {
       mockChatResponse({
         ok: true,
         status: 200,
-        content: JSON.stringify({ days: [{ dayNumber: 1, placeIds: ['p1', 'ghost', 'p2'] }] }),
+        content: JSON.stringify({
+          days: [
+            {
+              dayNumber: 1,
+              places: [
+                { placeId: 'p1', startTime: '10:00' },
+                { placeId: 'ghost', startTime: '11:00' },
+                { placeId: 'p2', startTime: '12:00' },
+              ],
+            },
+          ],
+        }),
       }),
     );
 
     const result = await client.requestSchedule(buildRequest());
 
-    expect(result.days[0].placeIds).toEqual(['p1', 'p2']);
+    expect(result.days[0].entries.map((e) => e.placeId)).toEqual(['p1', 'p2']);
+  });
+
+  it('형식이 깨진 startTime은 null로 정규화한다', async () => {
+    global.fetch = jest.fn().mockResolvedValue(
+      mockChatResponse({
+        ok: true,
+        status: 200,
+        content: JSON.stringify({
+          days: [
+            {
+              dayNumber: 1,
+              places: [
+                { placeId: 'p1', startTime: '25:99' },
+                { placeId: 'p2' },
+              ],
+            },
+          ],
+        }),
+      }),
+    );
+
+    const result = await client.requestSchedule(buildRequest());
+
+    expect(result.days[0].entries).toEqual([
+      { placeId: 'p1', startTime: null },
+      { placeId: 'p2', startTime: null },
+    ]);
   });
 
   it('HTTP 실패는 OPENAI_REQUEST_FAILED로 변환한다', async () => {
