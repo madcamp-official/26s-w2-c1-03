@@ -6,10 +6,12 @@ class PlaceFloatingCta extends StatelessWidget {
     super.key,
     required this.count,
     required this.onTap,
+    this.loading = false,
   });
 
   final int count;
   final VoidCallback onTap;
+  final bool loading;
 
   @override
   Widget build(BuildContext context) {
@@ -30,6 +32,7 @@ class PlaceFloatingCta extends StatelessWidget {
         child: AppButton(
           label: '$count곳으로 최적 동선 짜기',
           variant: AppButtonVariant.lime,
+          loading: loading,
           aiSparkle: true,
           onPressed: onTap,
         ),
