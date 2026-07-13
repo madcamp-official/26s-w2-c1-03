@@ -43,6 +43,20 @@ export interface PlaceCandidateDto {
   concentrationRate: number | null;
 }
 
+/**
+ * 스케줄 생성(Phase 8)이 필요로 하는 최소 장소 정보. Schedule 도메인은 places
+ * 테이블에 직접 접근하지 않고 이 메서드로만 장소를 조회한다(plan.md §3.1 의존 방향).
+ */
+export interface ScheduledPlaceInfo {
+  id: string;
+  name: string;
+  address: string | null;
+  lat: number | null;
+  lng: number | null;
+  categoryCode: string | null;
+  imageUrl: string | null;
+}
+
 const CATEGORY_TO_CONTENT_TYPE_ID: Record<PlaceCategory, string> = {
   tourist_spot: '12',
   restaurant: '39',
@@ -269,6 +283,65 @@ export class PlacesService {
 
   private concentrationScore(rate: number | null): number {
     return rate ?? UNMATCHED_SCORE;
+  }
+
+  /**
+   * 선택된 place.id 목록을 스케줄 생성용 정보로 해석한다(Schedule 도메인이 재사용).
+   * 입력 순서를 보존하며, Google 장소(name 미저장)는 place_id로 실시간 상세 조회해
+   * 이름을 채운다. 존재하지 않거나(삭제됨) Google 상세 조회가 실패한 id는 결과에서
+   * 빠지므로, 호출부는 반환 개수를 입력 개수와 비교해 유효성을 검증한다.
+   */
+  async resolveForSchedule(ids: string[]): Promise<ScheduledPlaceInfo[]> {
+    const uniqueIds = [...new Set(ids)];
+    if (uniqueIds.length === 0) {
+      return [];
+    }
+
+    const places = await this.placeRepository.find({ where: { id: In(uniqueIds) } });
+    const byId = new Map(places.map((place) => [place.id, place]));
+
+    const infos: ScheduledPlaceInfo[] = [];
+    for (const id of uniqueIds) {
+      const place = byId.get(id);
+      if (!place) {
+        continue;
+      }
+      const info = await this.toScheduledInfo(place);
+      if (info) {
+        infos.push(info);
+      }
+    }
+    return infos;
+  }
+
+  private async toScheduledInfo(place: Place): Promise<ScheduledPlaceInfo | null> {
+    if (place.source === PlaceSource.GOOGLE) {
+      const details = place.externalId
+        ? await this.googlePlacesClient.getPlaceDetails(place.externalId)
+        : null;
+      if (!details) {
+        return null;
+      }
+      return {
+        id: place.id,
+        name: details.name,
+        address: details.address,
+        lat: details.latitude,
+        lng: details.longitude,
+        categoryCode: null,
+        imageUrl: null,
+      };
+    }
+
+    return {
+      id: place.id,
+      name: place.name ?? '',
+      address: place.address,
+      lat: place.latitude ? Number(place.latitude) : null,
+      lng: place.longitude ? Number(place.longitude) : null,
+      categoryCode: place.categoryCode,
+      imageUrl: place.imageUrl,
+    };
   }
 
   async getPlaceDetail(placeId: string): Promise<PlaceCandidateDto> {

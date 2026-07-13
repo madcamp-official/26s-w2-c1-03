@@ -19,6 +19,7 @@ import { TripPlacesController } from './trip-places.controller';
   imports: [TypeOrmModule.forFeature([Place]), TripsModule],
   controllers: [TripPlacesController, PlacesController],
   providers: [PlacesService, TourApiClient, GooglePlacesClient, TatsCnctrRateClient],
-  exports: [TypeOrmModule],
+  // Schedule 도메인(Phase 8)이 PlacesService.resolveForSchedule로 선택 장소를 조회한다.
+  exports: [TypeOrmModule, PlacesService],
 })
 export class PlacesModule {}
