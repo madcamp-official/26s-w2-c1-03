@@ -65,7 +65,32 @@ export class PlacesService {
       contentTypeId: query.category ? CATEGORY_TO_CONTENT_TYPE_ID[query.category] : undefined,
     };
     const rawItems = await this.tourApiClient.fetchAreaBasedList(fetchParams);
+    return { candidates: await this.buildCandidates(rawItems) };
+  }
 
+  /**
+   * 키워드로 장소를 검색한다(API 명세서 §2.2 확장). 후보 목록(areaBasedList)에 없는
+   * 장소도 찾아 선택할 수 있게 한다. 트립에 areaCode가 있으면 그 지역으로 한정하고,
+   * 없으면 전국에서 검색한다 — areaBasedList와 달리 areaCode를 강제하지 않으므로,
+   * 아직 지역코드가 배정되지 않은 트립에서도 검색은 동작한다.
+   */
+  async searchCandidates(
+    tripId: string,
+    userId: string,
+    keyword: string,
+  ): Promise<{ candidates: PlaceCandidateDto[] }> {
+    // getDetail이 멤버십 검증까지 함께 해준다(TRIP_NOT_FOUND/TRIP_FORBIDDEN 전파).
+    const trip = await this.tripsService.getDetail(tripId, userId);
+    const rawItems = await this.tourApiClient.searchByKeyword({
+      keyword,
+      areaCode: trip.areaCode ?? undefined,
+      sigunguCode: trip.sigunguCode ?? undefined,
+    });
+    return { candidates: await this.buildCandidates(rawItems) };
+  }
+
+  /** rawItems(TourAPI) → places 캐시 upsert → Google Places 인기도 매칭 → 인기순 정렬 → DTO. */
+  private async buildCandidates(rawItems: TourApiPlaceItem[]): Promise<PlaceCandidateDto[]> {
     const cachedPlaces = await Promise.all(rawItems.map((item) => this.upsertPlace(item)));
 
     const withPopularity = await Promise.all(
@@ -79,11 +104,9 @@ export class PlacesService {
       (a, b) => this.popularityScore(b.popularity) - this.popularityScore(a.popularity),
     );
 
-    return {
-      candidates: withPopularity.map(({ place, popularity }) =>
-        this.toCandidateDto(place, popularity),
-      ),
-    };
+    return withPopularity.map(({ place, popularity }) =>
+      this.toCandidateDto(place, popularity),
+    );
   }
 
   async getPlaceDetail(placeId: string): Promise<PlaceCandidateDto> {

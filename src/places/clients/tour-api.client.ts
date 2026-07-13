@@ -30,6 +30,15 @@ export interface FetchAreaBasedListParams {
   numOfRows?: number;
 }
 
+export interface SearchKeywordParams {
+  keyword: string;
+  /** 있으면 해당 지역으로 한정, 없으면 전국 검색 — areaBasedList와 달리 필수가 아니다. */
+  areaCode?: string;
+  sigunguCode?: string;
+  contentTypeId?: string;
+  numOfRows?: number;
+}
+
 interface TourApiRawItem {
   contentid: string;
   contenttypeid: string;
@@ -91,6 +100,39 @@ export class TourApiClient {
     // 이 클라이언트 바깥(PlacesService)에서 별도로 계산한다. 여기선 수정일순으로만 받는다.
     url.searchParams.set('arrange', 'C');
 
+    return this.fetchItems(url);
+  }
+
+  /**
+   * 키워드 검색(searchKeyword2). 후보 목록(areaBasedList)에 없는 장소도 찾을 수 있게
+   * 한다. areaCode를 주면 그 지역으로 한정하고, 없으면 전국에서 검색한다 —
+   * areaBasedList2와 달리 지역코드가 필수가 아니다.
+   */
+  async searchByKeyword(params: SearchKeywordParams): Promise<TourApiPlaceItem[]> {
+    const url = new URL(`${this.baseUrl}/searchKeyword2`);
+    url.searchParams.set('serviceKey', this.serviceKey);
+    url.searchParams.set('MobileOS', 'ETC');
+    url.searchParams.set('MobileApp', 'TripAndEnd');
+    url.searchParams.set('_type', 'json');
+    url.searchParams.set('keyword', params.keyword);
+    if (params.areaCode) {
+      url.searchParams.set('areaCode', params.areaCode);
+    }
+    if (params.sigunguCode) {
+      url.searchParams.set('sigunguCode', params.sigunguCode);
+    }
+    if (params.contentTypeId) {
+      url.searchParams.set('contentTypeId', params.contentTypeId);
+    }
+    url.searchParams.set('numOfRows', String(params.numOfRows ?? DEFAULT_NUM_OF_ROWS));
+    url.searchParams.set('pageNo', '1');
+    url.searchParams.set('arrange', 'C');
+
+    return this.fetchItems(url);
+  }
+
+  /** areaBasedList2/searchKeyword2 공통 — 요청/응답 검증과 파싱(응답 스키마가 동일하다). */
+  private async fetchItems(url: URL): Promise<TourApiPlaceItem[]> {
     let response: globalThis.Response;
     try {
       response = await fetch(url);

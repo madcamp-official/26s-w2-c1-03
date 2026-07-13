@@ -2,9 +2,10 @@ import { Controller, Get, Param, Query, UseGuards } from '@nestjs/common';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { AuthenticatedUser, CurrentUser } from '../common/decorators/current-user.decorator';
 import { ListCandidatesQueryDto } from './dto/list-candidates-query.dto';
+import { SearchPlacesQueryDto } from './dto/search-places-query.dto';
 import { PlacesService } from './places.service';
 
-/** API 명세서 §2.2: GET /trips/{tripId}/places/candidates. */
+/** API 명세서 §2.2: GET /trips/{tripId}/places/candidates, .../places/search. */
 @UseGuards(JwtAuthGuard)
 @Controller('trips/:tripId/places')
 export class TripPlacesController {
@@ -17,5 +18,14 @@ export class TripPlacesController {
     @Query() query: ListCandidatesQueryDto,
   ) {
     return this.placesService.getCandidates(tripId, user.userId, query);
+  }
+
+  @Get('search')
+  searchPlaces(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param('tripId') tripId: string,
+    @Query() query: SearchPlacesQueryDto,
+  ) {
+    return this.placesService.searchCandidates(tripId, user.userId, query.keyword);
   }
 }
