@@ -18,6 +18,7 @@ import {
   UpdateSchedulePlaceDto,
 } from './dto/edit-schedule.dto';
 import { GenerateScheduleDto } from './dto/generate-schedule.dto';
+import { ApplyScheduleDto, ReviseScheduleDto } from './dto/revise-schedule.dto';
 import { ScheduleService } from './schedule.service';
 
 /** API 명세서 §2.3(생성)·§2.4(수동 편집): /trips/{tripId}/schedule. */
@@ -67,6 +68,24 @@ export class ScheduleController {
     @Param('tripPlaceId') tripPlaceId: string,
   ) {
     return this.scheduleService.removePlace(tripId, user.userId, tripPlaceId);
+  }
+
+  @Post('revise')
+  revise(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param('tripId') tripId: string,
+    @Body() dto: ReviseScheduleDto,
+  ) {
+    return this.scheduleService.revise(tripId, user.userId, dto);
+  }
+
+  @Post('revise/apply')
+  applyRevision(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param('tripId') tripId: string,
+    @Body() dto: ApplyScheduleDto,
+  ) {
+    return this.scheduleService.applyRevision(tripId, user.userId, dto);
   }
 
   @Patch('reorder')

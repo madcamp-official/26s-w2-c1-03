@@ -16,6 +16,8 @@ import {
   UpdateSchedulePlaceDto,
 } from './dto/edit-schedule.dto';
 import { GenerateScheduleDto } from './dto/generate-schedule.dto';
+import { ApplyScheduleDto, ReviseScheduleDto } from './dto/revise-schedule.dto';
+import { AiPlanRequest } from './entities/ai-plan-request.entity';
 import { TripPlace } from './entities/trip-place.entity';
 import { ScheduleErrorCode } from './exceptions/schedule-error-code';
 
@@ -40,6 +42,25 @@ export interface ScheduleDayDto {
 
 export interface ScheduleView {
   days: ScheduleDayDto[];
+}
+
+/** revise 미리보기 항목 — 아직 저장 전이라 tripPlace id가 없다. */
+export interface ScheduleProposalItemDto {
+  placeId: string | null;
+  customName: string | null;
+  customAddress: string | null;
+  dayNumber: number;
+  orderInDay: number;
+  startTime: string | null;
+  name: string;
+  address: string | null;
+  lat: number | null;
+  lng: number | null;
+  imageUrl: string | null;
+}
+
+export interface ScheduleProposalView {
+  days: Array<{ dayNumber: number; places: ScheduleProposalItemDto[] }>;
 }
 
 interface PlaceAssignment {
@@ -333,6 +354,234 @@ export class ScheduleService {
       }
     });
     return this.getSchedule(tripId, userId);
+  }
+
+  /**
+   * API 명세서 §2.5 POST /schedule/revise — 현재 일정 + 자연어 요청을 AI에 보내 수정된
+   * 일정 "제안"을 만든다. **저장하지 않고** 미리보기로 반환하며, 유저가 확인 후
+   * applyRevision으로 수용한다. 요청/응답 요약은 ai_plan_requests에 기록한다.
+   */
+  async revise(
+    tripId: string,
+    userId: string,
+    dto: ReviseScheduleDto,
+  ): Promise<{ requestId: string; proposal: ScheduleProposalView }> {
+    const trip = await this.assertEditor(tripId, userId);
+    const durationDays = this.computeDurationDays(trip.startDate, trip.endDate);
+
+    const rows = await this.dataSource.getRepository(TripPlace).find({
+      where: { tripId },
+      order: { dayNumber: 'ASC', orderInDay: 'ASC' },
+    });
+    const placeIds = rows
+      .map((row) => row.placeId)
+      .filter((id): id is string => id !== null);
+    const infos = await this.placesService.resolveForSchedule(placeIds);
+    const infoById = new Map(infos.map((info) => [info.id, info]));
+
+    // 커스텀 장소(placeId 없음)는 `custom:` 접두 id로 AI가 참조할 수 있게 한다.
+    const current = rows.map((row) => {
+      const info = row.placeId ? infoById.get(row.placeId) : undefined;
+      return {
+        id: row.placeId ?? `custom:${row.id}`,
+        name: info?.name ?? row.customName ?? '',
+        address: info?.address ?? row.customAddress ?? null,
+        lat: info?.lat ?? null,
+        lng: info?.lng ?? null,
+        category: info?.category ?? ('attraction' as const),
+        isRequired: false,
+        dayNumber: row.dayNumber,
+        startTime: row.startTime ?? null,
+      };
+    });
+
+    // "카페 추가해줘" 같은 요청에 대비해 현재 일정 주변의 보강 후보도 함께 준다.
+    const anchors = current
+      .filter((item) => item.lat !== null && item.lng !== null)
+      .map((item) => ({ lat: item.lat!, lng: item.lng! }));
+    const pools = await this.placesService.getScheduleCandidatePools(
+      tripId,
+      userId,
+      anchors,
+      placeIds,
+      {
+        attractions: Math.min(durationDays * 2 + 2, MAX_ATTRACTION_POOL),
+        restaurants: Math.min(durationDays * 2, MAX_RESTAURANT_POOL),
+        cafes: Math.min(durationDays + 1, MAX_CAFE_POOL),
+      },
+    );
+    const candidates = [...pools.attractions, ...pools.restaurants, ...pools.cafes];
+
+    const aiResult = await this.scheduleAiClient.requestRevision({
+      durationDays,
+      userPrompt: dto.prompt,
+      current,
+      candidates: candidates.map((info) => ({
+        id: info.id,
+        name: info.name,
+        address: info.address,
+        lat: info.lat,
+        lng: info.lng,
+        category: info.category,
+        isRequired: false,
+      })),
+    });
+
+    const proposal = this.buildProposal(aiResult, durationDays, {
+      infoById,
+      candidateById: new Map(candidates.map((info) => [info.id, info])),
+      rowById: new Map(rows.map((row) => [row.id, row])),
+    });
+
+    const requestRepo = this.dataSource.getRepository(AiPlanRequest);
+    const placeCount = proposal.days.reduce((sum, day) => sum + day.places.length, 0);
+    const savedRequest = await requestRepo.save(
+      requestRepo.create({
+        tripId,
+        requestedBy: userId,
+        promptText: dto.prompt,
+        responseSummary: `${proposal.days.length}일 / ${placeCount}곳 수정 제안`,
+      }),
+    );
+    return { requestId: savedRequest.id, proposal };
+  }
+
+  /**
+   * POST /schedule/revise/apply — 유저가 미리보기에서 확인한(일부 항목을 뺄 수도 있는)
+   * 최종 일정으로 trip_places 전체를 교체한다. 전체 교체 트랜잭션이라 부분 실패가 없다.
+   */
+  async applyRevision(
+    tripId: string,
+    userId: string,
+    dto: ApplyScheduleDto,
+  ): Promise<{ schedule: ScheduleView }> {
+    const trip = await this.assertEditor(tripId, userId);
+    for (const item of dto.items) {
+      if ((item.placeId !== undefined) === Boolean(item.customName?.trim())) {
+        throw new BusinessException(ScheduleErrorCode.SCHEDULE_PLACE_INPUT_INVALID);
+      }
+      this.assertDayInRange(item.dayNumber, trip.startDate, trip.endDate);
+    }
+    const placeIds = dto.items
+      .map((item) => item.placeId)
+      .filter((id): id is string => id !== undefined);
+    const infos = await this.placesService.resolveForSchedule(placeIds);
+    if (infos.length !== new Set(placeIds).size) {
+      throw new BusinessException(ScheduleErrorCode.SELECTED_PLACES_INVALID);
+    }
+    const infoById = new Map(infos.map((info) => [info.id, info]));
+
+    const saved = await this.dataSource.transaction(async (manager) => {
+      await manager.delete(TripPlace, { tripId });
+      const sorted = [...dto.items].sort(
+        (a, b) => a.dayNumber - b.dayNumber || a.orderInDay - b.orderInDay,
+      );
+      const counters = new Map<number, number>();
+      const rows = sorted.map((item) => {
+        const next = (counters.get(item.dayNumber) ?? 0) + 1;
+        counters.set(item.dayNumber, next);
+        return manager.create(TripPlace, {
+          tripId,
+          placeId: item.placeId ?? null,
+          customName: item.customName?.trim() || null,
+          customAddress: item.customAddress?.trim() || null,
+          memo: item.memo ?? null,
+          dayNumber: item.dayNumber,
+          orderInDay: next,
+          startTime: item.startTime ?? null,
+          addedBy: userId,
+        });
+      });
+      return manager.save(rows);
+    });
+    return { schedule: this.buildView(saved, infoById) };
+  }
+
+  /** AI 재수정 결과를 저장 없이 제안 뷰로 변환한다 — 클램프/중복 제거/시간순 정렬. */
+  private buildProposal(
+    aiResult: ScheduleAiResult,
+    durationDays: number,
+    lookup: {
+      infoById: Map<string, ScheduledPlaceInfo>;
+      candidateById: Map<string, ScheduledPlaceInfo>;
+      rowById: Map<string, TripPlace>;
+    },
+  ): ScheduleProposalView {
+    const dayToEntries = new Map<number, DayEntry[]>();
+    const placed = new Set<string>();
+    for (const day of [...aiResult.days].sort((a, b) => a.dayNumber - b.dayNumber)) {
+      const dayNumber = Math.min(Math.max(Math.trunc(day.dayNumber), 1), durationDays);
+      const list = dayToEntries.get(dayNumber) ?? [];
+      for (const entry of day.entries) {
+        if (placed.has(entry.placeId)) {
+          continue;
+        }
+        placed.add(entry.placeId);
+        list.push({ placeId: entry.placeId, startTime: entry.startTime });
+      }
+      dayToEntries.set(dayNumber, list);
+    }
+
+    const days: ScheduleProposalView['days'] = [];
+    for (const dayNumber of [...dayToEntries.keys()].sort((a, b) => a - b)) {
+      const entries = this.sortByStartTime(dayToEntries.get(dayNumber)!);
+      const places: ScheduleProposalItemDto[] = [];
+      for (const entry of entries) {
+        const item = this.toProposalItem(entry, dayNumber, places.length + 1, lookup);
+        if (item) {
+          places.push(item);
+        }
+      }
+      if (places.length > 0) {
+        days.push({ dayNumber, places });
+      }
+    }
+    return { days };
+  }
+
+  private toProposalItem(
+    entry: DayEntry,
+    dayNumber: number,
+    orderInDay: number,
+    lookup: {
+      infoById: Map<string, ScheduledPlaceInfo>;
+      candidateById: Map<string, ScheduledPlaceInfo>;
+      rowById: Map<string, TripPlace>;
+    },
+  ): ScheduleProposalItemDto | null {
+    const base = { dayNumber, orderInDay, startTime: entry.startTime };
+    if (entry.placeId.startsWith('custom:')) {
+      const row = lookup.rowById.get(entry.placeId.slice('custom:'.length));
+      if (!row) {
+        return null;
+      }
+      return {
+        ...base,
+        placeId: null,
+        customName: row.customName,
+        customAddress: row.customAddress,
+        name: row.customName ?? '',
+        address: row.customAddress,
+        lat: null,
+        lng: null,
+        imageUrl: null,
+      };
+    }
+    const info = lookup.infoById.get(entry.placeId) ?? lookup.candidateById.get(entry.placeId);
+    if (!info) {
+      return null;
+    }
+    return {
+      ...base,
+      placeId: info.id,
+      customName: null,
+      customAddress: null,
+      name: info.name,
+      address: info.address,
+      lat: info.lat,
+      lng: info.lng,
+      imageUrl: info.imageUrl,
+    };
   }
 
   /** 편집 계열 공통 검증 — 트립 존재/멤버십 + owner/editor 역할(viewer는 편집 불가). */
