@@ -406,7 +406,7 @@ erDiagram
 ### Phase 8 — AI 여행 계획 생성 ✅ BE 완료 (FE 미착수)
 - **목표**: 선택한 장소로 AI가 일자별 최적 동선을 생성 (이 프로젝트에서 가장 까다로운 AI 연동)
 - **[구현 메모, 2026-07-13]** OpenAI 연동 전송 계층은 `openai` Node SDK 대신 **`fetch` 직접 호출**로 구현했다(§9.1은 SDK를 언급하나, 기존 외부 클라이언트 TourApiClient/GooglePlacesClient/TatsCnctrRateClient가 모두 `fetch`+`ConfigService` 패턴으로 통일돼 있어 일관성·의존성 최소화를 위해 동일 패턴을 따름). §9.1의 실질 요구(인터페이스 추상화·env 주입·에러 변환)는 모두 충족한다. WebSocket 브로드캐스트는 Phase 10 Gateway가 아직 없어 **REST 응답만 우선 구현**(아래 참고).
-- **[검증 상태]** 코드는 손으로 정독해 타입/시그니처 일관성을 확인했으나, `tsc --noEmit`/`jest` **자동 실행은 아직 못 돌렸다**(구현 시점에 실행 환경 일시 장애). 커밋 전 반드시 `npx tsc --noEmit`과 `npx jest src/schedule`(신규 11건) + 전체 `npx jest`를 돌려 통과를 확인할 것.
+- **[검증 상태, 2026-07-13]** `npx tsc --noEmit`, `npx jest src/schedule`(2 suites / 11 tests), 전체 `npx jest`(13 suites / 89 tests) 모두 통과. 테스트 로그의 WARN/ERROR는 실패 케이스를 검증하기 위한 의도된 mock 로그이며 테스트 실패는 아님.
 - **BE 체크리스트**:
   - [x] `config/openai.config.ts` — `loadOpenAiConfig(ConfigService)`로 `OPENAI_API_KEY`/`OPENAI_BASE_URL`/`OPENAI_SCHEDULE_MODEL` 주입, 하드코딩 금지(§9.1). `env.validation.ts`에 Joi 스키마(BASE_URL/MODEL은 기본값) 추가
   - [x] `schedule/client/open-ai-schedule.client.ts` — 선택 장소 리스트 + 여행 일수를 프롬프트에 포함해 일자별 동선 요청(§9.2). `ScheduleAiClient` 인터페이스 + `SCHEDULE_AI_CLIENT` 토큰으로 추상화(모델/제공자 교체·테스트 Mock 대비). JSON 응답 파싱 + 입력에 없는(지어낸) placeId 필터링
@@ -416,10 +416,14 @@ erDiagram
   - [x] OpenAI 호출 실패(네트워크 오류/타임아웃/빈 응답/파싱 실패) → `OPENAI_REQUEST_FAILED`(502) 에러코드로 변환(§9.4)
   - [x] 테스트: `SCHEDULE_AI_CLIENT`를 Mock으로 대체해 스케줄 배정 로직 단위테스트(`schedule.service.spec.ts` 5건: 일자 배치/누락 보정/일수 클램프/유효성/AI 실패 전파) + `OpenAiScheduleClient` fetch Mock 테스트(`open-ai-schedule.client.spec.ts` 6건: 파싱/필터/HTTP·네트워크·파싱 실패) — 실제 OpenAI 호출 없이(§13)
 - **FE 체크리스트**:
-  - [ ] "선택 완료 → 생성 중" 로딩 화면(동기 응답 대기 UX, 취소 불가 명시)
-  - [ ] 결과 화면(일자별 리스트, `day_number` 기준 그룹핑)
-  - [ ] OpenAI 응답 지연 시 타임아웃/에러 처리 UX(§16 리스크: 체감 지연 측정 필요)
-- **완료 조건**: 선택한 장소들이 일자별로 배정되어 반환되고 `trip_places`에 저장됨 — **BE 충족**(단위테스트로 배정/저장 로직 검증). 실제 OpenAI 왕복은 배포 환경에서 별도 확인(§9.4)
+  - [ ] `features/schedule/data/schedule_models.dart` — BE 응답 `{ schedule: { days: [...] } }`를 `SchedulePlan`/`ScheduleDay`/`ScheduledTripPlace`로 파싱. JSON 키는 `dayNumber`, `orderInDay`, `placeId`, `imageUrl` 등 백엔드 DTO와 일치시킨다.
+  - [ ] `features/schedule/data/schedule_api.dart` — `POST /trips/{tripId}/schedule/generate` 호출 메서드 추가. 요청 바디는 `{ selectedPlaceIds: [...] }`, 응답은 `SchedulePlan`으로 반환.
+  - [ ] `PlaceSelectionScreen` CTA 연결 — `_showComingSoon()`을 실제 생성 플로우로 교체. 선택 장소가 0개면 CTA 숨김 유지, 1개 이상이면 로딩 화면으로 push/replace.
+  - [ ] "선택 완료 → 생성 중" 로딩 화면 — 동기 응답 대기 UX, 취소 불가/화면 이탈 주의 문구, 선택 장소 수와 여행 제목/도시 정보를 표시. OpenAI 지연 가능성이 있으므로 별도 receive timeout을 45~60초로 늘릴지 API 메서드에서 결정.
+  - [ ] 결과 화면 — `dayNumber` 기준 그룹핑된 리스트 표시. 장소명/주소/이미지/메모(null 가능)를 안전하게 렌더링하고, 결과 확인 후 여행 상세로 돌아가거나 Phase 9 편집 화면으로 이어질 수 있게 버튼 배치.
+  - [ ] 오류 UX — `OPENAI_REQUEST_FAILED`는 "AI가 일정을 못 만들었어요. 잠시 후 다시 시도해줘"로 안내, `SELECTED_PLACES_INVALID`는 후보 재조회 유도, 401/403은 공통 ApiClient 흐름에 맡김.
+  - [ ] 검증 — Android/iOS 중 최소 1개 실기기 또는 에뮬레이터에서 후보 선택 → 생성 API 호출 → 결과 화면 진입까지 확인. 서버 DB의 `trip_places` 저장 여부도 함께 확인.
+- **완료 조건**: 선택한 장소들이 일자별로 배정되어 반환되고 `trip_places`에 저장됨 — **BE 충족**(`npx tsc --noEmit`, `npx jest src/schedule`, 전체 `npx jest` 통과). 실제 OpenAI 왕복은 배포/실환경 키로 별도 확인(§9.4)
 - **선행 Phase**: Phase 7
 - **산출물**: `schedule/` 모듈(생성 부분: `schedule.service.ts`/`schedule.controller.ts`/`client/open-ai-schedule.client.ts`/`dto`/`exceptions`), `config/openai.config.ts`, `PlacesService.resolveForSchedule`
 
