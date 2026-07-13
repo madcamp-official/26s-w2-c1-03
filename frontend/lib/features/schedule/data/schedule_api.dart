@@ -1,3 +1,4 @@
+import 'package:dio/dio.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../core/network/api_client.dart';
 import '../../auth/presentation/login_controller.dart' show apiClientProvider;
@@ -16,6 +17,7 @@ class ScheduleApi {
     final response = await _apiClient.dio.post<Map<String, dynamic>>(
       '/trips/$tripId/schedule/generate',
       data: {'selectedPlaceIds': selectedPlaceIds},
+      options: Options(receiveTimeout: const Duration(seconds: 60)),
     );
     final schedule = response.data!['schedule'] as Map<String, dynamic>;
     return SchedulePlan.fromJson(schedule);

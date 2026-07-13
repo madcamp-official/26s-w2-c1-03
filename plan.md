@@ -418,9 +418,9 @@ erDiagram
 - **FE 체크리스트**:
   - [x] `features/schedule/data/schedule_models.dart` — BE 응답 `{ schedule: { days: [...] } }`를 `SchedulePlan`/`ScheduleDay`/`ScheduledTripPlace`로 파싱. JSON 키는 `dayNumber`, `orderInDay`, `placeId`, `imageUrl` 등 백엔드 DTO와 일치시킨다.
   - [x] `features/schedule/data/schedule_api.dart` — `POST /trips/{tripId}/schedule/generate` 호출 메서드 추가. 요청 바디는 `{ selectedPlaceIds: [...] }`, 응답은 `SchedulePlan`으로 반환.
-  - [x] `PlaceSelectionScreen` CTA 연결 — `_showComingSoon()`을 실제 생성 플로우로 교체. 선택 장소가 0개면 CTA 숨김 유지, 1개 이상이면 생성 API 호출 중 버튼 로딩 상태를 표시한다. 전용 로딩 화면 push/replace는 다음 체크리스트에서 보강.
-  - [ ] "선택 완료 → 생성 중" 로딩 화면 — 동기 응답 대기 UX, 취소 불가/화면 이탈 주의 문구, 선택 장소 수와 여행 제목/도시 정보를 표시. OpenAI 지연 가능성이 있으므로 별도 receive timeout을 45~60초로 늘릴지 API 메서드에서 결정.
-  - [ ] 결과 화면 — `dayNumber` 기준 그룹핑된 리스트 표시. 장소명/주소/이미지/메모(null 가능)를 안전하게 렌더링하고, 결과 확인 후 여행 상세로 돌아가거나 Phase 9 편집 화면으로 이어질 수 있게 버튼 배치.
+  - [x] `PlaceSelectionScreen` CTA 연결 — `_showComingSoon()`을 실제 생성 플로우로 교체. 선택 장소가 0개면 CTA 숨김 유지, 1개 이상이면 `ScheduleGeneratingScreen`으로 진입한다.
+  - [x] "선택 완료 → 생성 중" 로딩 화면 — 동기 응답 대기 UX, 취소 불가/화면 이탈 주의 문구, 선택 장소 수 표시. `ScheduleApi.generate()`는 OpenAI 지연 가능성을 고려해 receive timeout 60초로 호출한다.
+  - [x] 결과 화면 — `dayNumber` 기준 그룹핑된 리스트 표시. 장소명/주소/메모(null 가능)를 안전하게 렌더링하고, 결과 확인 후 여행 상세로 돌아가거나 장소 선택으로 돌아갈 수 있게 버튼 배치.
   - [ ] 오류 UX — `OPENAI_REQUEST_FAILED`는 "AI가 일정을 못 만들었어요. 잠시 후 다시 시도해줘"로 안내, `SELECTED_PLACES_INVALID`는 후보 재조회 유도, 401/403은 공통 ApiClient 흐름에 맡김.
   - [ ] 검증 — Android/iOS 중 최소 1개 실기기 또는 에뮬레이터에서 후보 선택 → 생성 API 호출 → 결과 화면 진입까지 확인. 서버 DB의 `trip_places` 저장 여부도 함께 확인.
 - **완료 조건**: 선택한 장소들이 일자별로 배정되어 반환되고 `trip_places`에 저장됨 — **BE 충족**(`npx tsc --noEmit`, `npx jest src/schedule`, 전체 `npx jest` 통과). 실제 OpenAI 왕복은 배포/실환경 키로 별도 확인(§9.4)
