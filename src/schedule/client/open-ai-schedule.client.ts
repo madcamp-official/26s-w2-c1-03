@@ -1,6 +1,7 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { BusinessException } from '../../common/exceptions/business-exception';
+import { haversineKm } from '../../common/utils/geo.util';
 import { isNetworkError } from '../../common/utils/network-error.util';
 import { loadOpenAiConfig, OpenAiConfig } from '../../config/openai.config';
 import { ScheduleErrorCode } from '../exceptions/schedule-error-code';
@@ -117,16 +118,21 @@ export class OpenAiScheduleClient implements ScheduleAiClient {
   private buildSystemPrompt(): string {
     return [
       '당신은 국내 여행 일정을 설계하는 전문 플래너다. 입력 장소로 시간표가 있는 완성된 일자별 일정을 만든다.',
-      '입력 장소는 category(attraction=관광지, restaurant=식당, cafe=카페)와 required 플래그, 좌표(lat, lng)를 가진다.',
+      '입력 장소는 [필수 장소]/[관광지 후보]/[식당 후보]/[카페 후보] 섹션으로 나뉘어 있고, 각 장소에 좌표(lat, lng)와 기준점에서의 거리(km)가 표기된다.',
+      '',
+      '가장 중요한 원칙:',
+      'A) 입력 목록의 나열 순서는 아무 의미가 없다. 입력 순서를 그대로 복사해 배치하면 안 되며, 반드시 좌표와 거리(km)를 근거로 어느 장소를 어느 날 몇 시에 방문할지 새로 설계한다.',
+      'B) 같은 placeId는 전체 일정을 통틀어 최대 한 번만 사용한다. 필수 장소도 한 번만 배치하며, 여러 날에 반복해서 넣지 않는다.',
+      'C) 하루는 하나의 권역이다: 서로 가까운(대략 10km 이내) 장소끼리 같은 날에 묶고, 지역이 넓으면 동쪽/서쪽처럼 권역을 날짜별로 나눈다. 멀리 떨어진 두 장소를 같은 날 왔다갔다하지 않는다.',
       '',
       '하루 일정 구성 규칙:',
-      '1) required=true인 장소는 반드시 전부, 정확히 한 번씩 배치한다.',
-      '2) 각 날짜는 시간순으로 채운다: 오전(09:30~11:30) 관광 1~2곳 → 점심(12:00~13:00) restaurant 1곳 → 오후(13:30~17:30) 관광 1~2곳 → 동선에 여유가 있으면 오후 중간에 cafe 1곳 → 저녁(18:00~19:30) restaurant 1곳.',
-      '3) 매일 점심과 저녁에 restaurant을 각각 1곳씩 반드시 배치한다. 관광 항목(attraction)은 하루 2~4곳으로 유지한다.',
-      '4) 동선 최적화: 좌표가 서로 가까운 장소끼리 같은 날에 묶고, 하루 안에서는 총 이동 거리가 최소가 되는 방문 순서로 정렬한다. 좌표 기준 멀리 떨어진 장소를 하루 안에서 왔다갔다하지 않는다.',
-      '5) 식당과 카페는 직전·직후에 방문하는 장소에서 가까운 곳을 고른다.',
+      '1) [필수 장소]는 반드시 전부, 정확히 한 번씩 배치한다. 각 필수 장소가 속한 권역이 그날의 중심이 된다.',
+      '2) 각 날짜는 시간순으로 채운다: 오전(09:30~11:30) 관광 1~2곳 → 점심(12:00~13:00) 식당 1곳 → 오후(13:30~17:30) 관광 1~2곳 → 동선에 여유가 있으면 오후 중간에 카페 1곳 → 저녁(18:00~19:30) 식당 1곳.',
+      '3) 매일 점심과 저녁에 [식당 후보]에서 각각 1곳씩 반드시 배치한다. 관광 항목은 하루 2~4곳으로 유지한다.',
+      '4) 하루 안에서는 총 이동 거리가 최소가 되는 방문 순서로 정렬한다(인접한 장소를 연달아 방문).',
+      '5) 식당과 카페는 그날 동선(직전·직후 방문 장소)에서 가까운 곳을 고른다.',
       '6) 각 장소에 startTime("HH:MM", 24시간제)을 부여한다. 장소 간 이동시간(가까우면 10~20분, 멀면 30~60분)과 체류시간(관광지 1~2시간, 식사 1시간, 카페 40분)을 감안해 현실적인 간격을 둔다.',
-      '7) 존재하지 않는 placeId를 지어내지 않고, 같은 placeId를 두 번 쓰지 않는다.',
+      '7) 존재하지 않는 placeId를 지어내지 않는다.',
       '',
       '반드시 아래 JSON 스키마로만 답한다. 설명 문장은 넣지 않는다.',
       '{ "days": [ { "dayNumber": <1부터 durationDays까지의 정수>, "places": [ { "placeId": "<place id>", "startTime": "HH:MM" } ] } ] }',
@@ -134,21 +140,62 @@ export class OpenAiScheduleClient implements ScheduleAiClient {
   }
 
   private buildUserPrompt(request: ScheduleAiRequest): string {
-    const placeLines = request.places
-      .map(
-        (place) =>
-          `- id=${place.id} | category=${place.category} | required=${
-            place.isRequired ? 'true' : 'false'
-          } | ${place.name}` +
-          (place.address ? ` | ${place.address}` : '') +
-          (place.lat !== null && place.lng !== null ? ` | (${place.lat}, ${place.lng})` : ''),
-      )
-      .join('\n');
-    return [
+    // 기준점 = 필수 장소들의 중심좌표. 모델이 좌표만으로 거리를 어림하기 어려우므로
+    // 기준점에서의 거리(km)를 계산해 함께 표기한다(권역 묶기·동선 판단의 근거).
+    const anchorCoords = request.places.filter(
+      (place) => place.isRequired && place.lat !== null && place.lng !== null,
+    );
+    const anchor =
+      anchorCoords.length > 0
+        ? {
+            lat: anchorCoords.reduce((sum, p) => sum + p.lat!, 0) / anchorCoords.length,
+            lng: anchorCoords.reduce((sum, p) => sum + p.lng!, 0) / anchorCoords.length,
+          }
+        : null;
+
+    const toLine = (place: ScheduleAiPlaceInput): string => {
+      let line = `- id=${place.id} | ${place.name}`;
+      if (place.address) {
+        line += ` | ${place.address}`;
+      }
+      if (place.lat !== null && place.lng !== null) {
+        line += ` | (${place.lat}, ${place.lng})`;
+        if (anchor) {
+          const km = haversineKm(anchor.lat, anchor.lng, place.lat, place.lng);
+          line += ` | 기준점에서 ${km.toFixed(1)}km`;
+        }
+      }
+      return line;
+    };
+
+    const sections: Array<{ title: string; filter: (p: ScheduleAiPlaceInput) => boolean }> = [
+      { title: '[필수 장소 — 반드시 모두, 각각 한 번씩 배치]', filter: (p) => p.isRequired },
+      {
+        title: '[관광지 후보 — 동선에 맞는 것만 선택]',
+        filter: (p) => !p.isRequired && p.category === 'attraction',
+      },
+      {
+        title: '[식당 후보 — 매일 점심·저녁 각 1곳]',
+        filter: (p) => !p.isRequired && p.category === 'restaurant',
+      },
+      {
+        title: '[카페 후보 — 동선에 여유가 있을 때만]',
+        filter: (p) => !p.isRequired && p.category === 'cafe',
+      },
+    ];
+
+    const lines: string[] = [
       `여행 일수: ${request.durationDays}일`,
-      `장소 목록(${request.places.length}곳):`,
-      placeLines,
-    ].join('\n');
+      '기준점은 필수 장소들의 중심좌표다. 아래 목록의 나열 순서는 무작위이며 방문 순서와 무관하다.',
+    ];
+    for (const section of sections) {
+      const members = request.places.filter(section.filter);
+      if (members.length === 0) {
+        continue;
+      }
+      lines.push('', `${section.title} (${members.length}곳)`, ...members.map(toLine));
+    }
+    return lines.join('\n');
   }
 
   private parseResult(content: string, request: ScheduleAiRequest): ScheduleAiResult {

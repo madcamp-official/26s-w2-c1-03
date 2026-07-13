@@ -19,6 +19,7 @@ import {
 import { ListCandidatesQueryDto, PlaceCategory } from './dto/list-candidates-query.dto';
 import { Place, PlaceSource } from './entities/place.entity';
 import { BusinessException } from '../common/exceptions/business-exception';
+import { haversineKm } from '../common/utils/geo.util';
 import { PlacesErrorCode } from './exceptions/places-error-code';
 
 export interface PlaceCandidateDto {
@@ -425,21 +426,11 @@ export class PlacesService {
 
     const distance = (info: ScheduledPlaceInfo): number =>
       info.lat !== null && info.lng !== null
-        ? PlacesService.haversineKm(centerLat, centerLng, info.lat, info.lng)
+        ? haversineKm(centerLat, centerLng, info.lat, info.lng)
         : Number.POSITIVE_INFINITY;
 
     // Array.prototype.sort는 안정 정렬 — 좌표 없는 장소들(Infinity)끼리는 원래 순서 유지.
     return [...infos].sort((a, b) => distance(a) - distance(b));
-  }
-
-  private static haversineKm(lat1: number, lng1: number, lat2: number, lng2: number): number {
-    const toRad = (deg: number): number => (deg * Math.PI) / 180;
-    const dLat = toRad(lat2 - lat1);
-    const dLng = toRad(lng2 - lng1);
-    const a =
-      Math.sin(dLat / 2) ** 2 +
-      Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLng / 2) ** 2;
-    return 6371 * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
   }
 
   private async toScheduledInfo(place: Place): Promise<ScheduledPlaceInfo | null> {
