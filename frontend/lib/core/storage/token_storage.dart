@@ -8,6 +8,7 @@ class TokenStorage {
 
   static const _accessTokenKey = 'access_token';
   static const _refreshTokenKey = 'refresh_token';
+  static const _deviceIdKey = 'device_id';
 
   final FlutterSecureStorage _storage;
 
@@ -22,10 +23,17 @@ class TokenStorage {
 
   Future<String?> readRefreshToken() => _storage.read(key: _refreshTokenKey);
 
+  /// `POST /users/me/devices` 응답의 device id. 로그아웃 시 이 id로
+  /// `DELETE /users/me/devices/{deviceId}`를 호출해 비활성화한다(§notifications).
+  Future<void> saveDeviceId(String deviceId) => _storage.write(key: _deviceIdKey, value: deviceId);
+
+  Future<String?> readDeviceId() => _storage.read(key: _deviceIdKey);
+
   Future<void> clear() async {
     await Future.wait([
       _storage.delete(key: _accessTokenKey),
       _storage.delete(key: _refreshTokenKey),
+      _storage.delete(key: _deviceIdKey),
     ]);
   }
 }

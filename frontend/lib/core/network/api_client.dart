@@ -24,7 +24,15 @@ class ApiClient {
         onError: (error, handler) async {
           final isUnauthorized = error.response?.statusCode == 401;
           final isAuthEndpoint = error.requestOptions.path.startsWith('/auth/');
-          if (!isUnauthorized || isAuthEndpoint || _isRetry(error.requestOptions)) {
+          if (!isUnauthorized || isAuthEndpoint) {
+            handler.next(_normalize(error));
+            return;
+          }
+          if (_isRetry(error.requestOptions)) {
+            // refresh 직후 재시도한 요청이 또 401을 받았다는 건 재발급된 토큰마저
+            // 무효라는 뜻이라, 붙잡고 있어봤자 매 요청마다 refresh만 반복된다.
+            // 다른 실패 분기와 동일하게 저장된 토큰을 지워 재로그인을 유도한다.
+            await _tokenStorage.clear();
             handler.next(_normalize(error));
             return;
           }

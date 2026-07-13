@@ -23,6 +23,10 @@ export const envValidationSchema = Joi.object({
   KAKAO_REST_API_KEY: Joi.string().required(),
   GOOGLE_CLIENT_ID: Joi.string().required(),
 
+  // Phase 2(Common/Config) — main.ts가 실제로 읽어서 적용한다(§16). 미설정 시
+  // 전체 origin 허용(로컬 개발 편의), 배포 전엔 실제 프론트 origin으로 채울 것.
+  CORS_ORIGIN: Joi.string().optional(),
+
   // Phase 7(Place 후보 추천) — TourAPI(국내 전용, §areaCode2 확인 완료)
   TOUR_API_SERVICE_KEY: Joi.string().required(),
   TOUR_API_BASE_URL: Joi.string().uri().required(),

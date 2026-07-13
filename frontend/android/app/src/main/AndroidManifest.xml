@@ -1,6 +1,9 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
     <!-- 백엔드(API 명세서) 및 카카오/구글 로그인 호출에 필요 -->
     <uses-permission android:name="android.permission.INTERNET"/>
+    <!-- Android 13(API 33)+ 런타임 알림 권한. firebase_messaging의 requestPermission()이
+         이 권한을 요청한다(plan.md Phase 5). -->
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS"/>
 
     <application
         android:label="tripandend"

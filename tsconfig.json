@@ -18,5 +18,10 @@
     "noImplicitAny": false,
     "strictBindCallApply": false,
     "noFallthroughCasesInSwitch": false
-  }
+  },
+  // include 없이는 tsc가 리포 루트 아래 전체를 훑는데, frontend/build(Flutter/CocoaPods/SPM
+  // 빌드 산출물, 예: firebase_messaging이 번들하는 예제 .ts)까지 컴파일 대상에 잡혀
+  // `tsc --noEmit`/`nest build`가 실패한다. 백엔드 소스는 항상 src/(+ test/의 e2e spec)뿐이므로
+  // 명시적으로 범위를 좁힌다.
+  "include": ["src/**/*", "test/**/*"]
 }

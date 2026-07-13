@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:firebase_core/firebase_core.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -60,6 +62,12 @@ class _StartupGateState extends ConsumerState<_StartupGate> {
     try {
       final usersApi = UsersApi(ref.read(apiClientProvider));
       await usersApi.getMe();
+      // 권한 팝업/FCM 토큰 발급을 기다리면 시작 화면이 멈춰 보이므로 기다리지 않는다.
+      unawaited(
+        ref
+            .read(pushNotificationServiceProvider)
+            .syncDevice(usersApi: usersApi, tokenStorage: tokenStorage),
+      );
       return const AppShell();
     } catch (_) {
       await tokenStorage.clear();

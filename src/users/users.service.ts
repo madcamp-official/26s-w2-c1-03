@@ -1,7 +1,8 @@
 import { Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { IsNull, Repository } from 'typeorm';
 import { BusinessException } from '../common/exceptions/business-exception';
+import { RefreshToken } from '../auth/entities/refresh-token.entity';
 import { RegisterDeviceDto } from './dto/register-device.dto';
 import { UpdateProfileDto } from './dto/update-profile.dto';
 import { UserDevice } from './entities/user-device.entity';
@@ -27,6 +28,8 @@ export class UsersService {
   constructor(
     @InjectRepository(User) private readonly userRepository: Repository<User>,
     @InjectRepository(UserDevice) private readonly deviceRepository: Repository<UserDevice>,
+    @InjectRepository(RefreshToken)
+    private readonly refreshTokenRepository: Repository<RefreshToken>,
   ) {}
 
   async getProfile(userId: string): Promise<UserProfile> {
@@ -51,6 +54,12 @@ export class UsersService {
     user.status = UserStatus.WITHDRAWN;
     user.withdrawnAt = new Date();
     await this.userRepository.save(user);
+    // 탈퇴 후에도 만료 전까지 재발급 가능한 잔여 세션이 남지 않도록 미폐기 refresh
+    // token을 전부 revoke한다(auth.service.ts의 재사용 탐지 시 전체 세션 무효화와 동일 패턴).
+    await this.refreshTokenRepository.update(
+      { userId, revokedAt: IsNull() },
+      { revokedAt: new Date() },
+    );
   }
 
   /**

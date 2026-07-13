@@ -1,3 +1,4 @@
+import { RefreshToken } from '../auth/entities/refresh-token.entity';
 import { UserDevice } from './entities/user-device.entity';
 import { User, UserStatus } from './entities/user.entity';
 import { UsersService } from './users.service';
@@ -11,6 +12,7 @@ function createRepositoryMock<T extends object>(): RepoMock<T> {
     create: jest.fn((entity) => entity),
     save: jest.fn(async (entity) => entity),
     findOneBy: jest.fn(),
+    update: jest.fn(),
   };
 }
 
@@ -32,12 +34,18 @@ function buildUser(overrides: Partial<User> = {}): User {
 describe('UsersService', () => {
   let userRepository: RepoMock<User>;
   let deviceRepository: RepoMock<UserDevice>;
+  let refreshTokenRepository: RepoMock<RefreshToken>;
   let service: UsersService;
 
   beforeEach(() => {
     userRepository = createRepositoryMock<User>();
     deviceRepository = createRepositoryMock<UserDevice>();
-    service = new UsersService(userRepository as never, deviceRepository as never);
+    refreshTokenRepository = createRepositoryMock<RefreshToken>();
+    service = new UsersService(
+      userRepository as never,
+      deviceRepository as never,
+      refreshTokenRepository as never,
+    );
   });
 
   describe('getProfile', () => {
@@ -93,6 +101,18 @@ describe('UsersService', () => {
 
       expect(userRepository.save).toHaveBeenCalledWith(
         expect.objectContaining({ status: UserStatus.WITHDRAWN, withdrawnAt: expect.any(Date) }),
+      );
+    });
+
+    it('탈퇴한 유저의 미폐기 refresh token을 전부 revoke한다', async () => {
+      const user = buildUser();
+      (userRepository.findOneBy as jest.Mock).mockResolvedValue(user);
+
+      await service.withdraw('user-1');
+
+      expect(refreshTokenRepository.update).toHaveBeenCalledWith(
+        expect.objectContaining({ userId: 'user-1' }),
+        { revokedAt: expect.any(Date) },
       );
     });
   });

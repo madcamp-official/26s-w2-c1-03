@@ -1,4 +1,4 @@
-/// API 명세서 §2.2 응답 스키마(`PlaceCandidateDto`, main/src/places/places.service.ts).
+/// API 명세서 §2.2 응답 스키마(`PlaceCandidateDto`, src/places/places.service.ts).
 class PlaceCandidate {
   const PlaceCandidate({
     required this.id,
