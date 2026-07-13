@@ -56,7 +56,8 @@ class PlaceSelectionScreen extends ConsumerStatefulWidget {
   final String tripId;
 
   @override
-  ConsumerState<PlaceSelectionScreen> createState() => _PlaceSelectionScreenState();
+  ConsumerState<PlaceSelectionScreen> createState() =>
+      _PlaceSelectionScreenState();
 }
 
 class _PlaceSelectionScreenState extends ConsumerState<PlaceSelectionScreen> {
@@ -92,7 +93,9 @@ class _PlaceSelectionScreenState extends ConsumerState<PlaceSelectionScreen> {
     });
     try {
       // 카테고리 없이 전체를 한 번만 받아 두고, 카테고리 전환은 클라이언트에서 거른다.
-      final candidates = await ref.read(placesApiProvider).getCandidates(widget.tripId);
+      final candidates = await ref
+          .read(placesApiProvider)
+          .getCandidates(widget.tripId);
       if (!mounted) return;
       setState(() {
         _allCandidates = candidates;
@@ -145,7 +148,9 @@ class _PlaceSelectionScreenState extends ConsumerState<PlaceSelectionScreen> {
       _searchQuery = keyword;
     });
     try {
-      final results = await ref.read(placesApiProvider).searchCandidates(widget.tripId, keyword);
+      final results = await ref
+          .read(placesApiProvider)
+          .searchCandidates(widget.tripId, keyword);
       if (!mounted) return;
       setState(() {
         _allCandidates = results;
@@ -186,7 +191,10 @@ class _PlaceSelectionScreenState extends ConsumerState<PlaceSelectionScreen> {
   void _focusPlace(PlaceCandidate candidate) {
     if (candidate.lat == null || candidate.lng == null) return;
     _mapController?.animateCamera(
-      CameraUpdate.newLatLngZoom(LatLng(candidate.lat!, candidate.lng!), _focusZoom),
+      CameraUpdate.newLatLngZoom(
+        LatLng(candidate.lat!, candidate.lng!),
+        _focusZoom,
+      ),
     );
   }
 
@@ -200,12 +208,17 @@ class _PlaceSelectionScreenState extends ConsumerState<PlaceSelectionScreen> {
   Future<void> _fitCamera() async {
     final controller = _mapController;
     if (controller == null) return;
-    final coords = _visibleCandidates.where((c) => c.lat != null && c.lng != null).toList();
+    final coords = _visibleCandidates
+        .where((c) => c.lat != null && c.lng != null)
+        .toList();
     if (coords.isEmpty) return;
 
     if (coords.length == 1) {
       await controller.animateCamera(
-        CameraUpdate.newLatLngZoom(LatLng(coords.first.lat!, coords.first.lng!), 13),
+        CameraUpdate.newLatLngZoom(
+          LatLng(coords.first.lat!, coords.first.lng!),
+          13,
+        ),
       );
       return;
     }
@@ -258,7 +271,11 @@ class _PlaceSelectionScreenState extends ConsumerState<PlaceSelectionScreen> {
         iconTheme: const IconThemeData(color: AppColors.ink900),
         title: const Text(
           '가고 싶은 곳 골라봐',
-          style: TextStyle(fontSize: 18, fontWeight: FontWeight.w800, color: AppColors.ink900),
+          style: TextStyle(
+            fontSize: 18,
+            fontWeight: FontWeight.w800,
+            color: AppColors.ink900,
+          ),
         ),
       ),
       body: SafeArea(
@@ -296,7 +313,10 @@ class _PlaceSelectionScreenState extends ConsumerState<PlaceSelectionScreen> {
                   // 검색 결과는 카테고리로 거르지 않으므로 검색 중엔 칩을 숨긴다.
                   if (!_searchMode) ...[
                     const SizedBox(height: 8),
-                    _CategoryChipRow(selected: _category, onSelect: _selectCategory),
+                    _CategoryChipRow(
+                      selected: _category,
+                      onSelect: _selectCategory,
+                    ),
                   ],
                 ],
               ),
@@ -305,7 +325,9 @@ class _PlaceSelectionScreenState extends ConsumerState<PlaceSelectionScreen> {
               const Positioned.fill(
                 child: ColoredBox(
                   color: Color(0x66FFFFFF),
-                  child: Center(child: CircularProgressIndicator(color: AppColors.ink900)),
+                  child: Center(
+                    child: CircularProgressIndicator(color: AppColors.ink900),
+                  ),
                 ),
               ),
             if (_error != null && _allCandidates.isEmpty)
@@ -320,7 +342,9 @@ class _PlaceSelectionScreenState extends ConsumerState<PlaceSelectionScreen> {
                 listLabel: _searchMode ? '검색 결과' : _categoryLabel(_category),
                 emptyText: _searchMode
                     ? '검색 결과가 없어'
-                    : (_category != null ? '이 카테고리엔 장소가 없어' : '이 지역에서 찾은 장소가 없어'),
+                    : (_category != null
+                          ? '이 카테고리엔 장소가 없어'
+                          : '이 지역에서 찾은 장소가 없어'),
                 onRowTap: _focusPlace,
                 onToggle: (candidate) => _toggleSelected(candidate.id),
               ),
@@ -395,7 +419,10 @@ class _PlaceSheetState extends State<_PlaceSheet> {
     double target;
     if (velocity < -300) {
       // 빠르게 위로 → 한 단계 위 스냅.
-      target = _snaps.firstWhere((s) => s > _extent + 0.001, orElse: () => _max);
+      target = _snaps.firstWhere(
+        (s) => s > _extent + 0.001,
+        orElse: () => _max,
+      );
     } else if (velocity > 300) {
       // 빠르게 아래로 → 한 단계 아래 스냅.
       target = _snaps.lastWhere((s) => s < _extent - 0.001, orElse: () => _min);
@@ -420,13 +447,17 @@ class _PlaceSheetState extends State<_PlaceSheet> {
           alignment: Alignment.bottomCenter,
           child: AnimatedContainer(
             // 드래그 중엔 손가락을 즉시 따라오고, 손을 떼면 스냅 위치로 부드럽게 이동.
-            duration: _dragging ? Duration.zero : const Duration(milliseconds: 220),
+            duration: _dragging
+                ? Duration.zero
+                : const Duration(milliseconds: 220),
             curve: Curves.easeOut,
             height: _extent * maxHeight,
             clipBehavior: Clip.antiAlias,
             decoration: BoxDecoration(
               color: Colors.white,
-              borderRadius: const BorderRadius.vertical(top: Radius.circular(24)),
+              borderRadius: const BorderRadius.vertical(
+                top: Radius.circular(24),
+              ),
               boxShadow: [
                 BoxShadow(
                   color: Colors.black.withValues(alpha: 0.12),
@@ -454,9 +485,7 @@ class _PlaceSheetState extends State<_PlaceSheet> {
                   ),
                 ),
                 // 목록 — 자체 스크롤 컨트롤러라 시트 크기와 독립적으로 스크롤된다.
-                Expanded(
-                  child: _buildList(),
-                ),
+                Expanded(child: _buildList()),
               ],
             ),
           ),
@@ -476,7 +505,10 @@ class _PlaceSheetState extends State<_PlaceSheet> {
             child: Center(
               child: Text(
                 text,
-                style: const TextStyle(color: AppColors.ink400, fontWeight: FontWeight.w600),
+                style: const TextStyle(
+                  color: AppColors.ink400,
+                  fontWeight: FontWeight.w600,
+                ),
               ),
             ),
           ),
@@ -522,7 +554,11 @@ class _SheetHandle extends StatelessWidget {
 }
 
 class _SheetHeader extends StatelessWidget {
-  const _SheetHeader({required this.label, required this.total, required this.selectedCount});
+  const _SheetHeader({
+    required this.label,
+    required this.total,
+    required this.selectedCount,
+  });
 
   final String label;
   final int total;
@@ -537,7 +573,11 @@ class _SheetHeader extends StatelessWidget {
         children: [
           Text(
             '$label $total곳',
-            style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w800, color: AppColors.ink900),
+            style: const TextStyle(
+              fontSize: 16,
+              fontWeight: FontWeight.w800,
+              color: AppColors.ink900,
+            ),
           ),
           if (selectedCount > 0)
             Text(
@@ -577,7 +617,9 @@ class _PlaceListRow extends StatelessWidget {
         padding: const EdgeInsets.fromLTRB(20, 12, 12, 12),
         decoration: BoxDecoration(
           border: showDivider
-              ? const Border(bottom: BorderSide(color: AppColors.border, width: 1))
+              ? const Border(
+                  bottom: BorderSide(color: AppColors.border, width: 1),
+                )
               : null,
         ),
         child: Row(
@@ -634,7 +676,9 @@ class _PlaceListRow extends StatelessWidget {
   String? _subtitle(PlaceCandidate candidate) {
     final parts = <String>[];
     if (candidate.rating != null) {
-      parts.add('★${candidate.rating!.toStringAsFixed(1)} (${candidate.reviewCount ?? 0})');
+      parts.add(
+        '★${candidate.rating!.toStringAsFixed(1)} (${candidate.reviewCount ?? 0})',
+      );
     }
     if (candidate.address != null) parts.add(candidate.address!);
     return parts.isEmpty ? null : parts.join(' · ');
@@ -655,9 +699,13 @@ class _SelectionCircleValue extends StatelessWidget {
       decoration: BoxDecoration(
         shape: BoxShape.circle,
         color: selected ? AppColors.ink900 : Colors.transparent,
-        border: selected ? null : Border.all(color: AppColors.ink200, width: 1.8),
+        border: selected
+            ? null
+            : Border.all(color: AppColors.ink200, width: 1.8),
       ),
-      child: selected ? const Icon(Icons.check, size: 16, color: AppColors.lime) : null,
+      child: selected
+          ? const Icon(Icons.check, size: 16, color: AppColors.lime)
+          : null,
     );
   }
 }
@@ -685,7 +733,10 @@ class _SearchBar extends StatelessWidget {
         borderRadius: BorderRadius.circular(14),
         border: Border.all(color: AppColors.border, width: 1),
         boxShadow: [
-          BoxShadow(color: Colors.black.withValues(alpha: 0.06), blurRadius: 10),
+          BoxShadow(
+            color: Colors.black.withValues(alpha: 0.06),
+            blurRadius: 10,
+          ),
         ],
       ),
       child: Row(
@@ -706,7 +757,10 @@ class _SearchBar extends StatelessWidget {
                 isDense: true,
                 border: InputBorder.none,
                 hintText: '장소 검색 · 예) 성산일출봉',
-                hintStyle: TextStyle(color: AppColors.ink400, fontWeight: FontWeight.w600),
+                hintStyle: TextStyle(
+                  color: AppColors.ink400,
+                  fontWeight: FontWeight.w600,
+                ),
               ),
             ),
           ),
@@ -756,7 +810,10 @@ class _CategoryChipRow extends StatelessWidget {
                   width: 1,
                 ),
                 boxShadow: [
-                  BoxShadow(color: Colors.black.withValues(alpha: 0.06), blurRadius: 8),
+                  BoxShadow(
+                    color: Colors.black.withValues(alpha: 0.06),
+                    blurRadius: 8,
+                  ),
                 ],
               ),
               alignment: Alignment.center,
@@ -793,14 +850,21 @@ class _PlaceThumbnail extends StatelessWidget {
         color: AppColors.surfaceSubtle,
         alignment: Alignment.center,
         child: imageUrl == null
-            ? Icon(Icons.place_outlined, color: AppColors.ink400, size: size * 0.45)
+            ? Icon(
+                Icons.place_outlined,
+                color: AppColors.ink400,
+                size: size * 0.45,
+              )
             : Image.network(
                 imageUrl,
                 fit: BoxFit.cover,
                 width: size,
                 height: size,
-                errorBuilder: (_, _, _) =>
-                    Icon(Icons.place_outlined, color: AppColors.ink400, size: size * 0.45),
+                errorBuilder: (_, _, _) => Icon(
+                  Icons.place_outlined,
+                  color: AppColors.ink400,
+                  size: size * 0.45,
+                ),
               ),
       ),
     );
@@ -822,7 +886,10 @@ class _ErrorOverlay extends StatelessWidget {
           color: Colors.white,
           borderRadius: BorderRadius.circular(20),
           boxShadow: [
-            BoxShadow(color: Colors.black.withValues(alpha: 0.1), blurRadius: 24),
+            BoxShadow(
+              color: Colors.black.withValues(alpha: 0.1),
+              blurRadius: 24,
+            ),
           ],
         ),
         child: Column(
@@ -831,7 +898,10 @@ class _ErrorOverlay extends StatelessWidget {
             Text(
               message,
               textAlign: TextAlign.center,
-              style: const TextStyle(color: AppColors.ink600, fontWeight: FontWeight.w600),
+              style: const TextStyle(
+                color: AppColors.ink600,
+                fontWeight: FontWeight.w600,
+              ),
             ),
             const SizedBox(height: 12),
             TextButton(onPressed: onRetry, child: const Text('다시 시도')),
