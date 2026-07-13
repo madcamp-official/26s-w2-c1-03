@@ -8,7 +8,15 @@ import 'api_exception.dart';
 class ApiClient {
   ApiClient({required TokenStorage tokenStorage, Dio? dio})
     : _tokenStorage = tokenStorage,
-      _dio = dio ?? Dio(BaseOptions(baseUrl: AppConfig.apiBaseUrl)) {
+      // 타임아웃이 없으면 백엔드가 응답하지 않을 때 요청이 영원히 매달린다.
+      // 특히 시작 화면(_StartupGate)의 getMe()가 걸려버리면 로그인 화면으로
+      // 넘어가지도 못하고 로딩 스피너만 무한히 떠 있게 된다.
+      _dio = dio ?? Dio(BaseOptions(
+        baseUrl: AppConfig.apiBaseUrl,
+        connectTimeout: const Duration(seconds: 10),
+        sendTimeout: const Duration(seconds: 15),
+        receiveTimeout: const Duration(seconds: 15),
+      )) {
     _dio.interceptors.add(
       InterceptorsWrapper(
         onRequest: (options, handler) async {

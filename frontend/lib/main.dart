@@ -61,7 +61,10 @@ class _StartupGateState extends ConsumerState<_StartupGate> {
 
     try {
       final usersApi = UsersApi(ref.read(apiClientProvider));
-      await usersApi.getMe();
+      // ApiClient의 Dio 타임아웃이 1차 방어선이지만, 시작 화면이 무한 로딩에
+      // 빠지는 일만은 없도록 세션 확인에도 상한을 둔다. 초과하면 아래 catch가
+      // 토큰을 지우고 로그인 화면으로 보낸다.
+      await usersApi.getMe().timeout(const Duration(seconds: 12));
       // 권한 팝업/FCM 토큰 발급을 기다리면 시작 화면이 멈춰 보이므로 기다리지 않는다.
       unawaited(
         ref
