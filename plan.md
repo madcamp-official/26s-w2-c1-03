@@ -430,7 +430,7 @@ erDiagram
 ### Phase 9 — 스케줄 조회/수동 편집/프롬프트 재수정
 - **목표**: AI 초안을 사용자가 다듬을 수 있게 함
 - **BE 체크리스트**:
-  - [ ] `GET /trips/{tripId}/schedule` — `trip_places`를 `day_number`, `order_in_day` 순 정렬 조회, `{ days: [{ dayNumber, places }] }` 형태로 그룹핑
+  - [x] `GET /trips/{tripId}/schedule` — `trip_places`를 `day_number`, `order_in_day` 순 정렬 조회, `{ days: [{ dayNumber, places }] }` 형태로 그룹핑. Phase 8 생성 후 저장된 AI 초안을 여행 상세 화면에서 읽기 위해 선반영(2026-07-13, `npx tsc --noEmit`/`npx jest src/schedule`/전체 `npx jest` 통과)
   - [ ] `POST /trips/{tripId}/schedule/places` — `place_id` 참조 또는 `custom_name`/`custom_address` 직접입력 두 경로 모두 지원(§4.4 ERD)
   - [ ] `PATCH .../schedule/places/{tripPlaceId}` — 메모 수정, 개별 위치 이동
   - [ ] `DELETE .../schedule/places/{tripPlaceId}` — 제거
@@ -439,6 +439,7 @@ erDiagram
   - [ ] `GET /trips/{tripId}/ai-requests` — AI 계획 생성/수정 요청 이력 조회
   - [ ] 트립 멤버 권한 검증(`assertMember`) 모든 편집 엔드포인트에 적용
 - **FE 체크리스트**:
+  - [x] 여행 상세 화면 — 진입 시 `GET /trips/{tripId}/schedule`로 저장된 AI 초안 조회. 스케줄이 있으면 design_example.pdf 4a 방향(상단 여행 히어로 + Day별 타임라인 카드)으로 표시하고, 스케줄이 없으면 장소 선택 화면으로 1회 자동 진입. AI 생성 완료 후 장소 선택 화면이 `true`를 반환해 상세 화면이 스케줄을 재조회
   - [ ] 편집 화면 — 드래그앤드롭 순서 변경(reorder 배치 호출)
   - [ ] 프롬프트 재수정 입력 UI(자연어 텍스트 입력 + 재생성 로딩 상태)
   - [ ] AI 요청 이력 조회 화면(선택 사항 — 명세서엔 있으나 UI 필수 여부는 팀 결정)

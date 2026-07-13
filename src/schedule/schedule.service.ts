@@ -127,6 +127,22 @@ export class ScheduleService {
     return { schedule: this.buildView(saved, infoById) };
   }
 
+  async getSchedule(tripId: string, userId: string): Promise<{ schedule: ScheduleView }> {
+    await this.tripsService.getDetail(tripId, userId);
+
+    const rows = await this.dataSource.getRepository(TripPlace).find({
+      where: { tripId },
+      order: { dayNumber: 'ASC', orderInDay: 'ASC' },
+    });
+    const placeIds = rows
+      .map((row) => row.placeId)
+      .filter((placeId): placeId is string => placeId !== null);
+    const infos = await this.placesService.resolveForSchedule(placeIds);
+    const infoById = new Map(infos.map((info) => [info.id, info]));
+
+    return { schedule: this.buildView(rows, infoById) };
+  }
+
   /** startDate/endDate('YYYY-MM-DD')로 여행 일수를 센다(양끝 포함, 최소 1일). */
   private computeDurationDays(startDate: string, endDate: string): number {
     const toUtc = (value: string): number => {
