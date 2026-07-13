@@ -284,4 +284,218 @@ describe('ScheduleService', () => {
     ).rejects.toMatchObject({ code: 'OPENAI_REQUEST_FAILED' });
     expect(dataSource.transaction).not.toHaveBeenCalled();
   });
+
+  // ── Phase 9 수동 편집 ────────────────────────────────────────────────────
+  // 트랜잭션 안에서 repo.find가 돌려준 행 객체를 직접 수정·저장하는 구현이므로,
+  // 인메모리 rows 배열을 공유하는 repo 목으로 최종 상태를 검증한다.
+
+  interface RowLike {
+    id: string;
+    tripId: string;
+    placeId: string | null;
+    dayNumber: number;
+    orderInDay: number;
+    startTime: string | null;
+    customName: string | null;
+    customAddress: string | null;
+    memo: string | null;
+    addedBy: string;
+  }
+
+  function buildRow(id: string, dayNumber: number, orderInDay: number): RowLike {
+    return {
+      id,
+      tripId: 'trip-1',
+      placeId: null,
+      dayNumber,
+      orderInDay,
+      startTime: null,
+      customName: `이름-${id}`,
+      customAddress: null,
+      memo: null,
+      addedBy: 'user-1',
+    };
+  }
+
+  function setupEditRepo(rows: RowLike[]) {
+    let seq = 0;
+    const repo = {
+      find: jest.fn(async () => [...rows]),
+      create: jest.fn((data: Record<string, unknown>) => {
+        const created = { id: `tp-new-${++seq}`, ...data } as unknown as RowLike;
+        rows.push(created);
+        return created;
+      }),
+      save: jest.fn(async (toSave: unknown) => toSave),
+      remove: jest.fn(async (row: RowLike) => {
+        rows.splice(rows.indexOf(row), 1);
+        return row;
+      }),
+    };
+    (manager as unknown as { getRepository: jest.Mock }).getRepository = jest.fn(() => repo);
+    // reorder가 마지막에 getSchedule로 전체 뷰를 다시 읽는다.
+    (dataSource as unknown as { getRepository: jest.Mock }).getRepository = jest.fn(() => ({
+      find: jest.fn(async () =>
+        [...rows].sort((a, b) => a.dayNumber - b.dayNumber || a.orderInDay - b.orderInDay),
+      ),
+    }));
+    placesService.resolveForSchedule.mockResolvedValue([]);
+    return repo;
+  }
+
+  it('addPlace: customName 장소를 그날 맨 뒤에 추가한다', async () => {
+    const rows = [buildRow('t1', 1, 1), buildRow('t2', 1, 2)];
+    setupEditRepo(rows);
+
+    const { tripPlace } = await service.addPlace('trip-1', 'user-1', {
+      customName: '수동 맛집',
+      customAddress: '제주 어딘가',
+      dayNumber: 1,
+    });
+
+    expect(tripPlace).toMatchObject({
+      name: '수동 맛집',
+      address: '제주 어딘가',
+      dayNumber: 1,
+      orderInDay: 3,
+      placeId: null,
+    });
+  });
+
+  it('addPlace: orderInDay를 지정하면 그 위치에 끼워 넣고 기존 항목을 밀어낸다', async () => {
+    const rows = [buildRow('t1', 1, 1), buildRow('t2', 1, 2)];
+    setupEditRepo(rows);
+
+    const { tripPlace } = await service.addPlace('trip-1', 'user-1', {
+      customName: '새 장소',
+      dayNumber: 1,
+      orderInDay: 1,
+    });
+
+    expect(tripPlace.orderInDay).toBe(1);
+    const day1 = rows
+      .filter((row) => row.dayNumber === 1)
+      .sort((a, b) => a.orderInDay - b.orderInDay);
+    expect(day1.map((row) => [row.customName, row.orderInDay])).toEqual([
+      ['새 장소', 1],
+      ['이름-t1', 2],
+      ['이름-t2', 3],
+    ]);
+  });
+
+  it('addPlace: placeId와 customName 둘 다(또는 둘 다 없이) 주면 SCHEDULE_PLACE_INPUT_INVALID', async () => {
+    setupEditRepo([]);
+    await expect(
+      service.addPlace('trip-1', 'user-1', {
+        placeId: '4c2f9c8e-0000-0000-0000-000000000001',
+        customName: '중복 입력',
+        dayNumber: 1,
+      }),
+    ).rejects.toMatchObject({ code: 'SCHEDULE_PLACE_INPUT_INVALID' });
+    await expect(
+      service.addPlace('trip-1', 'user-1', { dayNumber: 1 }),
+    ).rejects.toMatchObject({ code: 'SCHEDULE_PLACE_INPUT_INVALID' });
+  });
+
+  it('addPlace: 여행 일수(2일)를 벗어난 dayNumber는 거부한다', async () => {
+    setupEditRepo([]);
+    await expect(
+      service.addPlace('trip-1', 'user-1', { customName: '장소', dayNumber: 3 }),
+    ).rejects.toMatchObject({ code: 'SCHEDULE_PLACE_INPUT_INVALID' });
+  });
+
+  it('updatePlace: memo만 수정하면 위치는 그대로 두고, null이면 메모를 지운다', async () => {
+    const rows = [buildRow('t1', 1, 1)];
+    rows[0].memo = '기존 메모';
+    setupEditRepo(rows);
+
+    const { tripPlace } = await service.updatePlace('trip-1', 'user-1', 't1', { memo: null });
+
+    expect(tripPlace.memo).toBeNull();
+    expect(rows[0]).toMatchObject({ dayNumber: 1, orderInDay: 1 });
+  });
+
+  it('updatePlace: 다른 날로 이동하면 원래 날과 대상 날 모두 1..n으로 재부여된다', async () => {
+    const rows = [
+      buildRow('t1', 1, 1),
+      buildRow('t2', 1, 2),
+      buildRow('t3', 2, 1),
+    ];
+    setupEditRepo(rows);
+
+    // t1을 2일차 1번 위치로 이동
+    await service.updatePlace('trip-1', 'user-1', 't1', { dayNumber: 2, orderInDay: 1 });
+
+    const snapshot = rows.map((row) => [row.id, row.dayNumber, row.orderInDay]);
+    expect(snapshot).toEqual(
+      expect.arrayContaining([
+        ['t1', 2, 1],
+        ['t3', 2, 2],
+        ['t2', 1, 1], // 1일차가 당겨진다
+      ]),
+    );
+  });
+
+  it('updatePlace: 없는 tripPlaceId는 TRIP_PLACE_NOT_FOUND', async () => {
+    setupEditRepo([buildRow('t1', 1, 1)]);
+    await expect(
+      service.updatePlace('trip-1', 'user-1', 'ghost', { memo: 'x' }),
+    ).rejects.toMatchObject({ code: 'TRIP_PLACE_NOT_FOUND' });
+  });
+
+  it('removePlace: 행을 지우고 그날 순번을 압축한다', async () => {
+    const rows = [buildRow('t1', 1, 1), buildRow('t2', 1, 2), buildRow('t3', 1, 3)];
+    const repo = setupEditRepo(rows);
+
+    await service.removePlace('trip-1', 'user-1', 't2');
+
+    expect(repo.remove).toHaveBeenCalled();
+    const snapshot = rows.map((row) => [row.id, row.orderInDay]);
+    expect(snapshot).toEqual([
+      ['t1', 1],
+      ['t3', 2],
+    ]);
+  });
+
+  it('reorder: 일괄 operations를 적용하고 day별 1..n으로 재부여된 전체 스케줄을 반환한다', async () => {
+    const rows = [
+      buildRow('t1', 1, 1),
+      buildRow('t2', 1, 2),
+      buildRow('t3', 2, 1),
+    ];
+    setupEditRepo(rows);
+
+    // t3을 1일차 맨 앞으로, t1을 2일차로
+    const { schedule } = await service.reorder('trip-1', 'user-1', {
+      operations: [
+        { tripPlaceId: 't3', dayNumber: 1, orderInDay: 1 },
+        { tripPlaceId: 't1', dayNumber: 2, orderInDay: 1 },
+      ],
+    });
+
+    expect(schedule.days).toHaveLength(2);
+    expect(schedule.days[0].places.map((p) => [p.id, p.orderInDay])).toEqual([
+      ['t3', 1],
+      ['t2', 2],
+    ]);
+    expect(schedule.days[1].places.map((p) => [p.id, p.orderInDay])).toEqual([['t1', 1]]);
+  });
+
+  it('reorder: 없는 tripPlaceId가 섞이면 TRIP_PLACE_NOT_FOUND를 던진다', async () => {
+    setupEditRepo([buildRow('t1', 1, 1)]);
+    await expect(
+      service.reorder('trip-1', 'user-1', {
+        operations: [{ tripPlaceId: 'ghost', dayNumber: 1, orderInDay: 1 }],
+      }),
+    ).rejects.toMatchObject({ code: 'TRIP_PLACE_NOT_FOUND' });
+  });
+
+  it('reorder: 여행 일수를 벗어난 dayNumber는 SCHEDULE_PLACE_INPUT_INVALID', async () => {
+    setupEditRepo([buildRow('t1', 1, 1)]);
+    await expect(
+      service.reorder('trip-1', 'user-1', {
+        operations: [{ tripPlaceId: 't1', dayNumber: 9, orderInDay: 1 }],
+      }),
+    ).rejects.toMatchObject({ code: 'SCHEDULE_PLACE_INPUT_INVALID' });
+  });
 });
