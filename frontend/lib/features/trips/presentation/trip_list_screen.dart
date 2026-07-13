@@ -4,6 +4,8 @@ import '../../../core/theme/app_colors.dart';
 import '../../../core/theme/app_gradients.dart';
 import '../../../core/widgets/ai_badge.dart';
 import '../../../core/widgets/app_button.dart';
+import '../../notifications/notification_inbox_controller.dart';
+import '../../notifications/presentation/notifications_screen.dart';
 import '../../profile/presentation/profile_controller.dart';
 import '../../profile/presentation/profile_state.dart';
 import '../data/trip_models.dart';
@@ -108,13 +110,15 @@ class _TripListScreenState extends ConsumerState<TripListScreen> {
   Future<void> _reload() => ref.read(tripListControllerProvider.notifier).load();
 }
 
-class _GreetingHeader extends StatelessWidget {
+class _GreetingHeader extends ConsumerWidget {
   const _GreetingHeader({required this.profileState});
   final ProfileState profileState;
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
     final nickname = profileState is ProfileLoaded ? (profileState as ProfileLoaded).user.nickname : null;
+    // 이 기기가 받은 알림 중 안 읽은 개수. 알림 확인 창을 열면 markAllRead로 0이 된다.
+    final unread = ref.watch(notificationInboxControllerProvider).where((n) => !n.read).length;
 
     return Row(
       mainAxisAlignment: MainAxisAlignment.spaceBetween,
@@ -125,16 +129,39 @@ class _GreetingHeader extends StatelessWidget {
             style: const TextStyle(fontSize: 19, fontWeight: FontWeight.w700, color: AppColors.ink900),
           ),
         ),
-        // 알림(Phase 13)이 아직 없어 눌러도 "곧 만나요" 안내만 뜬다 — 그래서 실제
-        // 안 읽음이 없는데 있는 척하는 빨간 점은 넣지 않는다.
         InkWell(
           borderRadius: BorderRadius.circular(19),
-          onTap: () => _showComingSoon(context, '알림'),
-          child: Container(
-            width: 38,
-            height: 38,
-            decoration: const BoxDecoration(color: AppColors.surfaceSubtle, shape: BoxShape.circle),
-            child: const Icon(Icons.notifications_outlined, size: 19, color: AppColors.ink600),
+          onTap: () => Navigator.of(
+            context,
+          ).push(MaterialPageRoute(builder: (_) => const NotificationsScreen())),
+          child: Stack(
+            clipBehavior: Clip.none,
+            children: [
+              Container(
+                width: 38,
+                height: 38,
+                decoration: const BoxDecoration(
+                  color: AppColors.surfaceSubtle,
+                  shape: BoxShape.circle,
+                ),
+                child: const Icon(Icons.notifications_outlined, size: 19, color: AppColors.ink600),
+              ),
+              // 안 읽은 알림이 실제로 있을 때만 빨간 점을 띄운다.
+              if (unread > 0)
+                Positioned(
+                  right: 0,
+                  top: 0,
+                  child: Container(
+                    width: 10,
+                    height: 10,
+                    decoration: BoxDecoration(
+                      color: AppColors.danger,
+                      shape: BoxShape.circle,
+                      border: Border.all(color: Colors.white, width: 1.5),
+                    ),
+                  ),
+                ),
+            ],
           ),
         ),
       ],
