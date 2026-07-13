@@ -13,11 +13,13 @@ export interface ScheduleAiPlaceInput {
   lat: number | null;
   lng: number | null;
   categoryCode: string | null;
+  isRequired: boolean;
 }
 
 export interface ScheduleAiRequest {
   places: ScheduleAiPlaceInput[];
   durationDays: number;
+  targetPlaceCount: number;
 }
 
 /** AI가 돌려준 일자별 배치 결과(placeIds만) — 실제 trip_places 매핑은 Service가 한다. */
@@ -110,10 +112,11 @@ export class OpenAiScheduleClient implements ScheduleAiClient {
   private buildSystemPrompt(): string {
     return [
       '당신은 국내 여행 일정을 설계하는 전문 플래너다.',
-      '사용자가 고른 장소들을 여행 일수에 맞춰 하루 단위로 나누고, 하루 안에서는 동선(위치)을 고려해 방문 순서를 정한다.',
+      '입력 장소에는 required=true인 필수 장소와 required=false인 선택 후보가 섞여 있다.',
+      '필수 장소는 반드시 모두 포함하고, 선택 후보 중에서는 여행 일수와 동선을 고려해 좋은 장소를 추가로 골라 완성도 있는 일정을 만든다.',
       '반드시 아래 JSON 스키마로만 답한다. 설명 문장은 넣지 않는다.',
       '{ "days": [ { "dayNumber": <1부터 durationDays까지의 정수>, "placeIds": [<place id 문자열> ...] } ] }',
-      '규칙: 입력으로 받은 모든 placeId를 정확히 한 번씩만 사용한다. 존재하지 않는 id를 지어내지 않는다. 장소 수는 각 날짜에 가급적 고르게 배분한다.',
+      '규칙: required=true인 placeId는 정확히 한 번씩 모두 사용한다. required=false인 placeId는 필요할 때만 사용하되, 전체 사용 장소 수는 targetPlaceCount에 가깝게 한다. 존재하지 않는 id를 지어내지 않는다. 장소 수는 각 날짜에 가급적 고르게 배분한다.',
     ].join('\n');
   }
 
@@ -121,13 +124,14 @@ export class OpenAiScheduleClient implements ScheduleAiClient {
     const placeLines = request.places
       .map(
         (place) =>
-          `- id=${place.id} | ${place.name}` +
+          `- id=${place.id} | required=${place.isRequired ? 'true' : 'false'} | ${place.name}` +
           (place.address ? ` | ${place.address}` : '') +
           (place.lat !== null && place.lng !== null ? ` | (${place.lat}, ${place.lng})` : ''),
       )
       .join('\n');
     return [
       `여행 일수: ${request.durationDays}일`,
+      `목표 방문 장소 수: ${request.targetPlaceCount}곳`,
       `장소 목록(${request.places.length}곳):`,
       placeLines,
     ].join('\n');

@@ -42,6 +42,9 @@ interface PlaceAssignment {
   orderInDay: number;
 }
 
+const TARGET_PLACES_PER_DAY = 4;
+const MAX_AI_SCHEDULE_PLACES = 16;
+
 @Injectable()
 export class ScheduleService {
   constructor(
@@ -72,14 +75,24 @@ export class ScheduleService {
       TripMemberRole.EDITOR,
     ]);
 
-    const infos = await this.placesService.resolveForSchedule(dto.selectedPlaceIds);
+    const selectedInfos = await this.placesService.resolveForSchedule(dto.selectedPlaceIds);
     const requestedCount = new Set(dto.selectedPlaceIds).size;
-    if (infos.length !== requestedCount) {
+    if (selectedInfos.length !== requestedCount) {
       // 존재하지 않거나 조회 실패한 place가 섞여 있으면 부분 생성하지 않고 거부한다.
       throw new BusinessException(ScheduleErrorCode.SELECTED_PLACES_INVALID);
     }
 
     const durationDays = this.computeDurationDays(trip.startDate, trip.endDate);
+    const targetPlaceCount = this.computeTargetPlaceCount(durationDays, selectedInfos.length);
+    const additionalInfos = await this.placesService.recommendAdditionalForSchedule(
+      tripId,
+      userId,
+      selectedInfos.map((info) => info.id),
+      targetPlaceCount - selectedInfos.length,
+    );
+    const infos = [...selectedInfos, ...additionalInfos].slice(0, targetPlaceCount);
+    const requiredPlaceIds = new Set(selectedInfos.map((info) => info.id));
+
     const aiResult = await this.scheduleAiClient.requestSchedule({
       places: infos.map((info) => ({
         id: info.id,
@@ -88,11 +101,13 @@ export class ScheduleService {
         lat: info.lat,
         lng: info.lng,
         categoryCode: info.categoryCode,
+        isRequired: requiredPlaceIds.has(info.id),
       })),
       durationDays,
+      targetPlaceCount: infos.length,
     });
 
-    const assignments = this.buildAssignments(aiResult, infos, durationDays);
+    const assignments = this.buildAssignments(aiResult, infos, durationDays, requiredPlaceIds);
     const infoById = new Map(infos.map((info) => [info.id, info]));
 
     const saved = await this.dataSource.transaction(async (manager) => {
@@ -122,6 +137,11 @@ export class ScheduleService {
     return Math.max(diffDays + 1, 1);
   }
 
+  private computeTargetPlaceCount(durationDays: number, selectedCount: number): number {
+    const recommended = Math.min(durationDays * TARGET_PLACES_PER_DAY, MAX_AI_SCHEDULE_PLACES);
+    return Math.max(selectedCount, recommended);
+  }
+
   /**
    * AI 결과(placeIds만)를 trip_places 배치로 변환한다. dayNumber를 [1, durationDays]로
    * 클램프하고, 중복 배치는 첫 등장만 남긴다. AI가 누락한 장소는 마지막 날에 이어 붙여
@@ -131,6 +151,7 @@ export class ScheduleService {
     aiResult: ScheduleAiResult,
     infos: ScheduledPlaceInfo[],
     durationDays: number,
+    requiredPlaceIds: Set<string>,
   ): PlaceAssignment[] {
     const dayToPlaceIds = new Map<number, string[]>();
     const placed = new Set<string>();
@@ -149,7 +170,14 @@ export class ScheduleService {
       dayToPlaceIds.set(dayNumber, list);
     }
 
-    const leftovers = infos.filter((info) => !placed.has(info.id)).map((info) => info.id);
+    const requiredLeftovers = infos
+      .filter((info) => requiredPlaceIds.has(info.id) && !placed.has(info.id))
+      .map((info) => info.id);
+    const optionalFallbacks = infos
+      .filter((info) => !requiredPlaceIds.has(info.id) && !placed.has(info.id))
+      .map((info) => info.id)
+      .slice(0, Math.max(infos.length - placed.size - requiredLeftovers.length, 0));
+    const leftovers = [...requiredLeftovers, ...optionalFallbacks];
     if (leftovers.length > 0) {
       const lastDay = dayToPlaceIds.get(durationDays) ?? [];
       lastDay.push(...leftovers);

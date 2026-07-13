@@ -24,9 +24,26 @@ function buildRequest(): ScheduleAiRequest {
   return {
     durationDays: 2,
     places: [
-      { id: 'p1', name: '장소1', address: '주소1', lat: 37.5, lng: 127, categoryCode: 'A01' },
-      { id: 'p2', name: '장소2', address: null, lat: null, lng: null, categoryCode: null },
+      {
+        id: 'p1',
+        name: '장소1',
+        address: '주소1',
+        lat: 37.5,
+        lng: 127,
+        categoryCode: 'A01',
+        isRequired: true,
+      },
+      {
+        id: 'p2',
+        name: '장소2',
+        address: null,
+        lat: null,
+        lng: null,
+        categoryCode: null,
+        isRequired: false,
+      },
     ],
+    targetPlaceCount: 2,
   };
 }
 

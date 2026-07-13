@@ -314,6 +314,35 @@ export class PlacesService {
     return infos;
   }
 
+  /**
+   * 스케줄 생성에서 사용자가 고른 필수 장소 외에 함께 고려할 지역 추천 후보를 가져온다.
+   * 후보 조회 실패가 전체 스케줄 생성을 막지는 않도록 빈 배열로 폴백한다. 사용자가 고른
+   * 장소는 ScheduleService에서 별도로 검증하므로 여기서는 보강 후보만 조용히 줄인다.
+   */
+  async recommendAdditionalForSchedule(
+    tripId: string,
+    userId: string,
+    excludeIds: string[],
+    limit: number,
+  ): Promise<ScheduledPlaceInfo[]> {
+    if (limit <= 0) {
+      return [];
+    }
+
+    try {
+      const excluded = new Set(excludeIds);
+      const { candidates } = await this.getCandidates(tripId, userId, {});
+      const candidateIds = candidates
+        .map((candidate) => candidate.id)
+        .filter((id) => !excluded.has(id))
+        .slice(0, limit);
+      return this.resolveForSchedule(candidateIds);
+    } catch (error) {
+      this.logger.warn(`스케줄 보강 후보 조회 실패: ${(error as Error).message}`);
+      return [];
+    }
+  }
+
   private async toScheduledInfo(place: Place): Promise<ScheduledPlaceInfo | null> {
     if (place.source === PlaceSource.GOOGLE) {
       const details = place.externalId

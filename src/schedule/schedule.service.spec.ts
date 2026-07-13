@@ -37,7 +37,7 @@ function createManagerMock() {
 
 describe('ScheduleService', () => {
   let tripsService: { getDetail: jest.Mock; assertMember: jest.Mock };
-  let placesService: { resolveForSchedule: jest.Mock };
+  let placesService: { resolveForSchedule: jest.Mock; recommendAdditionalForSchedule: jest.Mock };
   let scheduleAiClient: { requestSchedule: jest.Mock };
   let manager: ReturnType<typeof createManagerMock>;
   let dataSource: { transaction: jest.Mock };
@@ -49,7 +49,10 @@ describe('ScheduleService', () => {
       getDetail: jest.fn(async () => ({ startDate: '2026-07-13', endDate: '2026-07-14' })),
       assertMember: jest.fn(async () => ({})),
     };
-    placesService = { resolveForSchedule: jest.fn() };
+    placesService = {
+      resolveForSchedule: jest.fn(),
+      recommendAdditionalForSchedule: jest.fn(async () => []),
+    };
     scheduleAiClient = { requestSchedule: jest.fn() };
     manager = createManagerMock();
     dataSource = { transaction: jest.fn(async (cb: (m: unknown) => unknown) => cb(manager)) };
@@ -89,7 +92,7 @@ describe('ScheduleService', () => {
     expect(manager.delete).toHaveBeenCalledWith(expect.anything(), { tripId: 'trip-1' });
     // 여행 일수(2일)를 AI에 전달한다.
     expect(scheduleAiClient.requestSchedule).toHaveBeenCalledWith(
-      expect.objectContaining({ durationDays: 2 }),
+      expect.objectContaining({ durationDays: 2, targetPlaceCount: 3 }),
     );
 
     expect(schedule.days).toHaveLength(2);
@@ -121,6 +124,47 @@ describe('ScheduleService', () => {
     // 누락분 p3는 마지막 날(durationDays=2)에 붙는다.
     const lastDay = schedule.days.find((day) => day.dayNumber === 2);
     expect(lastDay?.places.map((p) => p.placeId)).toContain('p3');
+  });
+
+  it('선택 장소 외 지역 추천 후보를 함께 AI에 넘겨 완성된 일정을 만든다', async () => {
+    placesService.resolveForSchedule.mockResolvedValue([buildInfo('p1'), buildInfo('p2')]);
+    placesService.recommendAdditionalForSchedule.mockResolvedValue([
+      buildInfo('r1'),
+      buildInfo('r2'),
+      buildInfo('r3'),
+      buildInfo('r4'),
+      buildInfo('r5'),
+      buildInfo('r6'),
+    ]);
+    scheduleAiClient.requestSchedule.mockResolvedValue({
+      days: [
+        { dayNumber: 1, placeIds: ['p1', 'r1', 'r2', 'r3'] },
+        { dayNumber: 2, placeIds: ['p2', 'r4', 'r5', 'r6'] },
+      ],
+    });
+
+    const { schedule } = await service.generate('trip-1', 'user-1', {
+      selectedPlaceIds: ['p1', 'p2'],
+    });
+
+    expect(placesService.recommendAdditionalForSchedule).toHaveBeenCalledWith(
+      'trip-1',
+      'user-1',
+      ['p1', 'p2'],
+      6,
+    );
+    expect(scheduleAiClient.requestSchedule).toHaveBeenCalledWith(
+      expect.objectContaining({
+        targetPlaceCount: 8,
+        places: expect.arrayContaining([
+          expect.objectContaining({ id: 'p1', isRequired: true }),
+          expect.objectContaining({ id: 'p2', isRequired: true }),
+          expect.objectContaining({ id: 'r1', isRequired: false }),
+        ]),
+      }),
+    );
+    const allPlaceIds = schedule.days.flatMap((day) => day.places.map((p) => p.placeId));
+    expect(allPlaceIds).toEqual(['p1', 'r1', 'r2', 'r3', 'p2', 'r4', 'r5', 'r6']);
   });
 
   it('여행 일수를 넘는 dayNumber는 마지막 날로 클램프한다', async () => {

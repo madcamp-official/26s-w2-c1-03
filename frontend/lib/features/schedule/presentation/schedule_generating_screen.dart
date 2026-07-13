@@ -106,7 +106,7 @@ class _ScheduleGeneratingScreenState
         const AiBadge(label: 'AI 동선 생성'),
         const SizedBox(height: 18),
         const Text(
-          '선택 완료!\n가장 자연스러운 동선을 짜는 중이에요',
+          '선택 완료!\n추천 장소까지 더해 일정을 짜는 중이에요',
           style: TextStyle(
             fontSize: 25,
             height: 1.25,
@@ -116,7 +116,8 @@ class _ScheduleGeneratingScreenState
         ),
         const SizedBox(height: 12),
         Text(
-          '${widget.selectedPlaceIds.length}곳을 여행 일수에 맞춰 나누고 있어요. '
+          '선택한 ${widget.selectedPlaceIds.length}곳은 꼭 포함하고, '
+          '주변 추천 장소를 더해 여행 일수에 맞춰 나누고 있어요. '
           'AI 응답을 기다리는 동안 화면을 닫지 말아줘요.',
           style: const TextStyle(
             fontSize: 14,
@@ -140,7 +141,7 @@ class _ScheduleGeneratingScreenState
         const _InfoCard(
           icon: Icons.lock_clock_outlined,
           title: '잠깐만 기다려줘',
-          description: 'OpenAI 응답이 느리면 최대 1분 정도 걸릴 수 있어요.',
+          description: '후보 장소까지 함께 검토해서 최대 1분 정도 걸릴 수 있어요.',
         ),
       ],
     );

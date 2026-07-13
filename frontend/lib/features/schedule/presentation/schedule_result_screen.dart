@@ -52,7 +52,7 @@ class ScheduleResultScreen extends StatelessWidget {
                     ),
                     const SizedBox(height: 8),
                     Text(
-                      '총 $_placeCount곳을 일자별로 배치했어요. 다음 Phase에서 순서와 메모를 직접 다듬을 수 있어요.',
+                      '선택한 장소는 반드시 포함하고, 어울리는 추천 장소를 더해 총 $_placeCount곳을 일자별로 배치했어요.',
                       style: const TextStyle(
                         fontSize: 14,
                         height: 1.5,
