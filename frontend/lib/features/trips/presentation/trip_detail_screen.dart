@@ -6,9 +6,11 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../core/network/api_exception.dart';
 import '../../../core/theme/app_colors.dart';
 import '../../../core/widgets/app_button.dart';
-import '../../../core/widgets/app_list_row.dart';
 import '../../places/presentation/place_selection_screen.dart';
+import '../../schedule/data/schedule_api.dart';
+import '../../schedule/data/schedule_models.dart';
 import '../data/trip_models.dart';
+import 'trip_detail_read_only_view.dart';
 import 'trip_list_controller.dart';
 
 sealed class _DetailState {
@@ -20,8 +22,9 @@ class _DetailLoading extends _DetailState {
 }
 
 class _DetailLoaded extends _DetailState {
-  const _DetailLoaded(this.trip);
+  const _DetailLoaded(this.trip, this.schedule);
   final Trip trip;
+  final SchedulePlan schedule;
 }
 
 class _DetailFailed extends _DetailState {
@@ -48,6 +51,7 @@ class _TripDetailScreenState extends ConsumerState<TripDetailScreen> {
   bool _editing = false;
   bool _saving = false;
   bool _deleting = false;
+  bool _redirectedToPlaceSelection = false;
 
   @override
   void initState() {
@@ -65,13 +69,20 @@ class _TripDetailScreenState extends ConsumerState<TripDetailScreen> {
     setState(() => _state = const _DetailLoading());
     try {
       final trip = await ref.read(tripsApiProvider).getDetail(widget.tripId);
+      final schedule = await ref
+          .read(scheduleApiProvider)
+          .getSchedule(widget.tripId);
       _titleController.text = trip.title;
       _dateRange = DateTimeRange(
         start: DateTime.parse(trip.startDate),
         end: DateTime.parse(trip.endDate),
       );
       if (!mounted) return;
-      setState(() => _state = _DetailLoaded(trip));
+      setState(() => _state = _DetailLoaded(trip, schedule));
+      if (!_hasSchedule(schedule) && !_redirectedToPlaceSelection) {
+        _redirectedToPlaceSelection = true;
+        unawaited(_openPlaceSelection(trip.id));
+      }
     } on DioException catch (e) {
       if (!mounted) return;
       final error = e.error;
@@ -113,7 +124,11 @@ class _TripDetailScreenState extends ConsumerState<TripDetailScreen> {
       unawaited(ref.read(tripListControllerProvider.notifier).load());
       if (!mounted) return;
       setState(() {
-        _state = _DetailLoaded(updated);
+        final previous = _state;
+        final schedule = previous is _DetailLoaded
+            ? previous.schedule
+            : const SchedulePlan(days: []);
+        _state = _DetailLoaded(updated, schedule);
         _editing = false;
         _saving = false;
       });
@@ -122,7 +137,9 @@ class _TripDetailScreenState extends ConsumerState<TripDetailScreen> {
       final error = e.error;
       setState(() => _saving = false);
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(error is ApiException ? error.message : '저장하지 못했어요.')),
+        SnackBar(
+          content: Text(error is ApiException ? error.message : '저장하지 못했어요.'),
+        ),
       );
     }
   }
@@ -158,7 +175,9 @@ class _TripDetailScreenState extends ConsumerState<TripDetailScreen> {
       final error = e.error;
       setState(() => _deleting = false);
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(error is ApiException ? error.message : '삭제하지 못했어요.')),
+        SnackBar(
+          content: Text(error is ApiException ? error.message : '삭제하지 못했어요.'),
+        ),
       );
     }
   }
@@ -167,6 +186,21 @@ class _TripDetailScreenState extends ConsumerState<TripDetailScreen> {
     final month = date.month.toString().padLeft(2, '0');
     final day = date.day.toString().padLeft(2, '0');
     return '${date.year}-$month-$day';
+  }
+
+  bool _hasSchedule(SchedulePlan schedule) {
+    return schedule.days.any((day) => day.places.isNotEmpty);
+  }
+
+  Future<void> _openPlaceSelection(String tripId) async {
+    final generated = await Navigator.of(context).push<bool>(
+      MaterialPageRoute(builder: (_) => PlaceSelectionScreen(tripId: tripId)),
+    );
+    if (!mounted) return;
+    if (generated == true) {
+      _redirectedToPlaceSelection = false;
+      await _load();
+    }
   }
 
   @override
@@ -179,7 +213,10 @@ class _TripDetailScreenState extends ConsumerState<TripDetailScreen> {
         elevation: 0,
         title: const Text(
           '여행 상세',
-          style: TextStyle(color: AppColors.ink900, fontWeight: FontWeight.w700),
+          style: TextStyle(
+            color: AppColors.ink900,
+            fontWeight: FontWeight.w700,
+          ),
         ),
         iconTheme: const IconThemeData(color: AppColors.ink900),
         actions: [
@@ -194,7 +231,10 @@ class _TripDetailScreenState extends ConsumerState<TripDetailScreen> {
                   ? const SizedBox(
                       width: 18,
                       height: 18,
-                      child: CircularProgressIndicator(strokeWidth: 2, color: AppColors.danger),
+                      child: CircularProgressIndicator(
+                        strokeWidth: 2,
+                        color: AppColors.danger,
+                      ),
                     )
                   : const Icon(Icons.delete_outline, color: AppColors.danger),
               onPressed: _deleting ? null : _confirmAndDelete,
@@ -225,12 +265,15 @@ class _TripDetailScreenState extends ConsumerState<TripDetailScreen> {
       );
     }
 
-    final trip = (state as _DetailLoaded).trip;
-    return Padding(
-      padding: const EdgeInsets.all(22),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: _editing ? _buildEditFields() : _buildReadOnlyFields(trip),
+    final loaded = state as _DetailLoaded;
+    return RefreshIndicator(
+      onRefresh: _load,
+      color: AppColors.ink900,
+      child: ListView(
+        padding: const EdgeInsets.fromLTRB(22, 14, 22, 120),
+        children: _editing
+            ? _buildEditFields()
+            : _buildReadOnlyFields(loaded.trip, loaded.schedule),
       ),
     );
   }
@@ -239,11 +282,18 @@ class _TripDetailScreenState extends ConsumerState<TripDetailScreen> {
     return [
       TextField(
         controller: _titleController,
-        style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w700, color: AppColors.ink900),
+        style: const TextStyle(
+          fontSize: 15,
+          fontWeight: FontWeight.w700,
+          color: AppColors.ink900,
+        ),
         decoration: InputDecoration(
           filled: true,
           fillColor: AppColors.surfaceSubtle,
-          border: OutlineInputBorder(borderRadius: BorderRadius.circular(16), borderSide: BorderSide.none),
+          border: OutlineInputBorder(
+            borderRadius: BorderRadius.circular(16),
+            borderSide: BorderSide.none,
+          ),
         ),
       ),
       const SizedBox(height: 12),
@@ -277,78 +327,33 @@ class _TripDetailScreenState extends ConsumerState<TripDetailScreen> {
               label: '취소',
               variant: AppButtonVariant.outline,
               height: 48,
-              onPressed: _saving ? null : () => setState(() => _editing = false),
+              onPressed: _saving
+                  ? null
+                  : () => setState(() => _editing = false),
             ),
           ),
           const SizedBox(width: 12),
           Expanded(
-            child: AppButton(label: '저장', height: 48, loading: _saving, onPressed: _save),
+            child: AppButton(
+              label: '저장',
+              height: 48,
+              loading: _saving,
+              onPressed: _save,
+            ),
           ),
         ],
       ),
     ];
   }
 
-  List<Widget> _buildReadOnlyFields(Trip trip) {
+  List<Widget> _buildReadOnlyFields(Trip trip, SchedulePlan schedule) {
     return [
-      Text(
-        trip.title,
-        style: const TextStyle(fontSize: 22, fontWeight: FontWeight.w800, color: AppColors.ink900),
-      ),
-      const SizedBox(height: 8),
-      Text(
-        trip.cityName,
-        style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w600, color: AppColors.ink600),
-      ),
-      const SizedBox(height: 4),
-      Text(
-        '${trip.startDate} ~ ${trip.endDate}',
-        style: const TextStyle(fontSize: 13.5, color: AppColors.ink400, fontWeight: FontWeight.w600),
-      ),
-      const SizedBox(height: 12),
-      _StatusBadge(status: trip.status),
-      const SizedBox(height: 20),
-      AppListRow(
-        showDivider: false,
-        leading: Container(
-          width: 40,
-          height: 40,
-          decoration: const BoxDecoration(color: AppColors.surfaceSubtle, shape: BoxShape.circle),
-          child: const Icon(Icons.explore_outlined, size: 19, color: AppColors.ink600),
-        ),
-        title: '가고 싶은 곳 골라보기',
-        subtitle: '이 지역 추천 장소를 둘러봐',
-        trailing: const AppChevron(),
-        onTap: () => Navigator.of(
-          context,
-        ).push(MaterialPageRoute(builder: (_) => PlaceSelectionScreen(tripId: trip.id))),
+      TripDetailReadOnlyView(
+        trip: trip,
+        schedule: schedule,
+        hasSchedule: _hasSchedule(schedule),
+        onSelectPlaces: () => _openPlaceSelection(trip.id),
       ),
     ];
-  }
-}
-
-class _StatusBadge extends StatelessWidget {
-  const _StatusBadge({required this.status});
-  final String status;
-
-  @override
-  Widget build(BuildContext context) {
-    final label = switch (status) {
-      'planning' => '계획 중',
-      'ongoing' => '여행 중',
-      'completed' => '완료',
-      _ => status,
-    };
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-      decoration: BoxDecoration(
-        color: AppColors.surfaceSubtle,
-        borderRadius: BorderRadius.circular(999),
-      ),
-      child: Text(
-        label,
-        style: const TextStyle(fontSize: 11.5, fontWeight: FontWeight.w700, color: AppColors.ink600),
-      ),
-    );
   }
 }

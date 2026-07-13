@@ -10,6 +10,14 @@ class ScheduleApi {
 
   final ApiClient _apiClient;
 
+  Future<SchedulePlan> getSchedule(String tripId) async {
+    final response = await _apiClient.dio.get<Map<String, dynamic>>(
+      '/trips/$tripId/schedule',
+    );
+    final schedule = response.data!['schedule'] as Map<String, dynamic>;
+    return SchedulePlan.fromJson(schedule);
+  }
+
   Future<SchedulePlan> generate({
     required String tripId,
     required List<String> selectedPlaceIds,

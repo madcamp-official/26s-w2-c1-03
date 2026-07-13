@@ -263,7 +263,7 @@ class _PlaceSelectionScreenState extends ConsumerState<PlaceSelectionScreen> {
     if (!mounted) return;
     setState(() => _generating = false);
     if (completed == true) {
-      Navigator.of(context).pop();
+      Navigator.of(context).pop(true);
     }
   }
 
