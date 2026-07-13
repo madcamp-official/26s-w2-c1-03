@@ -3,12 +3,12 @@ import 'dart:ui';
 import 'package:flutter/material.dart';
 import '../../../core/theme/app_colors.dart';
 import '../../profile/presentation/profile_screen.dart';
+import '../../schedule/presentation/schedule_trip_list_screen.dart';
 import '../../trips/presentation/create_trip_screen.dart';
 import '../../trips/presentation/trip_list_screen.dart';
 
 /// 하단 탭바 셸(design.md §5.1/§6): 좌측 홈/스케줄, 중앙 raised FAB(여행 추가),
-/// 우측 기록/마이. 스케줄·기록은 아직 기능이 없어(Phase 7~9, 11~12) 자리표시자만
-/// 넣는다.
+/// 우측 기록/마이. 기록은 아직 기능이 없어(Phase 11~12) 자리표시자만 넣는다.
 class AppShell extends StatefulWidget {
   const AppShell({super.key});
 
@@ -21,13 +21,15 @@ class _AppShellState extends State<AppShell> {
 
   static const _tabs = [
     TripListScreen(),
-    _ComingSoonTab(label: '스케줄'),
+    ScheduleTripListScreen(),
     _ComingSoonTab(label: '기록'),
     ProfileScreen(),
   ];
 
   void _openCreateTrip() {
-    Navigator.of(context).push(MaterialPageRoute(builder: (_) => const CreateTripScreen()));
+    Navigator.of(
+      context,
+    ).push(MaterialPageRoute(builder: (_) => const CreateTripScreen()));
   }
 
   @override
@@ -52,7 +54,9 @@ class _AppShellState extends State<AppShell> {
           child: Container(
             decoration: const BoxDecoration(
               color: Color(0xF5FFFFFF),
-              border: Border(top: BorderSide(color: Color(0xFFEFF1F3), width: 1)),
+              border: Border(
+                top: BorderSide(color: Color(0xFFEFF1F3), width: 1),
+              ),
             ),
             child: BottomAppBar(
               shape: const CircularNotchedRectangle(),
@@ -151,7 +155,11 @@ class _ComingSoonTab extends StatelessWidget {
       body: Center(
         child: Text(
           '$label은(는) 곧 만나요 👋',
-          style: const TextStyle(fontSize: 15, color: AppColors.ink400, fontWeight: FontWeight.w600),
+          style: const TextStyle(
+            fontSize: 15,
+            color: AppColors.ink400,
+            fontWeight: FontWeight.w600,
+          ),
         ),
       ),
     );
