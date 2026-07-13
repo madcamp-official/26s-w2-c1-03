@@ -8,7 +8,7 @@ import '../../../core/network/api_exception.dart';
 import '../../../core/theme/app_colors.dart';
 import '../data/places_api.dart';
 import '../data/places_models.dart';
-import '../../schedule/data/schedule_api.dart';
+import '../../schedule/presentation/schedule_generating_screen.dart';
 import 'place_selection_constants.dart';
 import 'widgets/category_chip_row.dart';
 import 'widgets/place_error_overlay.dart';
@@ -249,47 +249,22 @@ class _PlaceSelectionScreenState extends ConsumerState<PlaceSelectionScreen> {
     );
   }
 
-  Future<void> _generateSchedule() async {
+  Future<void> _openScheduleGeneration() async {
     if (_selectedCandidates.isEmpty || _generating) return;
     setState(() => _generating = true);
-    try {
-      final schedule = await ref
-          .read(scheduleApiProvider)
-          .generate(
-            tripId: widget.tripId,
-            selectedPlaceIds: _selectedCandidates.keys.toList(),
-          );
-      if (!mounted) return;
-      final placeCount = schedule.days.fold<int>(
-        0,
-        (sum, day) => sum + day.places.length,
-      );
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(SnackBar(content: Text('$placeCount곳으로 일정을 만들었어요.')));
+    final completed = await Navigator.of(context).push<bool>(
+      MaterialPageRoute(
+        builder: (_) => ScheduleGeneratingScreen(
+          tripId: widget.tripId,
+          selectedPlaceIds: _selectedCandidates.keys.toList(),
+        ),
+      ),
+    );
+    if (!mounted) return;
+    setState(() => _generating = false);
+    if (completed == true) {
       Navigator.of(context).pop();
-    } on DioException catch (e) {
-      if (!mounted) return;
-      final error = e.error;
-      final message = error is ApiException
-          ? _scheduleErrorMessage(error)
-          : '네트워크 연결을 확인해줘';
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(SnackBar(content: Text(message)));
-    } finally {
-      if (mounted) {
-        setState(() => _generating = false);
-      }
     }
-  }
-
-  String _scheduleErrorMessage(ApiException error) {
-    return switch (error.code) {
-      'OPENAI_REQUEST_FAILED' => 'AI가 일정을 못 만들었어요. 잠시 후 다시 시도해줘.',
-      'SELECTED_PLACES_INVALID' => '선택한 장소 정보를 다시 불러와야 해요.',
-      _ => error.message,
-    };
   }
 
   /// 로드된 후보 전체가 화면에 들어오도록 카메라를 맞춘다.
@@ -445,7 +420,7 @@ class _PlaceSelectionScreenState extends ConsumerState<PlaceSelectionScreen> {
           : PlaceFloatingCta(
               count: _selectedIds.length,
               loading: _generating,
-              onTap: _generateSchedule,
+              onTap: _openScheduleGeneration,
             ),
     );
   }
