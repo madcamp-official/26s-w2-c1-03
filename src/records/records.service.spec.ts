@@ -28,7 +28,21 @@ function createRepositoryMock<T extends object>(): RepoMock<T> {
     save: jest.fn(async (entity) => ({ id: 'ref-1', ...entity })),
     findOneBy: jest.fn(),
     findBy: jest.fn().mockResolvedValue([]),
+    find: jest.fn().mockResolvedValue([]),
     update: jest.fn(),
+  };
+}
+
+/** listMyRecords()의 QueryBuilder 체인을 흉내낸다 — getMany()만 통제하면 된다. */
+function createQueryBuilderMock(rows: TravelRecord[]) {
+  return {
+    innerJoinAndSelect: jest.fn().mockReturnThis(),
+    where: jest.fn().mockReturnThis(),
+    andWhere: jest.fn().mockReturnThis(),
+    orderBy: jest.fn().mockReturnThis(),
+    addOrderBy: jest.fn().mockReturnThis(),
+    take: jest.fn().mockReturnThis(),
+    getMany: jest.fn().mockResolvedValue(rows),
   };
 }
 
@@ -673,6 +687,262 @@ describe('RecordsService', () => {
       });
 
       expect(result).toMatchObject({ title: '기존 제목', content: '기존 내용' });
+    });
+  });
+
+  describe('listMyRecords', () => {
+    const trip = { cityName: '오사카', startDate: '2026-07-16', endDate: '2026-07-19' };
+
+    it('본인 기록만, 대표사진은 isCover가 있으면 그것을 우선한다', async () => {
+      const record = buildRecord({ id: 'record-1', trip: trip as never });
+      travelRecordRepository.createQueryBuilder = jest
+        .fn()
+        .mockReturnValue(createQueryBuilderMock([record]));
+      recordPhotoRepository.find!.mockResolvedValue([
+        buildRecordPhoto({ id: 'photo-1', recordId: 'record-1', orderIndex: 0, isCover: false }),
+        buildRecordPhoto({
+          id: 'photo-2',
+          recordId: 'record-1',
+          orderIndex: 1,
+          isCover: true,
+          storageUrl: 'https://storage.example/cover.jpg',
+        }),
+      ]);
+
+      const result = await service.listMyRecords('user-1', {});
+
+      expect(result.items).toEqual([
+        expect.objectContaining({
+          id: 'record-1',
+          tripCityName: '오사카',
+          tripStartDate: '2026-07-16',
+          tripEndDate: '2026-07-19',
+          coverPhotoUrl: 'https://storage.example/cover.jpg',
+        }),
+      ]);
+      expect(result.nextCursor).toBeNull();
+    });
+
+    it('사진이 있지만 isCover가 하나도 없으면 orderIndex가 가장 앞선 사진을 쓴다', async () => {
+      const record = buildRecord({ id: 'record-1', trip: trip as never });
+      travelRecordRepository.createQueryBuilder = jest
+        .fn()
+        .mockReturnValue(createQueryBuilderMock([record]));
+      recordPhotoRepository.find!.mockResolvedValue([
+        buildRecordPhoto({
+          id: 'photo-1',
+          recordId: 'record-1',
+          orderIndex: 0,
+          storageUrl: 'https://storage.example/first.jpg',
+        }),
+        buildRecordPhoto({
+          id: 'photo-2',
+          recordId: 'record-1',
+          orderIndex: 1,
+          storageUrl: 'https://storage.example/second.jpg',
+        }),
+      ]);
+
+      const result = await service.listMyRecords('user-1', {});
+
+      expect(result.items[0].coverPhotoUrl).toBe('https://storage.example/first.jpg');
+    });
+
+    it('사진이 하나도 없으면 coverPhotoUrl은 null이다', async () => {
+      const record = buildRecord({ id: 'record-1', trip: trip as never });
+      travelRecordRepository.createQueryBuilder = jest
+        .fn()
+        .mockReturnValue(createQueryBuilderMock([record]));
+      recordPhotoRepository.find!.mockResolvedValue([]);
+
+      const result = await service.listMyRecords('user-1', {});
+
+      expect(result.items[0].coverPhotoUrl).toBeNull();
+    });
+
+    it('limit보다 한 장 더 조회되면 hasMore로 판단해 nextCursor를 만든다', async () => {
+      const records = [
+        buildRecord({ id: 'record-1', trip: trip as never }),
+        buildRecord({ id: 'record-2', trip: trip as never }),
+      ];
+      travelRecordRepository.createQueryBuilder = jest
+        .fn()
+        .mockReturnValue(createQueryBuilderMock(records));
+      recordPhotoRepository.find!.mockResolvedValue([]);
+
+      const result = await service.listMyRecords('user-1', { limit: 1 });
+
+      expect(result.items).toHaveLength(1);
+      expect(result.items[0].id).toBe('record-1');
+      expect(result.nextCursor).not.toBeNull();
+    });
+
+    it('유효하지 않은 cursor는 VALIDATION_ERROR를 던진다', async () => {
+      await expect(
+        service.listMyRecords('user-1', { cursor: 'not-base64-json' }),
+      ).rejects.toThrow();
+    });
+  });
+
+  describe('getRecordDetail', () => {
+    it('레코드가 없으면 RECORD_NOT_FOUND를 던진다', async () => {
+      travelRecordRepository.findOneBy!.mockResolvedValue(null);
+
+      await expect(service.getRecordDetail('record-1', 'user-1')).rejects.toMatchObject({
+        code: 'RECORD_NOT_FOUND',
+      });
+    });
+
+    it('본인 기록이 아니면 RECORD_FORBIDDEN을 던진다', async () => {
+      travelRecordRepository.findOneBy!.mockResolvedValue(buildRecord({ userId: 'other-user' }));
+
+      await expect(service.getRecordDetail('record-1', 'user-1')).rejects.toMatchObject({
+        code: 'RECORD_FORBIDDEN',
+      });
+    });
+
+    it('사진을 orderIndex 순으로 포함해 반환한다', async () => {
+      travelRecordRepository.findOneBy!.mockResolvedValue(buildRecord());
+      const photos = [buildRecordPhoto({ id: 'photo-1', orderIndex: 0 })];
+      recordPhotoRepository.find!.mockResolvedValue(photos);
+
+      const result = await service.getRecordDetail('record-1', 'user-1');
+
+      expect(result.photos).toHaveLength(1);
+      expect(recordPhotoRepository.find).toHaveBeenCalledWith({
+        where: { recordId: 'record-1' },
+        order: { orderIndex: 'ASC' },
+      });
+    });
+  });
+
+  describe('deleteRecord', () => {
+    it('본인 기록이 아니면 RECORD_FORBIDDEN을 던지고 아무것도 지우지 않는다', async () => {
+      travelRecordRepository.findOneBy!.mockResolvedValue(buildRecord({ userId: 'other-user' }));
+
+      await expect(service.deleteRecord('record-1', 'user-1')).rejects.toMatchObject({
+        code: 'RECORD_FORBIDDEN',
+      });
+      expect(storageService.deletePermanent).not.toHaveBeenCalled();
+      expect(recordPhotoRepository.delete).not.toHaveBeenCalled();
+    });
+
+    it('사진 스토리지 파일까지 hard delete하고 기록은 soft delete한다', async () => {
+      travelRecordRepository.findOneBy!.mockResolvedValue(buildRecord());
+      recordPhotoRepository.findBy!.mockResolvedValue([
+        buildRecordPhoto({
+          id: 'photo-1',
+          storageUrl:
+            'https://firebasestorage.googleapis.com/v0/b/test-bucket/o/record-photos%2Frecord-1%2Fphoto-1.jpg?alt=media&token=abc',
+        }),
+      ]);
+
+      await service.deleteRecord('record-1', 'user-1');
+
+      expect(storageService.deletePermanent).toHaveBeenCalledWith(
+        'record-photos/record-1/photo-1.jpg',
+      );
+      expect(recordPhotoRepository.delete).toHaveBeenCalledWith({ recordId: 'record-1' });
+      expect(travelRecordRepository.update).toHaveBeenCalledWith(
+        { id: 'record-1' },
+        { deletedAt: expect.any(Date) },
+      );
+    });
+
+    it('삭제된 사진 중 대표사진이 있었으면 트립 대표사진을 자동 해제한다', async () => {
+      travelRecordRepository.findOneBy!.mockResolvedValue(buildRecord());
+      recordPhotoRepository.findBy!.mockResolvedValue([buildRecordPhoto({ isCover: true })]);
+
+      await service.deleteRecord('record-1', 'user-1');
+
+      expect(tripsService.setCoverImage).toHaveBeenCalledWith('trip-1', null);
+    });
+
+    it('삭제된 사진 중 대표사진이 없었으면 트립 대표사진을 건드리지 않는다', async () => {
+      travelRecordRepository.findOneBy!.mockResolvedValue(buildRecord());
+      recordPhotoRepository.findBy!.mockResolvedValue([buildRecordPhoto({ isCover: false })]);
+
+      await service.deleteRecord('record-1', 'user-1');
+
+      expect(tripsService.setCoverImage).not.toHaveBeenCalled();
+    });
+
+    it('사진이 하나도 없으면 recordPhotoRepository.delete를 호출하지 않는다', async () => {
+      travelRecordRepository.findOneBy!.mockResolvedValue(buildRecord());
+      recordPhotoRepository.findBy!.mockResolvedValue([]);
+
+      await service.deleteRecord('record-1', 'user-1');
+
+      expect(recordPhotoRepository.delete).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('setTripCover', () => {
+    it('트립 멤버가 아니면 assertMember가 던지는 예외를 그대로 전파한다', async () => {
+      tripsService.assertMember.mockRejectedValue(new Error('forbidden'));
+
+      await expect(service.setTripCover('trip-1', 'user-1', 'photo-1')).rejects.toThrow(
+        'forbidden',
+      );
+      expect(recordPhotoRepository.findOneBy).not.toHaveBeenCalled();
+    });
+
+    it('recordPhotoId가 존재하지 않으면 RECORD_PHOTO_NOT_FOUND를 던진다', async () => {
+      recordPhotoRepository.findOneBy!.mockResolvedValue(null);
+
+      await expect(service.setTripCover('trip-1', 'user-1', 'photo-1')).rejects.toMatchObject({
+        code: 'RECORD_PHOTO_NOT_FOUND',
+      });
+    });
+
+    it('타 멤버가 작성한 기록의 사진이면 RECORD_FORBIDDEN을 던진다', async () => {
+      recordPhotoRepository.findOneBy!.mockResolvedValue(
+        buildRecordPhoto({ recordId: 'record-1' }),
+      );
+      travelRecordRepository.findOneBy!.mockResolvedValue(buildRecord({ userId: 'other-user' }));
+
+      await expect(service.setTripCover('trip-1', 'user-1', 'photo-1')).rejects.toMatchObject({
+        code: 'RECORD_FORBIDDEN',
+      });
+      expect(tripsService.setCoverImage).not.toHaveBeenCalled();
+    });
+
+    it('본인 기록의 사진이면 다른 대표사진을 해제하고 trips.cover_image_url을 갱신한다', async () => {
+      const photo = buildRecordPhoto({
+        id: 'photo-1',
+        recordId: 'record-1',
+        storageUrl: 'https://storage.example/new-cover.jpg',
+      });
+      recordPhotoRepository.findOneBy!.mockResolvedValue(photo);
+      travelRecordRepository.findOneBy!.mockResolvedValue(buildRecord());
+
+      await service.setTripCover('trip-1', 'user-1', 'photo-1');
+
+      expect(recordPhotoRepository.createQueryBuilder).toHaveBeenCalled();
+      expect(recordPhotoRepository.update).toHaveBeenCalledWith(
+        { id: 'photo-1' },
+        { isCover: true },
+      );
+      expect(tripsService.setCoverImage).toHaveBeenCalledWith(
+        'trip-1',
+        'https://storage.example/new-cover.jpg',
+      );
+    });
+  });
+
+  describe('clearTripCover', () => {
+    it('트립 멤버가 아니면 assertMember가 던지는 예외를 그대로 전파한다', async () => {
+      tripsService.assertMember.mockRejectedValue(new Error('forbidden'));
+
+      await expect(service.clearTripCover('trip-1', 'user-1')).rejects.toThrow('forbidden');
+      expect(tripsService.setCoverImage).not.toHaveBeenCalled();
+    });
+
+    it('모든 대표사진 플래그를 해제하고 trips.cover_image_url을 null로 만든다', async () => {
+      await service.clearTripCover('trip-1', 'user-1');
+
+      expect(recordPhotoRepository.createQueryBuilder).toHaveBeenCalled();
+      expect(tripsService.setCoverImage).toHaveBeenCalledWith('trip-1', null);
     });
   });
 });
