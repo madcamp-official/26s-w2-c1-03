@@ -1,6 +1,7 @@
 import {
   Body,
   Controller,
+  Get,
   Param,
   Post,
   UploadedFiles,
@@ -10,6 +11,7 @@ import {
 import { AnyFilesInterceptor } from '@nestjs/platform-express';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { AuthenticatedUser, CurrentUser } from '../common/decorators/current-user.decorator';
+import { FinalizePhotosDto } from './dto/finalize-photos.dto';
 import { RegisterPhotoMetadataDto } from './dto/register-photo-metadata.dto';
 import { RecordsService } from './records.service';
 
@@ -51,5 +53,24 @@ export class RecordsController {
     @Param('recordId') recordId: string,
   ) {
     return this.recordsService.curate(tripId, recordId, user.userId);
+  }
+
+  @Get(':recordId/photos/candidates')
+  getCandidates(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param('tripId') tripId: string,
+    @Param('recordId') recordId: string,
+  ) {
+    return this.recordsService.getCandidates(tripId, recordId, user.userId);
+  }
+
+  @Post(':recordId/photos/finalize')
+  finalize(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param('tripId') tripId: string,
+    @Param('recordId') recordId: string,
+    @Body() dto: FinalizePhotosDto,
+  ) {
+    return this.recordsService.finalize(tripId, recordId, user.userId, dto);
   }
 }

@@ -8,15 +8,20 @@ import { Repository } from 'typeorm';
 import { BusinessException } from '../common/exceptions/business-exception';
 import { CommonErrorCode } from '../common/exceptions/error-code';
 import { loadPhotoBufferConfig } from '../config/photo-buffer.config';
+import { StorageService } from '../storage/storage.service';
 import { TripsService } from '../trips/trips.service';
 import { PHOTO_CURATE_AI_CLIENT, PhotoCurateAiClient } from './client/photo-curate-ai.client';
+import { FinalizePhotosDto } from './dto/finalize-photos.dto';
 import { RegisterPhotoMetadataDto } from './dto/register-photo-metadata.dto';
+import { RecordPhoto } from './entities/record-photo.entity';
 import { RecordPhotoRef, RecordPhotoRefStatus } from './entities/record-photo-ref.entity';
 import { TravelRecord, TravelRecordStatus } from './entities/travel-record.entity';
 import { RecordsErrorCode } from './exceptions/records-error-code';
+import { signPhotoPreviewToken } from './utils/photo-preview-token.util';
 
 const MAX_UPLOAD_BATCH = 100;
 const CURATE_TARGET_COUNT = 15;
+const PREVIEW_TTL_MS = 5 * 60_000;
 
 export interface RecordSummary {
   id: string;
@@ -34,22 +39,48 @@ export interface PhotoRefSummary {
   localId: string;
 }
 
+export interface PhotoCandidateSummary {
+  photoRefId: string;
+  previewUrl: string;
+  takenAt: Date | null;
+  locationName: string | null;
+}
+
+export interface RecordPhotoSummary {
+  id: string;
+  recordId: string;
+  storageUrl: string;
+  takenAt: Date | null;
+  locationName: string | null;
+  caption: string | null;
+  orderIndex: number;
+  isCover: boolean;
+  createdAt: Date;
+}
+
 @Injectable()
 export class RecordsService {
   private readonly logger = new Logger(RecordsService.name);
   private readonly bufferDir: string;
+  private readonly previewSecret: string;
 
   constructor(
     @InjectRepository(TravelRecord)
     private readonly travelRecordRepository: Repository<TravelRecord>,
     @InjectRepository(RecordPhotoRef)
     private readonly recordPhotoRefRepository: Repository<RecordPhotoRef>,
+    @InjectRepository(RecordPhoto)
+    private readonly recordPhotoRepository: Repository<RecordPhoto>,
     private readonly tripsService: TripsService,
+    private readonly storageService: StorageService,
     configService: ConfigService,
     @Inject(PHOTO_CURATE_AI_CLIENT)
     private readonly photoCurateAiClient: PhotoCurateAiClient,
   ) {
     this.bufferDir = loadPhotoBufferConfig(configService).dir;
+    // photo-preview 서명과 같은 secret을 재사용한다 — 별도 시크릿을 새로 요구하지
+    // 않기 위한 실용적 선택(§4 "짧은 TTL 서명 URL"의 만료 검증만 하면 되는 용도).
+    this.previewSecret = configService.getOrThrow<string>('JWT_ACCESS_SECRET');
   }
 
   /**
@@ -199,6 +230,130 @@ export class RecordsService {
     ]);
 
     return { recommended };
+  }
+
+  /**
+   * 추천된 사진의 짧은 TTL 서명 URL 미리보기(API 명세서 §4). 사진 실물은 여전히
+   * 임시 버퍼에만 있으므로 PhotoPreviewController가 이 서명을 검증해 스트리밍한다.
+   */
+  async getCandidates(
+    tripId: string,
+    recordId: string,
+    userId: string,
+  ): Promise<{ items: PhotoCandidateSummary[] }> {
+    const record = await this.findOwnedRecord(tripId, recordId, userId);
+
+    const refs = await this.recordPhotoRefRepository.findBy({
+      recordId: record.id,
+      status: RecordPhotoRefStatus.RECOMMENDED,
+    });
+
+    return {
+      items: refs.map((ref) => ({
+        photoRefId: ref.id,
+        previewUrl: this.buildPreviewUrl(ref.id),
+        takenAt: ref.takenAt,
+        locationName: ref.locationName,
+      })),
+    };
+  }
+
+  /**
+   * 사용자 최종 선택 확정(API 명세서 §4). RECOMMENDED 상태의 photoRefId만 선택할
+   * 수 있다 — 그 외(등록조차 안 됐거나 이미 폐기된 것)가 섞여 있으면 요청 자체를
+   * 거부한다(업로드/메타데이터 단계의 "조용히 건너뛰기"와 다르게, finalize는
+   * 사용자가 명시적으로 확정하는 마지막 단계라 잘못된 참조를 조용히 무시하지
+   * 않는다). 선택된 사진만 영구 스토리지로 이관하고, 그 외 추천분은 전량 폐기한다.
+   */
+  async finalize(
+    tripId: string,
+    recordId: string,
+    userId: string,
+    dto: FinalizePhotosDto,
+  ): Promise<{ recordPhotos: RecordPhotoSummary[] }> {
+    const record = await this.findOwnedRecord(tripId, recordId, userId);
+
+    const recommendedRefs = await this.recordPhotoRefRepository.findBy({
+      recordId: record.id,
+      status: RecordPhotoRefStatus.RECOMMENDED,
+    });
+    const refById = new Map(recommendedRefs.map((ref) => [ref.id, ref]));
+
+    const selections = dto.selections.map((selection, index) => {
+      const ref = refById.get(selection.photoRefId);
+      if (!ref) {
+        throw new BusinessException(
+          CommonErrorCode.VALIDATION_ERROR,
+          `추천되지 않았거나 이미 처리된 photoRefId입니다: ${selection.photoRefId}`,
+        );
+      }
+      return {
+        ref,
+        caption: selection.caption ?? null,
+        orderIndex: selection.orderIndex ?? index,
+      };
+    });
+
+    const selectedIds = new Set(selections.map((s) => s.ref.id));
+    const discarded = recommendedRefs.filter((ref) => !selectedIds.has(ref.id));
+
+    const recordPhotos = await Promise.all(
+      selections.map(({ ref, caption, orderIndex }) =>
+        this.finalizeOne(record.id, ref, caption, orderIndex),
+      ),
+    );
+    await Promise.all(discarded.map((ref) => this.discardRef(ref)));
+
+    return { recordPhotos };
+  }
+
+  private async finalizeOne(
+    recordId: string,
+    ref: RecordPhotoRef,
+    caption: string | null,
+    orderIndex: number,
+  ): Promise<RecordPhotoSummary> {
+    const buffer = await fs.readFile(ref.tempFilePath!);
+    const objectPath = `record-photos/${recordId}/${ref.id}.jpg`;
+    const storageUrl = await this.storageService.uploadPermanent(buffer, objectPath, 'image/jpeg');
+
+    const saved = await this.recordPhotoRepository.save(
+      this.recordPhotoRepository.create({
+        recordId,
+        storageUrl,
+        takenAt: ref.takenAt,
+        locationName: ref.locationName,
+        caption,
+        orderIndex,
+        isCover: false,
+      }),
+    );
+
+    // 영구 스토리지 이관이 끝났으니 임시본은 폐기한다(§8.3 "미선택 사진은 임시
+    // 버퍼 단계에서 폐기" — 선택분도 이관 후에는 임시 사본을 남겨둘 이유가 없다).
+    await this.discardRef(ref);
+
+    return this.toPhotoSummary(saved);
+  }
+
+  private buildPreviewUrl(photoRefId: string): string {
+    const expiresAt = Date.now() + PREVIEW_TTL_MS;
+    const signature = signPhotoPreviewToken(photoRefId, expiresAt, this.previewSecret);
+    return `/records/photo-preview/${photoRefId}?expires=${expiresAt}&sig=${signature}`;
+  }
+
+  private toPhotoSummary(photo: RecordPhoto): RecordPhotoSummary {
+    return {
+      id: photo.id,
+      recordId: photo.recordId,
+      storageUrl: photo.storageUrl,
+      takenAt: photo.takenAt,
+      locationName: photo.locationName,
+      caption: photo.caption,
+      orderIndex: photo.orderIndex,
+      isCover: photo.isCover,
+      createdAt: photo.createdAt,
+    };
   }
 
   /**

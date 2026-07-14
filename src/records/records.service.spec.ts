@@ -78,7 +78,9 @@ function buildFile(fieldname: string, content = 'fake-image-bytes'): Express.Mul
 describe('RecordsService', () => {
   let travelRecordRepository: RepoMock<TravelRecord>;
   let recordPhotoRefRepository: RepoMock<RecordPhotoRef>;
+  let recordPhotoRepository: RepoMock<import('./entities/record-photo.entity').RecordPhoto>;
   let tripsService: { assertMember: jest.Mock };
+  let storageService: { uploadPermanent: jest.Mock };
   let configService: { getOrThrow: jest.Mock };
   let photoCurateAiClient: { selectBestPhotos: jest.Mock };
   let bufferDir: string;
@@ -87,18 +89,28 @@ describe('RecordsService', () => {
   beforeEach(async () => {
     travelRecordRepository = createRepositoryMock<TravelRecord>();
     recordPhotoRefRepository = createRepositoryMock<RecordPhotoRef>();
+    recordPhotoRepository = createRepositoryMock();
     tripsService = { assertMember: jest.fn().mockResolvedValue(undefined) };
+    storageService = {
+      uploadPermanent: jest.fn().mockResolvedValue('https://storage.example/photo.jpg'),
+    };
     photoCurateAiClient = { selectBestPhotos: jest.fn() };
 
     bufferDir = await fs.mkdtemp(path.join(os.tmpdir(), 'record-photo-buffer-test-'));
     configService = {
-      getOrThrow: jest.fn((key: string) => (key === 'PHOTO_TEMP_BUFFER_DIR' ? bufferDir : 30)),
+      getOrThrow: jest.fn((key: string) => {
+        if (key === 'PHOTO_TEMP_BUFFER_DIR') return bufferDir;
+        if (key === 'JWT_ACCESS_SECRET') return 'test-secret-value-1234';
+        return 30;
+      }),
     };
 
     service = new RecordsService(
       travelRecordRepository as never,
       recordPhotoRefRepository as never,
+      recordPhotoRepository as never,
       tripsService as never,
+      storageService as never,
       configService as never,
       photoCurateAiClient as never,
     );
@@ -383,6 +395,120 @@ describe('RecordsService', () => {
           ]),
         }),
       );
+    });
+  });
+
+  describe('getCandidates', () => {
+    it('RECOMMENDED 상태 사진만 서명된 미리보기 URL과 함께 반환한다', async () => {
+      travelRecordRepository.findOneBy!.mockResolvedValue(buildRecord());
+      recordPhotoRefRepository.findBy!.mockResolvedValue([
+        buildPhotoRef({
+          id: 'ref-1',
+          status: RecordPhotoRefStatus.RECOMMENDED,
+          locationName: '오사카',
+        }),
+      ]);
+
+      const result = await service.getCandidates('trip-1', 'record-1', 'user-1');
+
+      expect(recordPhotoRefRepository.findBy).toHaveBeenCalledWith({
+        recordId: 'record-1',
+        status: RecordPhotoRefStatus.RECOMMENDED,
+      });
+      expect(result.items).toHaveLength(1);
+      expect(result.items[0]).toMatchObject({ photoRefId: 'ref-1', locationName: '오사카' });
+      expect(result.items[0].previewUrl).toMatch(
+        /^\/records\/photo-preview\/ref-1\?expires=\d+&sig=[0-9a-f]+$/,
+      );
+    });
+
+    it('본인 기록이 아니면 RECORD_FORBIDDEN을 던진다', async () => {
+      travelRecordRepository.findOneBy!.mockResolvedValue(buildRecord({ userId: 'other-user' }));
+
+      await expect(service.getCandidates('trip-1', 'record-1', 'user-1')).rejects.toMatchObject({
+        code: 'RECORD_FORBIDDEN',
+      });
+    });
+  });
+
+  describe('finalize', () => {
+    async function writeTempFile(photoRefId: string, content = 'jpeg-bytes'): Promise<string> {
+      const filePath = path.join(bufferDir, photoRefId);
+      await fs.writeFile(filePath, content);
+      return filePath;
+    }
+
+    it('RECOMMENDED가 아닌(또는 존재하지 않는) photoRefId가 섞여 있으면 VALIDATION_ERROR를 던진다', async () => {
+      travelRecordRepository.findOneBy!.mockResolvedValue(buildRecord());
+      recordPhotoRefRepository.findBy!.mockResolvedValue([]);
+
+      await expect(
+        service.finalize('trip-1', 'record-1', 'user-1', {
+          selections: [{ photoRefId: 'ref-unknown' }],
+        }),
+      ).rejects.toMatchObject({ code: 'VALIDATION_ERROR' });
+      expect(storageService.uploadPermanent).not.toHaveBeenCalled();
+    });
+
+    it('선택한 사진만 영구 스토리지에 업로드하고 record_photos로 저장한 뒤 임시본을 폐기한다', async () => {
+      const path1 = await writeTempFile('ref-1');
+      travelRecordRepository.findOneBy!.mockResolvedValue(buildRecord());
+      recordPhotoRefRepository.findBy!.mockResolvedValue([
+        buildPhotoRef({
+          id: 'ref-1',
+          tempFilePath: path1,
+          status: RecordPhotoRefStatus.RECOMMENDED,
+        }),
+      ]);
+
+      const result = await service.finalize('trip-1', 'record-1', 'user-1', {
+        selections: [{ photoRefId: 'ref-1', caption: '좋았다', orderIndex: 0 }],
+      });
+
+      expect(storageService.uploadPermanent).toHaveBeenCalledWith(
+        Buffer.from('jpeg-bytes'),
+        'record-photos/record-1/ref-1.jpg',
+        'image/jpeg',
+      );
+      expect(result.recordPhotos).toHaveLength(1);
+      expect(result.recordPhotos[0]).toMatchObject({
+        storageUrl: 'https://storage.example/photo.jpg',
+        caption: '좋았다',
+        orderIndex: 0,
+      });
+      expect(recordPhotoRefRepository.update).toHaveBeenCalledWith(
+        { id: 'ref-1' },
+        { status: RecordPhotoRefStatus.DISCARDED, tempFilePath: null },
+      );
+      await expect(fs.access(path1)).rejects.toThrow();
+    });
+
+    it('선택되지 않은 추천분은 전량 폐기한다', async () => {
+      const path1 = await writeTempFile('ref-1');
+      const path2 = await writeTempFile('ref-2');
+      travelRecordRepository.findOneBy!.mockResolvedValue(buildRecord());
+      recordPhotoRefRepository.findBy!.mockResolvedValue([
+        buildPhotoRef({
+          id: 'ref-1',
+          tempFilePath: path1,
+          status: RecordPhotoRefStatus.RECOMMENDED,
+        }),
+        buildPhotoRef({
+          id: 'ref-2',
+          tempFilePath: path2,
+          status: RecordPhotoRefStatus.RECOMMENDED,
+        }),
+      ]);
+
+      await service.finalize('trip-1', 'record-1', 'user-1', {
+        selections: [{ photoRefId: 'ref-1' }],
+      });
+
+      expect(recordPhotoRefRepository.update).toHaveBeenCalledWith(
+        { id: 'ref-2' },
+        { status: RecordPhotoRefStatus.DISCARDED, tempFilePath: null },
+      );
+      await expect(fs.access(path2)).rejects.toThrow();
     });
   });
 });

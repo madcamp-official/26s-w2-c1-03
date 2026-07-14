@@ -51,4 +51,9 @@ export const envValidationSchema = Joi.object({
   // 강제 삭제 주기(§6, §8.3: 사진 실물은 디스크/DB에 영구 기록하지 않는다).
   PHOTO_TEMP_BUFFER_DIR: Joi.string().default('./tmp/photo-buffer'),
   PHOTO_TEMP_BUFFER_TTL_MINUTES: Joi.number().positive().default(30),
+
+  // Phase 11 finalize(§4, §11.2) — 최종 선택 사진만 이 Firebase Storage 버킷에
+  // 영구 저장한다. 서비스 계정 JSON은 저장소에 커밋하지 않고 경로로만 주입한다.
+  FIREBASE_SERVICE_ACCOUNT_PATH: Joi.string().required(),
+  FIREBASE_STORAGE_BUCKET: Joi.string().required(),
 });
