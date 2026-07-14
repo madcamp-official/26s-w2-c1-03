@@ -8,6 +8,7 @@ import { envValidationSchema } from './config/env.validation';
 import { buildDataSourceOptions } from './config/database.config';
 import { AuthModule } from './auth/auth.module';
 import { UsersModule } from './users/users.module';
+import { CollaborationModule } from './collaboration/collaboration.module';
 import { TripsModule } from './trips/trips.module';
 import { PlacesModule } from './places/places.module';
 import { ScheduleModule } from './schedule/schedule.module';
@@ -32,6 +33,7 @@ import { NotificationsModule } from './notifications/notifications.module';
     AuthModule,
     UsersModule,
     TripsModule,
+    CollaborationModule,
     PlacesModule,
     ScheduleModule,
     RecordsModule,
