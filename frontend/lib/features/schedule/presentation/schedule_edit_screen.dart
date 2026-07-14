@@ -6,8 +6,9 @@ import '../../../core/theme/app_colors.dart';
 import '../data/schedule_api.dart';
 import '../data/schedule_models.dart';
 import 'schedule_chat_panel.dart';
+import 'widgets/schedule_place_detail_sheet.dart';
 
-/// 스케줄 편집 탭 — 장소 추가/삭제/메모 수정/드래그앤드롭 순서변경 + 우측 하단 FAB로
+/// 스케줄 편집 탭 — 장소 추가/삭제/상세 설정(메모·시간·비용)/드래그앤드롭 순서변경 + 우측 하단 FAB로
 /// 여닫는 AI 챗봇 패널(화면 절반 높이). 편집 결과가 반영됐으면 pop(true)로 알려
 /// 상세 화면이 스케줄을 재조회한다.
 class ScheduleEditScreen extends ConsumerStatefulWidget {
@@ -132,21 +133,25 @@ class _ScheduleEditScreenState extends ConsumerState<ScheduleEditScreen> {
     });
   }
 
-  Future<void> _editMemo(ScheduledTripPlace place) async {
-    final result = await showDialog<String?>(
-      context: context,
-      builder: (_) => _MemoDialog(initial: place.memo),
+  /// 상세 설정 버튼 — 메모/시간/비용을 한 시트에서 편집하고 세 값을 한 번에 저장한다.
+  Future<void> _editDetail(ScheduledTripPlace place) async {
+    final result = await showSchedulePlaceDetailSheet(
+      context,
+      placeName: place.name.isEmpty ? '이름 없는 장소' : place.name,
+      initialMemo: place.memo,
+      initialStartTime: place.startTime,
+      initialCost: place.cost,
     );
-    // 다이얼로그가 취소되면 null 래퍼 없이 그냥 닫힌다(_MemoResult로 구분).
     if (result == null || !mounted) return;
-    final newMemo = result.isEmpty ? null : result;
 
     setState(() => _busyIds.add(place.id));
     try {
       final updated = await ref.read(scheduleApiProvider).updatePlace(
             tripId: widget.tripId,
             tripPlaceId: place.id,
-            memo: newMemo,
+            memo: result.memo,
+            startTime: result.startTime,
+            cost: result.cost,
           );
       if (!mounted) return;
       setState(() {
@@ -155,7 +160,7 @@ class _ScheduleEditScreenState extends ConsumerState<ScheduleEditScreen> {
         _changed = true;
       });
     } on DioException catch (e) {
-      _showError(e.error, '메모를 저장하지 못했어요.');
+      _showError(e.error, '상세 정보를 저장하지 못했어요.');
     } finally {
       if (mounted) setState(() => _busyIds.remove(place.id));
     }
@@ -216,7 +221,7 @@ class _ScheduleEditScreenState extends ConsumerState<ScheduleEditScreen> {
                                   places: _byDay[day]!,
                                   busyIds: _busyIds,
                                   onDelete: _delete,
-                                  onEditMemo: _editMemo,
+                                  onEditDetail: _editDetail,
                                   onReorder: (oldIndex, newIndex) =>
                                       _reorderWithinDay(day, oldIndex, newIndex),
                                 ),
@@ -262,7 +267,7 @@ class _DayEditSection extends StatelessWidget {
     required this.places,
     required this.busyIds,
     required this.onDelete,
-    required this.onEditMemo,
+    required this.onEditDetail,
     required this.onReorder,
   });
 
@@ -270,7 +275,7 @@ class _DayEditSection extends StatelessWidget {
   final List<ScheduledTripPlace> places;
   final Set<String> busyIds;
   final ValueChanged<ScheduledTripPlace> onDelete;
-  final ValueChanged<ScheduledTripPlace> onEditMemo;
+  final ValueChanged<ScheduledTripPlace> onEditDetail;
   final void Function(int oldIndex, int newIndex) onReorder;
 
   @override
@@ -312,7 +317,7 @@ class _DayEditSection extends StatelessWidget {
                   place: sorted[i],
                   busy: busyIds.contains(sorted[i].id),
                   onDelete: () => onDelete(sorted[i]),
-                  onEditMemo: () => onEditMemo(sorted[i]),
+                  onEditDetail: () => onEditDetail(sorted[i]),
                 ),
             ],
           ),
@@ -329,14 +334,14 @@ class _PlaceEditRow extends StatelessWidget {
     required this.place,
     required this.busy,
     required this.onDelete,
-    required this.onEditMemo,
+    required this.onEditDetail,
   });
 
   final int index;
   final ScheduledTripPlace place;
   final bool busy;
   final VoidCallback onDelete;
-  final VoidCallback onEditMemo;
+  final VoidCallback onEditDetail;
 
   @override
   Widget build(BuildContext context) {
@@ -381,10 +386,10 @@ class _PlaceEditRow extends StatelessWidget {
                       color: AppColors.ink900,
                     ),
                   ),
-                  if (place.memo != null && place.memo!.isNotEmpty) ...[
+                  if (_subtitle(place) != null) ...[
                     const SizedBox(height: 3),
                     Text(
-                      place.memo!,
+                      _subtitle(place)!,
                       style: const TextStyle(
                         fontSize: 12.5,
                         fontWeight: FontWeight.w600,
@@ -397,8 +402,9 @@ class _PlaceEditRow extends StatelessWidget {
             ),
             IconButton(
               visualDensity: VisualDensity.compact,
-              icon: const Icon(Icons.notes, size: 20, color: AppColors.ink400),
-              onPressed: busy ? null : onEditMemo,
+              icon: const Icon(Icons.tune, size: 20, color: AppColors.ink400),
+              tooltip: '메모·시간·비용 설정',
+              onPressed: busy ? null : onEditDetail,
             ),
             IconButton(
               visualDensity: VisualDensity.compact,
@@ -410,48 +416,23 @@ class _PlaceEditRow extends StatelessWidget {
       ),
     );
   }
-}
 
-class _MemoDialog extends StatefulWidget {
-  const _MemoDialog({this.initial});
-  final String? initial;
-
-  @override
-  State<_MemoDialog> createState() => _MemoDialogState();
-}
-
-class _MemoDialogState extends State<_MemoDialog> {
-  late final TextEditingController _controller =
-      TextEditingController(text: widget.initial ?? '');
-
-  @override
-  void dispose() {
-    _controller.dispose();
-    super.dispose();
+  /// 메모와 비용을 한 줄로 합쳐 보여준다("메모 · 15,000원"). 둘 다 없으면 null.
+  String? _subtitle(ScheduledTripPlace place) {
+    final parts = <String>[];
+    if (place.memo != null && place.memo!.isNotEmpty) parts.add(place.memo!);
+    if (place.cost != null) parts.add('${_formatCost(place.cost!)}원');
+    return parts.isEmpty ? null : parts.join(' · ');
   }
 
-  @override
-  Widget build(BuildContext context) {
-    return AlertDialog(
-      title: const Text('메모'),
-      content: TextField(
-        controller: _controller,
-        autofocus: true,
-        maxLines: 3,
-        decoration: const InputDecoration(hintText: '이 장소에 대한 메모'),
-      ),
-      actions: [
-        TextButton(
-          onPressed: () => Navigator.of(context).pop(),
-          child: const Text('취소'),
-        ),
-        TextButton(
-          // 빈 문자열 = 메모 삭제, 취소(null)와 구분한다.
-          onPressed: () => Navigator.of(context).pop(_controller.text.trim()),
-          child: const Text('저장'),
-        ),
-      ],
-    );
+  String _formatCost(int cost) {
+    final digits = cost.toString();
+    final buffer = StringBuffer();
+    for (var i = 0; i < digits.length; i++) {
+      if (i > 0 && (digits.length - i) % 3 == 0) buffer.write(',');
+      buffer.write(digits[i]);
+    }
+    return buffer.toString();
   }
 }
 

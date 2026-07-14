@@ -76,21 +76,25 @@ class ScheduleApi {
     );
   }
 
-  /// API 명세서 §2.4 PATCH — 메모 수정 / 개별 위치 이동.
+  /// API 명세서 §2.4 PATCH — 메모/시간/비용 수정 / 개별 위치 이동.
   Future<ScheduledTripPlace> updatePlace({
     required String tripId,
     required String tripPlaceId,
     int? dayNumber,
     int? orderInDay,
     Object? memo = _unset,
+    Object? startTime = _unset,
+    Object? cost = _unset,
   }) async {
     final response = await _apiClient.dio.patch<Map<String, dynamic>>(
       '/trips/$tripId/schedule/places/$tripPlaceId',
       data: {
         if (dayNumber != null) 'dayNumber': dayNumber,
         if (orderInDay != null) 'orderInDay': orderInDay,
-        // memo는 null 전송(삭제)과 미전송(변경 없음)을 구분해야 해 sentinel을 쓴다.
+        // memo/startTime/cost는 null 전송(삭제)과 미전송(변경 없음)을 구분해야 해 sentinel을 쓴다.
         if (!identical(memo, _unset)) 'memo': memo,
+        if (!identical(startTime, _unset)) 'startTime': startTime,
+        if (!identical(cost, _unset)) 'cost': cost,
       },
     );
     return ScheduledTripPlace.fromJson(
