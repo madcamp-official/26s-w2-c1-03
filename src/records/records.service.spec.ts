@@ -1,3 +1,7 @@
+import * as fsSync from 'fs';
+import { promises as fs } from 'fs';
+import * as os from 'os';
+import * as path from 'path';
 import { RecordPhotoRef, RecordPhotoRefStatus } from './entities/record-photo-ref.entity';
 import { TravelRecord, TravelRecordStatus } from './entities/travel-record.entity';
 import { RecordsService } from './records.service';
@@ -13,6 +17,8 @@ function createRepositoryMock<T extends object>(): RepoMock<T> {
     // create()만으로는 id가 없으므로 save() 단계에서 흉내낸다.
     save: jest.fn(async (entity) => ({ id: 'ref-1', ...entity })),
     findOneBy: jest.fn(),
+    findBy: jest.fn().mockResolvedValue([]),
+    update: jest.fn(),
   };
 }
 
@@ -43,26 +49,51 @@ function buildPhotoRef(overrides: Partial<RecordPhotoRef> = {}): RecordPhotoRef 
     takenAt: new Date('2026-07-16T09:00:00Z'),
     locationName: '오사카',
     status: RecordPhotoRefStatus.PENDING,
+    tempFilePath: null,
     createdAt: new Date('2026-01-01T00:00:00Z'),
     ...overrides,
   };
+}
+
+function buildFile(fieldname: string, content = 'fake-image-bytes'): Express.Multer.File {
+  return {
+    fieldname,
+    originalname: `${fieldname}.jpg`,
+    encoding: '7bit',
+    mimetype: 'image/jpeg',
+    buffer: Buffer.from(content),
+    size: content.length,
+  } as Express.Multer.File;
 }
 
 describe('RecordsService', () => {
   let travelRecordRepository: RepoMock<TravelRecord>;
   let recordPhotoRefRepository: RepoMock<RecordPhotoRef>;
   let tripsService: { assertMember: jest.Mock };
+  let configService: { getOrThrow: jest.Mock };
+  let bufferDir: string;
   let service: RecordsService;
 
-  beforeEach(() => {
+  beforeEach(async () => {
     travelRecordRepository = createRepositoryMock<TravelRecord>();
     recordPhotoRefRepository = createRepositoryMock<RecordPhotoRef>();
     tripsService = { assertMember: jest.fn().mockResolvedValue(undefined) };
+
+    bufferDir = await fs.mkdtemp(path.join(os.tmpdir(), 'record-photo-buffer-test-'));
+    configService = {
+      getOrThrow: jest.fn((key: string) => (key === 'PHOTO_TEMP_BUFFER_DIR' ? bufferDir : 30)),
+    };
+
     service = new RecordsService(
       travelRecordRepository as never,
       recordPhotoRefRepository as never,
       tripsService as never,
+      configService as never,
     );
+  });
+
+  afterEach(async () => {
+    await fs.rm(bufferDir, { recursive: true, force: true });
   });
 
   describe('startSession', () => {
@@ -156,6 +187,69 @@ describe('RecordsService', () => {
         expect.objectContaining({ id: 'ref-1', locationName: '오사카' }),
       );
       expect(result.photos).toEqual([{ photoRefId: 'ref-1', localId: 'local-1' }]);
+    });
+  });
+
+  describe('uploadPhotos', () => {
+    it('한 요청에 100장을 초과하면 VALIDATION_ERROR를 던지고 레코드 조회조차 하지 않는다', async () => {
+      const files = Array.from({ length: 101 }, (_, i) => buildFile(`ref-${i}`));
+
+      await expect(
+        service.uploadPhotos('trip-1', 'record-1', 'user-1', files),
+      ).rejects.toMatchObject({ code: 'VALIDATION_ERROR' });
+      expect(travelRecordRepository.findOneBy).not.toHaveBeenCalled();
+    });
+
+    it('본인 기록이 아니면 RECORD_FORBIDDEN을 던진다', async () => {
+      travelRecordRepository.findOneBy!.mockResolvedValue(buildRecord({ userId: 'other-user' }));
+
+      await expect(
+        service.uploadPhotos('trip-1', 'record-1', 'user-1', [buildFile('ref-1')]),
+      ).rejects.toMatchObject({ code: 'RECORD_FORBIDDEN' });
+    });
+
+    it('등록되지 않은 photoRefId(fieldname)는 조용히 건너뛴다', async () => {
+      travelRecordRepository.findOneBy!.mockResolvedValue(buildRecord());
+      recordPhotoRefRepository.findBy!.mockResolvedValue([]);
+
+      const result = await service.uploadPhotos('trip-1', 'record-1', 'user-1', [
+        buildFile('unknown-ref'),
+      ]);
+
+      expect(result.uploaded).toEqual([]);
+      expect(recordPhotoRefRepository.update).not.toHaveBeenCalled();
+    });
+
+    it('PENDING이 아닌 photoRef(이미 업로드됨)는 건너뛴다', async () => {
+      travelRecordRepository.findOneBy!.mockResolvedValue(buildRecord());
+      recordPhotoRefRepository.findBy!.mockResolvedValue([
+        buildPhotoRef({ id: 'ref-1', status: RecordPhotoRefStatus.UPLOADED }),
+      ]);
+
+      const result = await service.uploadPhotos('trip-1', 'record-1', 'user-1', [
+        buildFile('ref-1'),
+      ]);
+
+      expect(result.uploaded).toEqual([]);
+    });
+
+    it('PENDING인 photoRef는 파일을 임시 버퍼에 쓰고 UPLOADED로 갱신한다', async () => {
+      travelRecordRepository.findOneBy!.mockResolvedValue(buildRecord());
+      recordPhotoRefRepository.findBy!.mockResolvedValue([
+        buildPhotoRef({ id: 'ref-1', status: RecordPhotoRefStatus.PENDING }),
+      ]);
+
+      const result = await service.uploadPhotos('trip-1', 'record-1', 'user-1', [
+        buildFile('ref-1', 'hello-bytes'),
+      ]);
+
+      expect(result.uploaded).toEqual(['ref-1']);
+      const writtenPath = path.join(bufferDir, 'ref-1');
+      expect(fsSync.readFileSync(writtenPath, 'utf8')).toBe('hello-bytes');
+      expect(recordPhotoRefRepository.update).toHaveBeenCalledWith(
+        { id: 'ref-1' },
+        { tempFilePath: writtenPath, status: RecordPhotoRefStatus.UPLOADED },
+      );
     });
   });
 });

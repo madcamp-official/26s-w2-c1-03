@@ -47,6 +47,10 @@ export class RecordPhotoRef {
   @Column({ type: 'varchar', length: 20, default: RecordPhotoRefStatus.PENDING })
   status: RecordPhotoRefStatus;
 
+  /** 로컬 임시 버퍼 파일 경로(사진 실물이 아니라 경로 문자열만, §8.3). */
+  @Column({ type: 'text', nullable: true })
+  tempFilePath: string | null;
+
   @CreateDateColumn({ type: 'timestamptz' })
   createdAt: Date;
 }

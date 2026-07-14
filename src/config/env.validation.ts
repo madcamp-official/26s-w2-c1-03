@@ -44,4 +44,9 @@ export const envValidationSchema = Joi.object({
   OPENAI_API_KEY: Joi.string().required(),
   OPENAI_BASE_URL: Joi.string().uri().default('https://api.openai.com/v1'),
   OPENAI_SCHEDULE_MODEL: Joi.string().default('gpt-4o-mini'),
+
+  // Phase 11(사진 파이프라인) — 로컬 디스크 임시 버퍼(pass-through) 경로와 TTL
+  // 강제 삭제 주기(§6, §8.3: 사진 실물은 디스크/DB에 영구 기록하지 않는다).
+  PHOTO_TEMP_BUFFER_DIR: Joi.string().default('./tmp/photo-buffer'),
+  PHOTO_TEMP_BUFFER_TTL_MINUTES: Joi.number().positive().default(30),
 });
