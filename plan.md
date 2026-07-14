@@ -475,11 +475,12 @@ erDiagram
   - [ ] `schedule:conflict` 브로드캐스트 — `trip_places.updated_at` 기반 낙관적 잠금, stale 변경 거부 후 서버 최신 상태 강제 전달(§10.1)
   - [ ] `member:joined`/`member:left` 브로드캐스트
   - [ ] Service 단위 테스트로 낙관적 잠금 충돌 처리 케이스 반드시 검증(§13 — 손으로 검증하기 어려운 로직)
-- **FE 체크리스트**:
-  - [ ] 공유 링크 생성/공유 시트 UI
-  - [ ] 딥링크로 초대 링크 참여 처리
+- **FE 체크리스트** — REST 연동 완료(2026-07-14). 신규 패키지 `share_plus`/`app_links`, 참여자 화면(`trip_members_screen.dart`)·초대 시트(`invite_link_sheet.dart`)·가입 화면(`join_trip_screen.dart`)·딥링크 수신기(`core/deeplink/invite_deep_link_handler.dart`) 추가:
+  - [x] 공유 링크 생성/공유 시트 UI — 만료 기간 칩(24h/7일/무기한), OS 공유 시트 + 클립보드 복사. 참여자 화면 앱바에서 owner/editor에게만 노출
+  - [x] 참여자 목록/역할 변경/내보내기/자진 탈퇴 화면 — owner에게만 관리 메뉴, 자진 탈퇴 시 상세 화면까지 닫힘
+  - [x] 딥링크로 초대 링크 참여 처리 — `tripandend://join?token=` 스킴(Android intent-filter + iOS CFBundleURLTypes), 콜드 스타트/실행 중 수신 모두 지원, **로그인 전 수신 시 토큰을 보관했다가 로그인 완료 후 이어서 처리**
   - [ ] (WS 구현되면) 실시간 반영 — `schedule:op`/`member:joined`/`member:left` 구독
-  - [ ] (WS 미구현/지연 시) 폴링 또는 "새로고침 시 반영"으로 폴백(§15) — REST 초대·멤버 관리 기능 자체는 축소 대상 아님
+  - [x] (WS 미구현/지연 시) 폴링 또는 "새로고침 시 반영"으로 폴백(§15) — 참여자 화면 15초 조용한 폴링, 일정은 기존 새로고침/복귀 시 반영(편집 중 폴링은 낙관적 업데이트와 충돌 위험이 있어 의도적으로 제외)
 - **완료 조건**: 초대 링크로 참여 및 역할 변경/추방이 정상 동작(REST 필수). WebSocket은 되면 실시간 반영, 안 되면 "새로고침 시 반영"까지만 허용(§15)
 - **선행 Phase**: Phase 9
 - **산출물**: `trips/` 모듈(멤버·초대링크 부분), `collaboration/` 모듈

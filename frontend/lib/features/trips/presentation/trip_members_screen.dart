@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -46,11 +48,35 @@ class TripMembersScreen extends ConsumerStatefulWidget {
 class _TripMembersScreenState extends ConsumerState<TripMembersScreen> {
   _MembersState _state = const _MembersLoading();
   bool _busy = false;
+  Timer? _pollTimer;
 
   @override
   void initState() {
     super.initState();
     _load();
+    // WS 실시간 동기화 전 폴백(plan.md Phase 10): 다른 멤버의 참여/역할 변경이
+    // 늦어도 15초 안에 보이도록 조용히 재조회한다. 실패는 무시(다음 주기에 재시도).
+    _pollTimer = Timer.periodic(const Duration(seconds: 15), (_) => _refreshSilently());
+  }
+
+  @override
+  void dispose() {
+    _pollTimer?.cancel();
+    super.dispose();
+  }
+
+  Future<void> _refreshSilently() async {
+    if (_busy || _state is! _MembersLoaded) return;
+    try {
+      final (me, members) = await (
+        ref.read(usersApiProvider).getMe(),
+        ref.read(tripMembersApiProvider).listMembers(widget.tripId),
+      ).wait;
+      if (!mounted || _busy) return;
+      setState(() => _state = _MembersLoaded(myUserId: me.id, members: members));
+    } on DioException {
+      // 조용한 갱신 실패는 화면 상태를 건드리지 않는다.
+    }
   }
 
   Future<void> _load() async {
