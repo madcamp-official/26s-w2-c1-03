@@ -5,10 +5,12 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:kakao_flutter_sdk_user/kakao_flutter_sdk_user.dart';
 import 'core/config/app_config.dart';
+import 'core/deeplink/invite_deep_link_handler.dart';
 import 'features/auth/presentation/login_controller.dart';
 import 'features/auth/presentation/login_screen.dart';
 import 'features/home/presentation/app_shell.dart';
 import 'features/profile/data/users_api.dart';
+import 'features/trips/presentation/join_trip_screen.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -17,6 +19,15 @@ void main() async {
   // (FlutterFire CLI로 만드는 DefaultFirebaseOptions와 동일한 값을 얻는 또 다른 방법).
   await Firebase.initializeApp();
   KakaoSdk.init(nativeAppKey: AppConfig.kakaoNativeAppKey);
+  // 초대 딥링크(plan.md Phase 10). 토큰이 와도 세션 준비(AppShell 진입) 전까지는
+  // 핸들러가 보관만 하므로 로그인 흐름을 방해하지 않는다.
+  unawaited(
+    InviteDeepLinkHandler.instance.init(
+      onInviteToken: (token) => appNavigatorKey.currentState?.push(
+        MaterialPageRoute(builder: (_) => JoinTripScreen(token: token)),
+      ),
+    ),
+  );
   runApp(const ProviderScope(child: TripAndEndApp()));
 }
 
@@ -26,6 +37,7 @@ class TripAndEndApp extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
+      navigatorKey: appNavigatorKey,
       title: 'trip and end',
       debugShowCheckedModeBanner: false,
       theme: ThemeData(

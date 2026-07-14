@@ -60,6 +60,16 @@
 				<string>com.googleusercontent.apps.217633740424-6njh9eo1p6h8e4685gjov8i58h19a5lk</string>
 			</array>
 		</dict>
+		<!-- 여행 초대 딥링크(plan.md Phase 10): tripandend://join?token=...
+		     백엔드 INVITE_LINK_BASE_URL 기본값과 스킴이 일치해야 한다. -->
+		<dict>
+			<key>CFBundleTypeRole</key>
+			<string>Editor</string>
+			<key>CFBundleURLSchemes</key>
+			<array>
+				<string>tripandend</string>
+			</array>
+		</dict>
 	</array>
 	<!-- 카카오톡 설치 여부 확인(isKakaoTalkInstalled())에 필요 -->
 	<key>LSApplicationQueriesSchemes</key>

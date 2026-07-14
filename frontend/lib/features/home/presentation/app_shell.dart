@@ -1,6 +1,7 @@
 import 'dart:ui';
 
 import 'package:flutter/material.dart';
+import '../../../core/deeplink/invite_deep_link_handler.dart';
 import '../../../core/theme/app_colors.dart';
 import '../../profile/presentation/profile_screen.dart';
 import '../../records/presentation/records_list_screen.dart';
@@ -19,6 +20,14 @@ class AppShell extends StatefulWidget {
 
 class _AppShellState extends State<AppShell> {
   int _tabIndex = 0;
+
+  @override
+  void initState() {
+    super.initState();
+    // 로그인된 셸에 도달했다 = 세션 준비 완료. 보관 중인 초대 딥링크 토큰이 있으면
+    // 이 시점에 가입 화면이 뜬다(자동 로그인/신규 로그인 두 경로 모두 여길 지난다).
+    InviteDeepLinkHandler.instance.markSessionReady();
+  }
 
   static const _tabs = [
     TripListScreen(),

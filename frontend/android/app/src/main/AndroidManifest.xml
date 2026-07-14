@@ -35,6 +35,14 @@
                 <action android:name="android.intent.action.MAIN"/>
                 <category android:name="android.intent.category.LAUNCHER"/>
             </intent-filter>
+            <!-- 여행 초대 딥링크(plan.md Phase 10): tripandend://join?token=...
+                 백엔드 INVITE_LINK_BASE_URL 기본값과 스킴/호스트가 일치해야 한다. -->
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW"/>
+                <category android:name="android.intent.category.DEFAULT"/>
+                <category android:name="android.intent.category.BROWSABLE"/>
+                <data android:scheme="tripandend" android:host="join"/>
+            </intent-filter>
         </activity>
         <!-- 카카오 로그인 리다이렉트. kakao_flutter_sdk_common이 병합하는
              AuthCodeCustomTabsActivity의 onNewIntent()만 이 리다이렉트를 받아
