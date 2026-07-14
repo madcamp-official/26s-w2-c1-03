@@ -2,6 +2,7 @@ import { Injectable } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { InjectDataSource, InjectRepository } from '@nestjs/typeorm';
 import { DataSource, IsNull, Repository } from 'typeorm';
+import { CollaborationEventBus } from '../collaboration/collaboration-event-bus';
 import { BusinessException } from '../common/exceptions/business-exception';
 import { CommonErrorCode } from '../common/exceptions/error-code';
 import { CreateInviteLinkDto } from './dto/create-invite-link.dto';
@@ -66,7 +67,17 @@ export class TripsService {
     private readonly inviteLinkRepository: Repository<TripInviteLink>,
     @InjectDataSource() private readonly dataSource: DataSource,
     private readonly configService: ConfigService,
+    private readonly collaborationEventBus: CollaborationEventBus,
   ) {}
+
+  /** 참여자 입퇴장을 WS 채널로 알린다(§3.2 member:joined / member:left). */
+  private emitMemberEvent(tripId: string, event: 'member:joined' | 'member:left', member: TripMember): void {
+    this.collaborationEventBus.emit({
+      tripId,
+      event,
+      payload: { userId: member.userId, nickname: member.user?.nickname ?? '' },
+    });
+  }
 
   async create(ownerId: string, dto: CreateTripDto): Promise<TripSummary> {
     this.assertDateRange(dto.startDate, dto.endDate);
@@ -231,13 +242,19 @@ export class TripsService {
 
     const existing = await this.tripMemberRepository.findOneBy({ tripId: link.tripId, userId });
     if (!existing) {
-      await this.tripMemberRepository.save(
+      const saved = await this.tripMemberRepository.save(
         this.tripMemberRepository.create({
           tripId: link.tripId,
           userId,
           role: TripMemberRole.EDITOR,
         }),
       );
+      // 닉네임을 함께 실어야 해서(§3.2 payload) user 관계를 다시 조회한다.
+      const withUser = await this.tripMemberRepository.findOne({
+        where: { id: saved.id },
+        relations: { user: true },
+      });
+      this.emitMemberEvent(link.tripId, 'member:joined', withUser ?? saved);
     }
     return { tripId: link.tripId };
   }
@@ -288,7 +305,10 @@ export class TripsService {
     await this.findActiveTrip(tripId);
     await this.assertMember(tripId, actorUserId, [TripMemberRole.OWNER]);
 
-    const target = await this.tripMemberRepository.findOneBy({ tripId, userId: targetUserId });
+    const target = await this.tripMemberRepository.findOne({
+      where: { tripId, userId: targetUserId },
+      relations: { user: true },
+    });
     if (!target) {
       throw new BusinessException(TripsErrorCode.MEMBER_NOT_FOUND);
     }
@@ -296,6 +316,7 @@ export class TripsService {
       await this.assertNotLastOwner(tripId);
     }
     await this.tripMemberRepository.delete({ id: target.id });
+    this.emitMemberEvent(tripId, 'member:left', target);
   }
 
   /** 자진 탈퇴 — 마지막 owner는 나갈 수 없다(여행 삭제로 유도). */
@@ -306,7 +327,12 @@ export class TripsService {
     if (member.role === TripMemberRole.OWNER) {
       await this.assertNotLastOwner(tripId);
     }
+    const withUser = await this.tripMemberRepository.findOne({
+      where: { id: member.id },
+      relations: { user: true },
+    });
     await this.tripMemberRepository.delete({ id: member.id });
+    this.emitMemberEvent(tripId, 'member:left', withUser ?? member);
   }
 
   /** owner가 1명뿐이면 강등/추방/탈퇴를 막는다(여행이 주인 없는 상태가 되는 것 방지). */

@@ -2,6 +2,7 @@ import { Module } from '@nestjs/common';
 import { JwtModule } from '@nestjs/jwt';
 import { ScheduleModule } from '../schedule/schedule.module';
 import { TripsModule } from '../trips/trips.module';
+import { CollaborationEventsModule } from './collaboration-events.module';
 import { CollaborationGateway } from './collaboration.gateway';
 import { ConflictResolutionService } from './conflict-resolution.service';
 
@@ -12,7 +13,7 @@ import { ConflictResolutionService } from './conflict-resolution.service';
  * JwtModule은 AuthModule과 같은 이유로 기본값 없이 등록하고 검증 시 secret을 매번 지정한다.
  */
 @Module({
-  imports: [TripsModule, ScheduleModule, JwtModule.register({})],
+  imports: [TripsModule, ScheduleModule, CollaborationEventsModule, JwtModule.register({})],
   providers: [CollaborationGateway, ConflictResolutionService],
   exports: [CollaborationGateway],
 })

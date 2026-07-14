@@ -1,4 +1,4 @@
-import { Logger } from '@nestjs/common';
+import { Logger, OnModuleDestroy, OnModuleInit } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { JwtService } from '@nestjs/jwt';
 import {
@@ -13,6 +13,7 @@ import {
 import { Server, Socket } from 'socket.io';
 import { BusinessException } from '../common/exceptions/business-exception';
 import { TripsService } from '../trips/trips.service';
+import { CollaborationEventBus } from './collaboration-event-bus';
 import { ConflictResolutionService, ScheduleOpInput } from './conflict-resolution.service';
 
 /**
@@ -35,8 +36,11 @@ interface TripSocketData {
  * `auth.token`(또는 query `token`)과 query `tripId`를 함께 보낸다.
  */
 @WebSocketGateway({ namespace: 'ws/trips', cors: { origin: true } })
-export class CollaborationGateway implements OnGatewayConnection, OnGatewayDisconnect {
+export class CollaborationGateway
+  implements OnGatewayConnection, OnGatewayDisconnect, OnModuleInit, OnModuleDestroy
+{
   private readonly logger = new Logger(CollaborationGateway.name);
+  private unsubscribeEventBus?: () => void;
 
   @WebSocketServer()
   server: Server;
@@ -46,7 +50,19 @@ export class CollaborationGateway implements OnGatewayConnection, OnGatewayDisco
     private readonly configService: ConfigService,
     private readonly tripsService: TripsService,
     private readonly conflictResolutionService: ConflictResolutionService,
+    private readonly collaborationEventBus: CollaborationEventBus,
   ) {}
+
+  /** 도메인 서비스(Trips/Schedule)가 발행한 이벤트를 해당 여행 room으로 중계한다. */
+  onModuleInit(): void {
+    this.unsubscribeEventBus = this.collaborationEventBus.subscribe(({ tripId, event, payload }) =>
+      this.broadcastToTrip(tripId, event, payload),
+    );
+  }
+
+  onModuleDestroy(): void {
+    this.unsubscribeEventBus?.();
+  }
 
   async handleConnection(socket: Socket): Promise<void> {
     try {

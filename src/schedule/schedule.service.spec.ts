@@ -87,6 +87,7 @@ describe('ScheduleService', () => {
       tripsService as never,
       placesService as never,
       scheduleAiClient as never,
+      { emit: jest.fn() } as never, // CollaborationEventBus — WS 브로드캐스트는 이 스위트 관심사 아님
     );
   });
 

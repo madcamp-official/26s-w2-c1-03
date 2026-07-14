@@ -1,5 +1,6 @@
 import { Module } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
+import { CollaborationEventsModule } from '../collaboration/collaboration-events.module';
 import { PlacesModule } from '../places/places.module';
 import { TripsModule } from '../trips/trips.module';
 import {
@@ -19,7 +20,12 @@ import { ScheduleService } from './schedule.service';
  * 수동 편집/프롬프트 재수정(Phase 9), WebSocket 브로드캐스트(Phase 10)는 이후 추가된다.
  */
 @Module({
-  imports: [TypeOrmModule.forFeature([TripPlace, AiPlanRequest]), TripsModule, PlacesModule],
+  imports: [
+    TypeOrmModule.forFeature([TripPlace, AiPlanRequest]),
+    TripsModule,
+    PlacesModule,
+    CollaborationEventsModule,
+  ],
   controllers: [ScheduleController, AiRequestsController],
   providers: [
     ScheduleService,

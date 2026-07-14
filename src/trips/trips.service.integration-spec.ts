@@ -1,6 +1,7 @@
 import 'reflect-metadata';
 import { ConfigService } from '@nestjs/config';
 import { DataSource } from 'typeorm';
+import { CollaborationEventBus } from '../collaboration/collaboration-event-bus';
 import { buildDataSourceOptions } from '../config/database.config';
 import { User } from '../users/entities/user.entity';
 import { Trip, TripStatus } from './entities/trip.entity';
@@ -32,6 +33,7 @@ describeIfDb('TripsService (Phase 6, 실DB)', () => {
       dataSource.getRepository(TripInviteLink),
       dataSource,
       new ConfigService(),
+      new CollaborationEventBus(),
     );
   });
 

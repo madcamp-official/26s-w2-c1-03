@@ -1,6 +1,7 @@
 import { Inject, Injectable } from '@nestjs/common';
 import { InjectDataSource } from '@nestjs/typeorm';
 import { DataSource } from 'typeorm';
+import { CollaborationEventBus } from '../collaboration/collaboration-event-bus';
 import { BusinessException } from '../common/exceptions/business-exception';
 import {
   PlaceCandidateDto,
@@ -166,7 +167,20 @@ export class ScheduleService {
     private readonly tripsService: TripsService,
     private readonly placesService: PlacesService,
     @Inject(SCHEDULE_AI_CLIENT) private readonly scheduleAiClient: ScheduleAiClient,
+    private readonly collaborationEventBus: CollaborationEventBus,
   ) {}
+
+  /**
+   * REST로 변경된 스케줄도 동일 채널에 브로드캐스트한다(§3.2). 변경 내용을 일일이
+   * 싣지 않고 "누가 바꿨다"만 알린다 — 수신 측(FE)은 GET /schedule로 재조회한다.
+   */
+  private emitScheduleChanged(tripId: string, userId: string): void {
+    this.collaborationEventBus.emit({
+      tripId,
+      event: 'schedule:changed',
+      payload: { authorUserId: userId },
+    });
+  }
 
   /**
    * API 명세서 §2.3 POST /trips/{tripId}/schedule/generate — 선택 장소를 AI가 일자별
@@ -276,7 +290,10 @@ export class ScheduleService {
       return manager.save(rows);
     });
 
-    return { schedule: this.buildView(saved, infoById) };
+    const schedule = this.buildView(saved, infoById);
+    // Phase 8에서 Gateway 부재로 이월됐던 §3.2 브로드캐스트 — 함께 보던 멤버 화면 즉시 갱신.
+    this.collaborationEventBus.emit({ tripId, event: 'schedule:generated', payload: { schedule } });
+    return { schedule };
   }
 
   /**
@@ -332,6 +349,7 @@ export class ScheduleService {
       return manager.save(rows);
     });
 
+    this.emitScheduleChanged(tripId, userId);
     return { schedule: this.buildView(saved, infoById) };
   }
 
@@ -397,6 +415,7 @@ export class ScheduleService {
       await repo.save(this.renumber(rows));
       return created;
     });
+    this.emitScheduleChanged(tripId, userId);
     return { tripPlace: this.toPlaceDto(saved, info) };
   }
 
@@ -443,6 +462,7 @@ export class ScheduleService {
     const infos = saved.placeId
       ? await this.placesService.resolveForSchedule([saved.placeId])
       : [];
+    this.emitScheduleChanged(tripId, userId);
     return { tripPlace: this.toPlaceDto(saved, infos[0]) };
   }
 
@@ -462,6 +482,7 @@ export class ScheduleService {
         await repo.save(changed);
       }
     });
+    this.emitScheduleChanged(tripId, userId);
   }
 
   /**
@@ -496,6 +517,7 @@ export class ScheduleService {
         await repo.save(changed);
       }
     });
+    this.emitScheduleChanged(tripId, userId);
     return this.getSchedule(tripId, userId);
   }
 
@@ -637,6 +659,7 @@ export class ScheduleService {
       });
       return manager.save(rows);
     });
+    this.emitScheduleChanged(tripId, userId);
     return { schedule: this.buildView(saved, infoById) };
   }
 
@@ -781,6 +804,9 @@ export class ScheduleService {
       }),
     );
 
+    if (changed) {
+      this.emitScheduleChanged(tripId, userId);
+    }
     return { reply: finalReply, schedule, changed };
   }
 

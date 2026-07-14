@@ -63,6 +63,7 @@ describe('TripsService', () => {
       inviteLinkRepository as never,
       dataSource as unknown as DataSource,
       configService as never,
+      { emit: jest.fn() } as never, // CollaborationEventBus — WS 브로드캐스트는 이 스위트 관심사 아님
     );
   });
 
@@ -468,9 +469,12 @@ describe('TripsService', () => {
     });
 
     it('마지막 owner를 내보내려 하면 LAST_OWNER_CANNOT_LEAVE를 던진다', async () => {
-      (tripMemberRepository.findOneBy as jest.Mock)
-        .mockResolvedValueOnce({ role: TripMemberRole.OWNER }) // actor assertMember
-        .mockResolvedValueOnce(buildMember({ userId: 'user-1', role: TripMemberRole.OWNER }));
+      (tripMemberRepository.findOneBy as jest.Mock).mockResolvedValue({
+        role: TripMemberRole.OWNER,
+      }); // actor assertMember
+      (tripMemberRepository.findOne as jest.Mock).mockResolvedValue(
+        buildMember({ userId: 'user-1', role: TripMemberRole.OWNER }),
+      );
       (tripMemberRepository.countBy as jest.Mock).mockResolvedValue(1);
 
       await expect(service.removeMember('trip-1', 'user-1', 'user-1')).rejects.toMatchObject({
@@ -480,9 +484,12 @@ describe('TripsService', () => {
     });
 
     it('owner는 일반 멤버를 내보낼 수 있다', async () => {
-      (tripMemberRepository.findOneBy as jest.Mock)
-        .mockResolvedValueOnce({ role: TripMemberRole.OWNER })
-        .mockResolvedValueOnce(buildMember({ id: 'member-2' }));
+      (tripMemberRepository.findOneBy as jest.Mock).mockResolvedValue({
+        role: TripMemberRole.OWNER,
+      });
+      (tripMemberRepository.findOne as jest.Mock).mockResolvedValue(
+        buildMember({ id: 'member-2' }),
+      );
 
       await service.removeMember('trip-1', 'user-1', 'user-2');
 
