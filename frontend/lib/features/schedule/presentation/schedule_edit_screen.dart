@@ -5,7 +5,7 @@ import '../../../core/network/api_exception.dart';
 import '../../../core/theme/app_colors.dart';
 import '../data/schedule_api.dart';
 import '../data/schedule_models.dart';
-import 'add_place_sheet.dart';
+import 'add_place_map_screen.dart';
 import 'schedule_chat_panel.dart';
 
 /// 스케줄 편집 탭 — 장소 추가/삭제/메모 수정/드래그앤드롭 순서변경 + 우측 하단 FAB로
@@ -133,35 +133,22 @@ class _ScheduleEditScreenState extends ConsumerState<ScheduleEditScreen> {
     });
   }
 
+  /// place_selection_screen.dart와 같은 지도+드래그시트 화면에서 그 날에 넣을
+  /// 장소를 고른다. 화면 안에서 실제 addPlace 호출까지 끝내고, 추가된 장소들을
+  /// 돌려주면 로컬 목록에 이어붙이기만 하면 된다.
   Future<void> _addPlace(int dayNumber) async {
-    final result = await showModalBottomSheet<AddPlaceResult>(
-      context: context,
-      isScrollControlled: true,
-      backgroundColor: Colors.white,
-      shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+    final added = await Navigator.of(context).push<List<ScheduledTripPlace>>(
+      MaterialPageRoute(
+        builder: (_) =>
+            AddPlaceMapScreen(tripId: widget.tripId, dayNumber: dayNumber),
       ),
-      builder: (_) => AddPlaceSheet(tripId: widget.tripId, dayNumber: dayNumber),
     );
-    if (result == null || !mounted) return;
-
-    try {
-      final added = await ref.read(scheduleApiProvider).addPlace(
-            tripId: widget.tripId,
-            placeId: result.placeId,
-            customName: result.customName,
-            customAddress: result.customAddress,
-            dayNumber: dayNumber,
-          );
-      if (!mounted) return;
-      setState(() {
-        _places.add(added);
-        _places.sort(_byDayThenOrder);
-        _changed = true;
-      });
-    } on DioException catch (e) {
-      _showError(e.error, '장소를 추가하지 못했어요.');
-    }
+    if (added == null || added.isEmpty || !mounted) return;
+    setState(() {
+      _places.addAll(added);
+      _places.sort(_byDayThenOrder);
+      _changed = true;
+    });
   }
 
   Future<void> _editMemo(ScheduledTripPlace place) async {

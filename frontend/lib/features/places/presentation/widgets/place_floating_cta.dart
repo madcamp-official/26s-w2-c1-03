@@ -7,11 +7,16 @@ class PlaceFloatingCta extends StatelessWidget {
     required this.count,
     required this.onTap,
     this.loading = false,
+    this.label,
   });
 
   final int count;
   final VoidCallback onTap;
   final bool loading;
+
+  /// 생략하면 "N곳 일정에 담기"(새 일정 만들기 문구)를 쓴다. 기존 일정에 장소를
+  /// 추가하는 화면처럼 문구가 달라야 할 때 재사용한다.
+  final String? label;
 
   @override
   Widget build(BuildContext context) {
@@ -30,7 +35,7 @@ class PlaceFloatingCta extends StatelessWidget {
       child: SafeArea(
         top: false,
         child: AppButton(
-          label: '$count곳 일정에 담기',
+          label: label ?? '$count곳 일정에 담기',
           variant: AppButtonVariant.lime,
           loading: loading,
           onPressed: onTap,
