@@ -9,6 +9,8 @@ export interface OpenAiConfig {
   apiKey: string;
   baseUrl: string;
   scheduleModel: string;
+  /** Phase 11 사진 선별(Vision) — 별도 모델 키로 분리해 스케줄과 독립적으로 튜닝 가능하게 한다. */
+  photosModel: string;
 }
 
 export function loadOpenAiConfig(configService: ConfigService): OpenAiConfig {
@@ -16,5 +18,6 @@ export function loadOpenAiConfig(configService: ConfigService): OpenAiConfig {
     apiKey: configService.getOrThrow<string>('OPENAI_API_KEY'),
     baseUrl: configService.getOrThrow<string>('OPENAI_BASE_URL'),
     scheduleModel: configService.getOrThrow<string>('OPENAI_SCHEDULE_MODEL'),
+    photosModel: configService.getOrThrow<string>('OPENAI_PHOTOS_MODEL'),
   };
 }

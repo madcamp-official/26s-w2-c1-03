@@ -6,6 +6,15 @@ import { RecordPhotoRef, RecordPhotoRefStatus } from './entities/record-photo-re
 import { TravelRecord, TravelRecordStatus } from './entities/travel-record.entity';
 import { RecordsService } from './records.service';
 
+// curate()의 stripExif가 실제 sharp로 이미지를 재인코딩하는데, 유닛테스트에서는
+// 진짜 JPEG 바이트가 없으므로 입력을 그대로 통과시키는 스텁으로 대체한다 —
+// EXIF 스트립 자체의 정확성은 sharp 라이브러리 몫이라 여기서 검증하지 않는다.
+jest.mock('sharp', () => {
+  return jest.fn((buffer: Buffer) => ({
+    jpeg: () => ({ toBuffer: async () => buffer }),
+  }));
+});
+
 type RepoMock<T extends object> = {
   [K in keyof import('typeorm').Repository<T>]?: jest.Mock;
 };
@@ -71,6 +80,7 @@ describe('RecordsService', () => {
   let recordPhotoRefRepository: RepoMock<RecordPhotoRef>;
   let tripsService: { assertMember: jest.Mock };
   let configService: { getOrThrow: jest.Mock };
+  let photoCurateAiClient: { selectBestPhotos: jest.Mock };
   let bufferDir: string;
   let service: RecordsService;
 
@@ -78,6 +88,7 @@ describe('RecordsService', () => {
     travelRecordRepository = createRepositoryMock<TravelRecord>();
     recordPhotoRefRepository = createRepositoryMock<RecordPhotoRef>();
     tripsService = { assertMember: jest.fn().mockResolvedValue(undefined) };
+    photoCurateAiClient = { selectBestPhotos: jest.fn() };
 
     bufferDir = await fs.mkdtemp(path.join(os.tmpdir(), 'record-photo-buffer-test-'));
     configService = {
@@ -89,6 +100,7 @@ describe('RecordsService', () => {
       recordPhotoRefRepository as never,
       tripsService as never,
       configService as never,
+      photoCurateAiClient as never,
     );
   });
 
@@ -250,6 +262,118 @@ describe('RecordsService', () => {
         { id: 'ref-1' },
         { tempFilePath: writtenPath, status: RecordPhotoRefStatus.UPLOADED },
       );
+    });
+  });
+
+  describe('curate', () => {
+    async function writeTempFile(photoRefId: string, content = 'jpeg-bytes'): Promise<string> {
+      const filePath = path.join(bufferDir, photoRefId);
+      await fs.writeFile(filePath, content);
+      return filePath;
+    }
+
+    it('UPLOADED 상태 사진이 없으면 빈 배열을 반환하고 AI를 호출하지 않는다', async () => {
+      travelRecordRepository.findOneBy!.mockResolvedValue(buildRecord());
+      recordPhotoRefRepository.findBy!.mockResolvedValue([]);
+
+      const result = await service.curate('trip-1', 'record-1', 'user-1');
+
+      expect(result).toEqual({ recommended: [] });
+      expect(photoCurateAiClient.selectBestPhotos).not.toHaveBeenCalled();
+    });
+
+    it('AI가 추천한 것만 RECOMMENDED로 갱신하고 나머지는 DISCARDED + 파일 삭제한다', async () => {
+      const path1 = await writeTempFile('ref-1');
+      const path2 = await writeTempFile('ref-2');
+      const path3 = await writeTempFile('ref-3');
+
+      travelRecordRepository.findOneBy!.mockResolvedValue(buildRecord());
+      recordPhotoRefRepository.findBy!.mockResolvedValue([
+        buildPhotoRef({
+          id: 'ref-1',
+          tempFilePath: path1,
+          takenAt: new Date('2026-07-16T09:00:00Z'),
+        }),
+        buildPhotoRef({
+          id: 'ref-2',
+          tempFilePath: path2,
+          takenAt: new Date('2026-07-16T10:00:00Z'),
+        }),
+        buildPhotoRef({
+          id: 'ref-3',
+          tempFilePath: path3,
+          takenAt: new Date('2026-07-16T11:00:00Z'),
+        }),
+      ]);
+      photoCurateAiClient.selectBestPhotos.mockResolvedValue({
+        selectedPhotoRefIds: ['ref-2', 'ref-3'],
+      });
+
+      const result = await service.curate('trip-1', 'record-1', 'user-1');
+
+      expect([...result.recommended].sort()).toEqual(['ref-2', 'ref-3']);
+      expect(recordPhotoRefRepository.update).toHaveBeenCalledWith(
+        { id: 'ref-2' },
+        { status: RecordPhotoRefStatus.RECOMMENDED },
+      );
+      expect(recordPhotoRefRepository.update).toHaveBeenCalledWith(
+        { id: 'ref-3' },
+        { status: RecordPhotoRefStatus.RECOMMENDED },
+      );
+      expect(recordPhotoRefRepository.update).toHaveBeenCalledWith(
+        { id: 'ref-1' },
+        { status: RecordPhotoRefStatus.DISCARDED, tempFilePath: null },
+      );
+      await expect(fs.access(path1)).rejects.toThrow();
+    });
+
+    it('AI 호출이 실패하면 그날은 최신순으로 quota만큼 폴백 선택한다', async () => {
+      const path1 = await writeTempFile('ref-1');
+      const path2 = await writeTempFile('ref-2');
+
+      travelRecordRepository.findOneBy!.mockResolvedValue(buildRecord());
+      recordPhotoRefRepository.findBy!.mockResolvedValue([
+        buildPhotoRef({
+          id: 'ref-1',
+          tempFilePath: path1,
+          takenAt: new Date('2026-07-16T09:00:00Z'),
+        }),
+        buildPhotoRef({
+          id: 'ref-2',
+          tempFilePath: path2,
+          takenAt: new Date('2026-07-16T10:00:00Z'),
+        }),
+      ]);
+      photoCurateAiClient.selectBestPhotos.mockRejectedValue(new Error('openai down'));
+
+      const result = await service.curate('trip-1', 'record-1', 'user-1');
+
+      // 2장뿐이라 그날 quota=2(전체 통과) — 최신순 폴백이면 둘 다 선택된다.
+      expect([...result.recommended].sort()).toEqual(['ref-1', 'ref-2']);
+    });
+
+    it('날짜가 다른 그룹은 각각 별도로 AI를 호출한다', async () => {
+      const path1 = await writeTempFile('ref-1');
+      const path2 = await writeTempFile('ref-2');
+
+      travelRecordRepository.findOneBy!.mockResolvedValue(buildRecord());
+      recordPhotoRefRepository.findBy!.mockResolvedValue([
+        buildPhotoRef({
+          id: 'ref-1',
+          tempFilePath: path1,
+          takenAt: new Date('2026-07-16T09:00:00Z'),
+        }),
+        buildPhotoRef({
+          id: 'ref-2',
+          tempFilePath: path2,
+          takenAt: new Date('2026-07-17T09:00:00Z'),
+        }),
+      ]);
+      photoCurateAiClient.selectBestPhotos.mockResolvedValue({ selectedPhotoRefIds: [] });
+
+      await service.curate('trip-1', 'record-1', 'user-1');
+
+      expect(photoCurateAiClient.selectBestPhotos).toHaveBeenCalledTimes(2);
     });
   });
 });

@@ -43,4 +43,13 @@ export class RecordsController {
   ) {
     return this.recordsService.uploadPhotos(tripId, recordId, user.userId, files);
   }
+
+  @Post(':recordId/photos/curate')
+  curate(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param('tripId') tripId: string,
+    @Param('recordId') recordId: string,
+  ) {
+    return this.recordsService.curate(tripId, recordId, user.userId);
+  }
 }

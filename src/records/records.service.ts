@@ -1,19 +1,23 @@
-import { Injectable } from '@nestjs/common';
+import { Inject, Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { InjectRepository } from '@nestjs/typeorm';
 import { promises as fs } from 'fs';
 import * as path from 'path';
+import sharp from 'sharp';
 import { Repository } from 'typeorm';
 import { BusinessException } from '../common/exceptions/business-exception';
 import { CommonErrorCode } from '../common/exceptions/error-code';
 import { loadPhotoBufferConfig } from '../config/photo-buffer.config';
 import { TripsService } from '../trips/trips.service';
+import { PHOTO_CURATE_AI_CLIENT, PhotoCurateAiClient } from './client/photo-curate-ai.client';
 import { RegisterPhotoMetadataDto } from './dto/register-photo-metadata.dto';
 import { RecordPhotoRef, RecordPhotoRefStatus } from './entities/record-photo-ref.entity';
 import { TravelRecord, TravelRecordStatus } from './entities/travel-record.entity';
 import { RecordsErrorCode } from './exceptions/records-error-code';
+import { allocatePhotoQuota } from './utils/photo-quota.util';
 
 const MAX_UPLOAD_BATCH = 100;
+const CURATE_TARGET_COUNT = 15;
 
 export interface RecordSummary {
   id: string;
@@ -33,6 +37,7 @@ export interface PhotoRefSummary {
 
 @Injectable()
 export class RecordsService {
+  private readonly logger = new Logger(RecordsService.name);
   private readonly bufferDir: string;
 
   constructor(
@@ -42,6 +47,8 @@ export class RecordsService {
     private readonly recordPhotoRefRepository: Repository<RecordPhotoRef>,
     private readonly tripsService: TripsService,
     configService: ConfigService,
+    @Inject(PHOTO_CURATE_AI_CLIENT)
+    private readonly photoCurateAiClient: PhotoCurateAiClient,
   ) {
     this.bufferDir = loadPhotoBufferConfig(configService).dir;
   }
@@ -156,6 +163,110 @@ export class RecordsService {
     }
 
     return { uploaded };
+  }
+
+  /**
+   * `taken_at` 기준 일자별 그룹핑 → OpenAI 배치 전송 → 여행 일수 기준 동적 배분으로
+   * 최종 최대 15장 추천(API 명세서 §4, §3.3). 추천분은 RECOMMENDED로, 비추천분은
+   * 즉시 임시 버퍼에서 폐기(DISCARDED + 파일 삭제)한다. UPLOADED 상태만 대상이라
+   * 이미 처리된 photoRef는 다시 curate되지 않는다.
+   */
+  async curate(
+    tripId: string,
+    recordId: string,
+    userId: string,
+  ): Promise<{ recommended: string[] }> {
+    const record = await this.findOwnedRecord(tripId, recordId, userId);
+
+    const uploadedRefs = await this.recordPhotoRefRepository.findBy({
+      recordId: record.id,
+      status: RecordPhotoRefStatus.UPLOADED,
+    });
+    if (uploadedRefs.length === 0) {
+      return { recommended: [] };
+    }
+
+    const groupsByDate = this.groupByTakenDate(uploadedRefs);
+    const quota = allocatePhotoQuota(
+      groupsByDate.map(([date, refs]) => ({ date, count: refs.length })),
+      CURATE_TARGET_COUNT,
+    );
+
+    const recommended: string[] = [];
+    for (const [date, refs] of groupsByDate) {
+      const dayQuota = quota.get(date) ?? 0;
+      if (dayQuota === 0) {
+        continue;
+      }
+      recommended.push(...(await this.selectBestForDay(refs, dayQuota)));
+    }
+
+    const recommendedSet = new Set(recommended);
+    const discarded = uploadedRefs.filter((ref) => !recommendedSet.has(ref.id));
+
+    await Promise.all([
+      ...recommended.map((id) =>
+        this.recordPhotoRefRepository.update({ id }, { status: RecordPhotoRefStatus.RECOMMENDED }),
+      ),
+      ...discarded.map((ref) => this.discardRef(ref)),
+    ]);
+
+    return { recommended };
+  }
+
+  /** 촬영일시(없으면 등록일시) 기준 UTC 캘린더 날짜로 그룹핑. */
+  private groupByTakenDate(refs: RecordPhotoRef[]): Array<[string, RecordPhotoRef[]]> {
+    const map = new Map<string, RecordPhotoRef[]>();
+    for (const ref of refs) {
+      const date = (ref.takenAt ?? ref.createdAt).toISOString().slice(0, 10);
+      const list = map.get(date) ?? [];
+      list.push(ref);
+      map.set(date, list);
+    }
+    return [...map.entries()];
+  }
+
+  /**
+   * OpenAI가 실패하면 그날 전체를 실패시키지 않고 최신순으로 quota만큼 폴백
+   * 선택한다(§16 리스크 대응 기조 — 필터링 실패가 전체 파이프라인을 막지 않게).
+   */
+  private async selectBestForDay(refs: RecordPhotoRef[], quota: number): Promise<string[]> {
+    try {
+      const candidates = await Promise.all(
+        refs
+          .filter((ref) => ref.tempFilePath)
+          .map(async (ref) => ({
+            photoRefId: ref.id,
+            imageBuffer: await this.stripExif(await fs.readFile(ref.tempFilePath!)),
+          })),
+      );
+      const result = await this.photoCurateAiClient.selectBestPhotos({
+        candidates,
+        selectCount: quota,
+      });
+      return result.selectedPhotoRefIds;
+    } catch (error) {
+      this.logger.warn(`사진 선별 AI 실패, 최신순 폴백으로 대체: ${(error as Error).message}`);
+      return [...refs]
+        .sort((a, b) => (b.takenAt?.getTime() ?? 0) - (a.takenAt?.getTime() ?? 0))
+        .slice(0, quota)
+        .map((ref) => ref.id);
+    }
+  }
+
+  /** OpenAI 전송 직전 재인코딩으로 EXIF를 다시 한번 제거한다(§9.3 이중 스트립). */
+  private async stripExif(buffer: Buffer): Promise<Buffer> {
+    return sharp(buffer).jpeg().toBuffer();
+  }
+
+  private async discardRef(ref: RecordPhotoRef): Promise<void> {
+    if (ref.tempFilePath) {
+      await fs.unlink(ref.tempFilePath).catch(() => undefined);
+    }
+    await this.recordPhotoRefRepository.update(
+      { id: ref.id },
+      { status: RecordPhotoRefStatus.DISCARDED, tempFilePath: null },
+    );
   }
 
   /** record.user_id == 요청자 검증(API 명세서 §4 비공개 원칙), 아니면 403. */
