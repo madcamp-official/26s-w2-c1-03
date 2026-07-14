@@ -127,6 +127,45 @@ class ScheduleApi {
     final schedule = response.data!['schedule'] as Map<String, dynamic>;
     return SchedulePlan.fromJson(schedule);
   }
+
+  /// POST /schedule/chat — 챗봇 스케줄 편집. 대화는 세션 한정이라 [messages]에 그동안의
+  /// user/assistant 히스토리 전체를 담아 매번 보낸다. AI가 도구를 호출하면 서버가 그
+  /// 자리에서 실제로 반영하므로(응답의 changed로 알 수 있음), 반환된 schedule이 최신 상태다.
+  Future<ChatReply> chat({
+    required String tripId,
+    required List<ChatMessage> messages,
+  }) async {
+    final response = await _apiClient.dio.post<Map<String, dynamic>>(
+      '/trips/$tripId/schedule/chat',
+      data: {'messages': messages.map((m) => m.toJson()).toList()},
+      options: Options(receiveTimeout: const Duration(seconds: 60)),
+    );
+    return ChatReply.fromJson(response.data!);
+  }
+
+  /// 되돌리기 — snapshot(직전 스케줄 스냅샷)으로 전체를 교체한다. revise/apply 엔드포인트를
+  /// 그대로 재사용하되, ScheduledTripPlace를 apply 항목 형태로 직접 변환한다(placeId가
+  /// 없으면 name/address를 custom 필드로 취급 — buildView가 커스텀 항목을 그렇게 채운다).
+  Future<SchedulePlan> restoreSnapshot({
+    required String tripId,
+    required SchedulePlan snapshot,
+  }) async {
+    final items = [
+      for (final day in snapshot.days)
+        for (final place in day.places)
+          ProposalItem(
+            placeId: place.placeId,
+            customName: place.placeId == null ? place.name : null,
+            customAddress: place.placeId == null ? place.address : null,
+            dayNumber: place.dayNumber,
+            orderInDay: place.orderInDay,
+            startTime: place.startTime,
+            name: place.name,
+            address: place.address,
+          ),
+    ];
+    return applyRevision(tripId: tripId, items: items);
+  }
 }
 
 /// memo 미전송과 null 전송을 구분하기 위한 sentinel.

@@ -171,3 +171,29 @@ class ProposalItem {
         if (startTime != null) 'startTime': startTime,
       };
 }
+
+/// 챗봇 스케줄 편집(Phase 9 chat) 대화 메시지 — 세션(화면) 한정, 서버에 저장되지 않는다.
+/// user/assistant만 존재한다(system/tool 메시지는 서버가 내부적으로만 구성).
+class ChatMessage {
+  const ChatMessage({required this.role, required this.content});
+
+  final String role; // 'user' | 'assistant'
+  final String content;
+
+  Map<String, dynamic> toJson() => {'role': role, 'content': content};
+}
+
+/// POST /schedule/chat 응답: { reply, schedule: {days:[...]}, changed }.
+class ChatReply {
+  const ChatReply({required this.reply, required this.schedule, required this.changed});
+
+  final String reply;
+  final SchedulePlan schedule;
+  final bool changed;
+
+  factory ChatReply.fromJson(Map<String, dynamic> json) => ChatReply(
+        reply: json['reply'] as String,
+        schedule: SchedulePlan.fromJson(json['schedule'] as Map<String, dynamic>),
+        changed: json['changed'] as bool,
+      );
+}
