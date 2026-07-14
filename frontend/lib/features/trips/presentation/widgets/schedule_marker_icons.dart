@@ -21,6 +21,11 @@ class ScheduleMarkerIcons {
 
   static final Map<String, BitmapDescriptor> _cache = {};
 
+  /// 지도 위에 실제로 찍힐 마커 지름(논리 픽셀, dp) — 구글 기본 핀과 비슷한 크기.
+  static const double _targetSize = 30.0;
+  /// 고해상도 화면에서 흐릿하지 않게 그 배수로 래스터화한다.
+  static const double _pixelRatio = 3.0;
+
   static Future<BitmapDescriptor> numbered({
     required int number,
     required Color color,
@@ -29,15 +34,15 @@ class ScheduleMarkerIcons {
     final cached = _cache[key];
     if (cached != null) return cached;
 
-    const size = 84.0;
+    final rasterSize = _targetSize * _pixelRatio;
     final recorder = ui.PictureRecorder();
     final canvas = Canvas(recorder);
-    final center = const Offset(size / 2, size / 2 - 4);
-    const radius = size / 2 - 6;
+    final center = Offset(rasterSize / 2, rasterSize / 2 - rasterSize * 0.04);
+    final radius = rasterSize / 2 - rasterSize * 0.08;
 
     // 그림자
     canvas.drawCircle(
-      center.translate(0, 2),
+      center.translate(0, rasterSize * 0.03),
       radius,
       Paint()..color = Colors.black.withValues(alpha: 0.18),
     );
@@ -49,15 +54,15 @@ class ScheduleMarkerIcons {
       Paint()
         ..color = Colors.white
         ..style = PaintingStyle.stroke
-        ..strokeWidth = 3,
+        ..strokeWidth = rasterSize * 0.045,
     );
 
     final textPainter = TextPainter(
       text: TextSpan(
         text: '$number',
-        style: const TextStyle(
+        style: TextStyle(
           color: Colors.white,
-          fontSize: 30,
+          fontSize: rasterSize * 0.4,
           fontWeight: FontWeight.w800,
         ),
       ),
@@ -69,9 +74,13 @@ class ScheduleMarkerIcons {
     );
 
     final picture = recorder.endRecording();
-    final image = await picture.toImage(size.toInt(), size.toInt());
+    final image = await picture.toImage(rasterSize.round(), rasterSize.round());
     final bytes = await image.toByteData(format: ui.ImageByteFormat.png);
-    final descriptor = BitmapDescriptor.bytes(bytes!.buffer.asUint8List());
+    final descriptor = BitmapDescriptor.bytes(
+      bytes!.buffer.asUint8List(),
+      width: _targetSize,
+      height: _targetSize,
+    );
     _cache[key] = descriptor;
     return descriptor;
   }
