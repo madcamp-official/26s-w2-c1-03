@@ -57,13 +57,8 @@ class _RecordModeSheetContent extends StatelessWidget {
             ),
             const SizedBox(height: 18),
             const Text(
-              '어떻게 기록을 시작할까?',
+              '사진을 어떻게 고를까?',
               style: TextStyle(fontSize: 17, fontWeight: FontWeight.w800, color: AppColors.ink900),
-            ),
-            const SizedBox(height: 4),
-            const Text(
-              '이 기간에 찍은 사진만 기기에서 확인해요. 사진 실물은 이 단계에서 서버로 전송되지 않아요.',
-              style: TextStyle(fontSize: 12.5, height: 1.5, fontWeight: FontWeight.w600, color: AppColors.ink600),
             ),
             const SizedBox(height: 20),
             AppButton(

@@ -20,6 +20,7 @@ import { RecordPhoto } from './entities/record-photo.entity';
 import { RecordPhotoRef, RecordPhotoRefStatus } from './entities/record-photo-ref.entity';
 import { TravelRecord, TravelRecordStatus } from './entities/travel-record.entity';
 import { RecordsErrorCode } from './exceptions/records-error-code';
+import { allocateDailyQuotas } from './utils/curate-day-allocation.util';
 import { signPhotoPreviewToken } from './utils/photo-preview-token.util';
 
 const MAX_UPLOAD_BATCH = 100;
@@ -228,10 +229,12 @@ export class RecordsService {
   }
 
   /**
-   * UPLOADED 상태 사진 전체(여행 전체 기간)를 한 번에 OpenAI에 보내 베스트
-   * 최대 15장을 추천한다(API 명세서 §4 — 날짜별이 아니라 여행 전체 기준 선별로
-   * 변경). 추천분은 RECOMMENDED로, 비추천분은 즉시 임시 버퍼에서 폐기(DISCARDED
-   * + 파일 삭제)한다. 이미 처리된 photoRef는 다시 curate되지 않는다.
+   * UPLOADED 상태 사진을 `taken_at` 기준 일자별로 그룹핑해 각 그룹을 따로
+   * OpenAI에 보낸다(API 명세서 §4, 기능명세서 §3.3) — 여행 일수 기준 동적
+   * 배분(allocateDailyQuotas)으로 하루당 몫을 정하고, 그룹별 추천을 합쳐
+   * 최종 최대 15장을 만든다. 추천분은 RECOMMENDED로, 비추천분은 즉시 임시
+   * 버퍼에서 폐기(DISCARDED + 파일 삭제)한다. 이미 처리된 photoRef는 다시
+   * curate되지 않는다.
    */
   async curate(
     tripId: string,
@@ -249,7 +252,18 @@ export class RecordsService {
     }
 
     const quota = Math.min(CURATE_TARGET_COUNT, uploadedRefs.length);
-    const recommended = await this.selectBestOverall(uploadedRefs, quota);
+    const dayGroups = this.groupRefsByTakenDate(uploadedRefs);
+    const dayQuotas = allocateDailyQuotas(
+      dayGroups.map((group) => group.length),
+      quota,
+    );
+
+    const recommendedByDay = await Promise.all(
+      dayGroups.map((group, index) =>
+        dayQuotas[index] > 0 ? this.selectBestOverall(group, dayQuotas[index]) : [],
+      ),
+    );
+    const recommended = recommendedByDay.flat();
 
     const recommendedSet = new Set(recommended);
     const discarded = uploadedRefs.filter((ref) => !recommendedSet.has(ref.id));
@@ -262,6 +276,28 @@ export class RecordsService {
     ]);
 
     return { recommended };
+  }
+
+  /**
+   * `takenAt`의 날짜(YYYY-MM-DD, UTC 기준) 별로 그룹핑한다 — 시간대별 그룹
+   * 순서는 촬영일 오름차순으로 정렬해 배분 결과가 여행 진행 순서와 대응되게
+   * 한다. `takenAt`이 없는 참조는 별도 그룹으로 묶어 배분에서 배제하지 않는다.
+   */
+  private groupRefsByTakenDate(refs: RecordPhotoRef[]): RecordPhotoRef[][] {
+    const groups = new Map<string, RecordPhotoRef[]>();
+    const sorted = [...refs].sort(
+      (a, b) => (a.takenAt?.getTime() ?? 0) - (b.takenAt?.getTime() ?? 0),
+    );
+    for (const ref of sorted) {
+      const key = ref.takenAt ? ref.takenAt.toISOString().slice(0, 10) : 'unknown';
+      const bucket = groups.get(key);
+      if (bucket) {
+        bucket.push(ref);
+      } else {
+        groups.set(key, [ref]);
+      }
+    }
+    return [...groups.values()];
   }
 
   /**

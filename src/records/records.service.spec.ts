@@ -408,7 +408,7 @@ describe('RecordsService', () => {
       expect([...result.recommended].sort()).toEqual(['ref-1', 'ref-2']);
     });
 
-    it('촬영일이 서로 다른 사진도 날짜별로 나누지 않고 한 번에 AI를 호출한다', async () => {
+    it('촬영일이 다른 사진은 날짜별로 그룹을 나눠 그룹마다 AI를 따로 호출한다', async () => {
       const path1 = await writeTempFile('ref-1');
       const path2 = await writeTempFile('ref-2');
 
@@ -429,16 +429,44 @@ describe('RecordsService', () => {
 
       await service.curate('trip-1', 'record-1', 'user-1');
 
-      expect(photoCurateAiClient.selectBestPhotos).toHaveBeenCalledTimes(1);
+      // 사진이 하루에 1장씩뿐이라 quota=2를 두 날짜에 1장씩 배분 → 호출도 2번.
+      expect(photoCurateAiClient.selectBestPhotos).toHaveBeenCalledTimes(2);
       expect(photoCurateAiClient.selectBestPhotos).toHaveBeenCalledWith(
         expect.objectContaining({
-          selectCount: 2,
-          candidates: expect.arrayContaining([
-            expect.objectContaining({ photoRefId: 'ref-1' }),
-            expect.objectContaining({ photoRefId: 'ref-2' }),
-          ]),
+          selectCount: 1,
+          candidates: [expect.objectContaining({ photoRefId: 'ref-1' })],
         }),
       );
+      expect(photoCurateAiClient.selectBestPhotos).toHaveBeenCalledWith(
+        expect.objectContaining({
+          selectCount: 1,
+          candidates: [expect.objectContaining({ photoRefId: 'ref-2' })],
+        }),
+      );
+    });
+
+    it('같은 날짜 사진이 몰려 있으면 그 날짜 몫만큼만 그룹으로 한 번에 호출한다', async () => {
+      const path1 = await writeTempFile('ref-1');
+      const path2 = await writeTempFile('ref-2');
+      const path3 = await writeTempFile('ref-3');
+
+      travelRecordRepository.findOneBy!.mockResolvedValue(buildRecord());
+      recordPhotoRefRepository.findBy!.mockResolvedValue([
+        buildPhotoRef({ id: 'ref-1', tempFilePath: path1, takenAt: new Date('2026-07-16T09:00:00Z') }),
+        buildPhotoRef({ id: 'ref-2', tempFilePath: path2, takenAt: new Date('2026-07-16T10:00:00Z') }),
+        buildPhotoRef({ id: 'ref-3', tempFilePath: path3, takenAt: new Date('2026-07-16T11:00:00Z') }),
+      ]);
+      photoCurateAiClient.selectBestPhotos.mockResolvedValue({
+        selectedPhotoRefIds: ['ref-2', 'ref-3'],
+      });
+
+      const result = await service.curate('trip-1', 'record-1', 'user-1');
+
+      expect(photoCurateAiClient.selectBestPhotos).toHaveBeenCalledTimes(1);
+      expect(photoCurateAiClient.selectBestPhotos).toHaveBeenCalledWith(
+        expect.objectContaining({ selectCount: 3 }),
+      );
+      expect([...result.recommended].sort()).toEqual(['ref-2', 'ref-3']);
     });
   });
 

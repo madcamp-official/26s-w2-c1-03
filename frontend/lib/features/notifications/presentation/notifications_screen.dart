@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../core/theme/app_colors.dart';
+import '../../../core/widgets/app_back_button.dart';
 import '../notification_inbox_controller.dart';
 import '../received_notification.dart';
 
@@ -33,6 +34,7 @@ class _NotificationsScreenState extends ConsumerState<NotificationsScreen> {
       appBar: AppBar(
         backgroundColor: Colors.white,
         elevation: 0,
+        leading: const AppBackButton(),
         title: const Text(
           '알림',
           style: TextStyle(color: AppColors.ink900, fontWeight: FontWeight.w800),

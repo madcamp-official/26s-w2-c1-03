@@ -6,6 +6,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../core/network/api_exception.dart';
 import '../../../core/theme/app_colors.dart';
 import '../../../core/widgets/ai_badge.dart';
+import '../../../core/widgets/app_back_button.dart';
 import '../../../core/widgets/app_button.dart';
 import '../data/schedule_api.dart';
 import 'schedule_result_screen.dart';
@@ -86,7 +87,8 @@ class _ScheduleGeneratingScreenState
         appBar: AppBar(
           backgroundColor: Colors.white,
           elevation: 0,
-          automaticallyImplyLeading: !_loading,
+          automaticallyImplyLeading: false,
+          leading: _loading ? null : const AppBackButton(),
           iconTheme: const IconThemeData(color: AppColors.ink900),
         ),
         body: SafeArea(
