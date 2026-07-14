@@ -20,11 +20,13 @@ class ScheduleApi {
 
   Future<SchedulePlan> generate({
     required String tripId,
-    required List<String> selectedPlaceIds,
+    required List<SelectedPlace> selectedPlaces,
   }) async {
     final response = await _apiClient.dio.post<Map<String, dynamic>>(
       '/trips/$tripId/schedule/generate',
-      data: {'selectedPlaceIds': selectedPlaceIds},
+      data: {
+        'selectedPlaces': selectedPlaces.map((p) => p.toJson()).toList(),
+      },
       options: Options(receiveTimeout: const Duration(seconds: 60)),
     );
     final schedule = response.data!['schedule'] as Map<String, dynamic>;
@@ -159,6 +161,16 @@ class ScheduleApi {
 
 /// memo 미전송과 null 전송을 구분하기 위한 sentinel.
 const Object _unset = Object();
+
+/// API 명세서 §2.3 selectedPlaces 원소 — 선택한 장소와 사용자가 지정한 날짜(1부터).
+class SelectedPlace {
+  const SelectedPlace({required this.placeId, required this.dayNumber});
+
+  final String placeId;
+  final int dayNumber;
+
+  Map<String, dynamic> toJson() => {'placeId': placeId, 'dayNumber': dayNumber};
+}
 
 class ReorderOperation {
   const ReorderOperation({

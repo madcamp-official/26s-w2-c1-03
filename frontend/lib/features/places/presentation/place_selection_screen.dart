@@ -8,6 +8,7 @@ import '../../../core/network/api_exception.dart';
 import '../../../core/theme/app_colors.dart';
 import '../data/places_api.dart';
 import '../data/places_models.dart';
+import '../../schedule/data/schedule_api.dart';
 import '../../schedule/presentation/schedule_generating_screen.dart';
 import 'place_selection_constants.dart';
 import 'widgets/category_chip_row.dart';
@@ -35,9 +36,17 @@ import 'widgets/place_sheet.dart';
 /// 아직 백엔드에 없다(plan.md Phase 8) — 지금은 선택 상태만 유지하고 CTA는 "곧
 /// 만나요" 안내로 대체한다.
 class PlaceSelectionScreen extends ConsumerStatefulWidget {
-  const PlaceSelectionScreen({super.key, required this.tripId});
+  const PlaceSelectionScreen({
+    super.key,
+    required this.tripId,
+    required this.startDate,
+    required this.endDate,
+  });
 
   final String tripId;
+  /// 여행 시작/종료일("yyyy-MM-dd") — 날짜 배지에 쓸 여행 일수를 계산하는 데 쓴다.
+  final String startDate;
+  final String endDate;
 
   @override
   ConsumerState<PlaceSelectionScreen> createState() =>
@@ -52,8 +61,17 @@ class _PlaceSelectionScreenState extends ConsumerState<PlaceSelectionScreen> {
   final Map<String, List<PlaceCandidate>> _categoryCandidates = {};
   final Set<String> _loadingCategoryCandidates = {};
   final Map<String, PlaceCandidate> _selectedCandidates = {};
+  final Map<String, int> _selectedDayNumbers = {};
   GoogleMapController? _mapController;
   bool _generating = false;
+
+  /// 여행 일수(최소 1일). 백엔드 computeDurationDays와 동일한 로직(포함 일수).
+  int get _dayCount {
+    final start = DateTime.parse(widget.startDate);
+    final end = DateTime.parse(widget.endDate);
+    final days = end.difference(start).inDays + 1;
+    return days < 1 ? 1 : days;
+  }
 
   // 검색 상태. _searchMode면 _allCandidates가 지역 후보가 아니라 검색 결과다.
   final _searchController = TextEditingController();
@@ -232,10 +250,17 @@ class _PlaceSelectionScreenState extends ConsumerState<PlaceSelectionScreen> {
     setState(() {
       if (_selectedCandidates.containsKey(candidate.id)) {
         _selectedCandidates.remove(candidate.id);
+        _selectedDayNumbers.remove(candidate.id);
       } else {
         _selectedCandidates[candidate.id] = candidate;
+        _selectedDayNumbers[candidate.id] = 1;
       }
     });
+  }
+
+  void _setDayNumber(PlaceCandidate candidate, int dayNumber) {
+    if (!_selectedCandidates.containsKey(candidate.id)) return;
+    setState(() => _selectedDayNumbers[candidate.id] = dayNumber);
   }
 
   /// 지도를 해당 장소로 확대 이동한다(선택 상태는 건드리지 않음).
@@ -256,7 +281,13 @@ class _PlaceSelectionScreenState extends ConsumerState<PlaceSelectionScreen> {
       MaterialPageRoute(
         builder: (_) => ScheduleGeneratingScreen(
           tripId: widget.tripId,
-          selectedPlaceIds: _selectedCandidates.keys.toList(),
+          selectedPlaces: [
+            for (final id in _selectedCandidates.keys)
+              SelectedPlace(
+                placeId: id,
+                dayNumber: _selectedDayNumbers[id] ?? 1,
+              ),
+          ],
         ),
       ),
     );
@@ -408,8 +439,11 @@ class _PlaceSelectionScreenState extends ConsumerState<PlaceSelectionScreen> {
                     : (_category != null
                           ? '이 카테고리엔 장소가 없어'
                           : '이 지역에서 찾은 장소가 없어'),
+                dayCount: _dayCount,
+                selectedDayNumbers: _selectedDayNumbers,
                 onRowTap: _focusPlace,
                 onToggle: _toggleSelected,
+                onDaySelected: _setDayNumber,
               ),
             ),
           ],

@@ -82,7 +82,7 @@ class _TripDetailScreenState extends ConsumerState<TripDetailScreen> {
       setState(() => _state = _DetailLoaded(trip, schedule));
       if (!_hasSchedule(schedule) && !_redirectedToPlaceSelection) {
         _redirectedToPlaceSelection = true;
-        unawaited(_openPlaceSelection(trip.id));
+        unawaited(_openPlaceSelection(trip.id, trip.startDate, trip.endDate));
       }
     } on DioException catch (e) {
       if (!mounted) return;
@@ -193,9 +193,19 @@ class _TripDetailScreenState extends ConsumerState<TripDetailScreen> {
     return schedule.days.any((day) => day.places.isNotEmpty);
   }
 
-  Future<void> _openPlaceSelection(String tripId) async {
+  Future<void> _openPlaceSelection(
+    String tripId,
+    String startDate,
+    String endDate,
+  ) async {
     final generated = await Navigator.of(context).push<bool>(
-      MaterialPageRoute(builder: (_) => PlaceSelectionScreen(tripId: tripId)),
+      MaterialPageRoute(
+        builder: (_) => PlaceSelectionScreen(
+          tripId: tripId,
+          startDate: startDate,
+          endDate: endDate,
+        ),
+      ),
     );
     if (!mounted) return;
     if (generated == true) {
@@ -364,7 +374,8 @@ class _TripDetailScreenState extends ConsumerState<TripDetailScreen> {
         trip: trip,
         schedule: schedule,
         hasSchedule: _hasSchedule(schedule),
-        onSelectPlaces: () => _openPlaceSelection(trip.id),
+        onSelectPlaces: () =>
+            _openPlaceSelection(trip.id, trip.startDate, trip.endDate),
         onEditSchedule: () => _openScheduleEdit(schedule),
       ),
     ];

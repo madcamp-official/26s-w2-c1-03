@@ -14,11 +14,11 @@ class ScheduleGeneratingScreen extends ConsumerStatefulWidget {
   const ScheduleGeneratingScreen({
     super.key,
     required this.tripId,
-    required this.selectedPlaceIds,
+    required this.selectedPlaces,
   });
 
   final String tripId;
-  final List<String> selectedPlaceIds;
+  final List<SelectedPlace> selectedPlaces;
 
   @override
   ConsumerState<ScheduleGeneratingScreen> createState() =>
@@ -47,7 +47,7 @@ class _ScheduleGeneratingScreenState
           .read(scheduleApiProvider)
           .generate(
             tripId: widget.tripId,
-            selectedPlaceIds: widget.selectedPlaceIds,
+            selectedPlaces: widget.selectedPlaces,
           );
       if (!mounted) return;
       final completed = await Navigator.of(context).push<bool>(
@@ -116,7 +116,7 @@ class _ScheduleGeneratingScreenState
         ),
         const SizedBox(height: 12),
         Text(
-          '선택한 ${widget.selectedPlaceIds.length}곳은 꼭 포함하고, '
+          '선택한 ${widget.selectedPlaces.length}곳은 꼭 포함하고, '
           '주변 추천 장소를 더해 여행 일수에 맞춰 나누고 있어요. '
           'AI 응답을 기다리는 동안 화면을 닫지 말아줘요.',
           style: const TextStyle(

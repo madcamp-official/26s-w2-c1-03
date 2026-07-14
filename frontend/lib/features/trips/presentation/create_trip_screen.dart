@@ -91,7 +91,11 @@ class _CreateTripScreenState extends ConsumerState<CreateTripScreen> {
       if (!mounted) return;
       Navigator.of(context).pushReplacement(
         MaterialPageRoute(
-          builder: (_) => PlaceSelectionScreen(tripId: trip.id),
+          builder: (_) => PlaceSelectionScreen(
+            tripId: trip.id,
+            startDate: trip.startDate,
+            endDate: trip.endDate,
+          ),
         ),
       );
     } on DioException catch (e) {
