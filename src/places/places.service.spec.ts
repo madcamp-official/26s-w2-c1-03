@@ -188,6 +188,63 @@ describe('PlacesService', () => {
       );
     });
 
+    it('category=restaurant면 음식점(39)을 받아 카페(cat3=A05020900)는 제외한다', async () => {
+      const realRestaurant = buildTourApiItem({
+        contentId: 'r1',
+        contentTypeId: '39',
+        title: '진짜 식당',
+        cat3: 'A05020100',
+      });
+      const cafe = buildTourApiItem({
+        contentId: 'c1',
+        contentTypeId: '39',
+        title: '카페',
+        cat3: 'A05020900',
+      });
+      tripsService.getDetail.mockResolvedValue({
+        areaCode: '6',
+        sigunguCode: '1',
+        startDate: '2026-07-13',
+      });
+      tourApiClient.fetchAreaBasedList.mockResolvedValue([realRestaurant, cafe]);
+      (placeRepository.find as jest.Mock).mockResolvedValue([
+        buildPlace(realRestaurant, 'r1'),
+      ]);
+
+      const result = await service.getCandidates('trip-1', 'user-1', { category: 'restaurant' });
+
+      expect(tourApiClient.fetchAreaBasedList).toHaveBeenCalledWith(
+        expect.objectContaining({ contentTypeId: '39', numOfRows: 60 }),
+      );
+      expect(result.candidates.map((c) => c.name)).toEqual(['진짜 식당']);
+    });
+
+    it('category=cafe면 음식점(39) 중 cat3=A05020900만 남긴다', async () => {
+      const realRestaurant = buildTourApiItem({
+        contentId: 'r1',
+        contentTypeId: '39',
+        title: '진짜 식당',
+        cat3: 'A05020100',
+      });
+      const cafe = buildTourApiItem({
+        contentId: 'c1',
+        contentTypeId: '39',
+        title: '카페',
+        cat3: 'A05020900',
+      });
+      tripsService.getDetail.mockResolvedValue({
+        areaCode: '6',
+        sigunguCode: '1',
+        startDate: '2026-07-13',
+      });
+      tourApiClient.fetchAreaBasedList.mockResolvedValue([realRestaurant, cafe]);
+      (placeRepository.find as jest.Mock).mockResolvedValue([buildPlace(cafe, 'c1')]);
+
+      const result = await service.getCandidates('trip-1', 'user-1', { category: 'cafe' });
+
+      expect(result.candidates.map((c) => c.name)).toEqual(['카페']);
+    });
+
     it('집중률이 높은 관광지를 위로, 매칭 안 된 장소는 TourAPI 순서를 유지한 채 뒤로 정렬한다', async () => {
       const low = buildTourApiItem({ contentId: '1', title: '집중률 낮음' });
       const unmatched = buildTourApiItem({ contentId: '2', title: '미매칭 장소' });

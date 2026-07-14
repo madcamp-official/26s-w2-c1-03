@@ -12,11 +12,7 @@ import {
   TatsCnctrRateClient,
 } from './clients/tats-cnctr-rate.client';
 import { TourApiClient, TourApiPlaceItem } from './clients/tour-api.client';
-import {
-  ListCandidatesQueryDto,
-  PLACE_CATEGORIES,
-  PlaceCategory,
-} from './dto/list-candidates-query.dto';
+import { ListCandidatesQueryDto, PlaceCategory } from './dto/list-candidates-query.dto';
 import { Place, PlaceSource } from './entities/place.entity';
 import { BusinessException } from '../common/exceptions/business-exception';
 import { haversineKm } from '../common/utils/geo.util';
@@ -75,9 +71,11 @@ export interface ScheduleCandidatePoolLimits {
   cafes: number;
 }
 
+/** TourAPI contentTypeId — 맛집/카페는 TourAPI에 별도 contentTypeId가 없어 둘 다 39다. */
 const CATEGORY_TO_CONTENT_TYPE_ID: Record<PlaceCategory, string> = {
   tourist_spot: '12',
   restaurant: '39',
+  cafe: '39',
   shopping: '38',
 };
 
@@ -92,11 +90,20 @@ const UNMATCHED_SCORE = -1;
 
 /**
  * 카테고리 미지정("전체") 조회 시 카테고리당 요청 개수 — candidatePageSize(30)를
- * 앱이 다루는 3개 카테고리로 균등 배분한다. contentTypeId 없이 조회하면 TourAPI가
- * 숙박(32)·여행코스(25, 좌표 없음)·행사(15) 등 관광지 후보로 부적절한 항목까지
- * 섞어 내려주므로, 카테고리별로 나눠 받아 합친다.
+ * 균등 배분한다. contentTypeId 없이 조회하면 TourAPI가 숙박(32)·여행코스(25, 좌표
+ * 없음)·행사/축제(15) 등 관광지 후보로 부적절한 항목까지 섞어 내려주므로, 카테고리별로
+ * 나눠 받아 합친다. 맛집(39) 한 번만 받고 그 안에 카페가 섞여 있어도 "전체" 탭은
+ * 애초에 카테고리를 가리지 않으니 별도로 카페를 더 조회하지 않는다.
  */
 const UNCATEGORIZED_ROWS_PER_CATEGORY = 10;
+const UNCATEGORIZED_FETCH_CATEGORIES: readonly PlaceCategory[] = [
+  'tourist_spot',
+  'restaurant',
+  'shopping',
+];
+
+/** 맛집/카페 카테고리 요청 시 음식점(39)을 넉넉히 받아 cat3로 걸러낸다(필터링 후에도 후보가 부족하지 않게). */
+const CATEGORY_FOOD_FETCH_ROWS = 60;
 
 @Injectable()
 export class PlacesService {
@@ -149,10 +156,7 @@ export class PlacesService {
 
     const baseParams = { areaCode: trip.areaCode, sigunguCode: trip.sigunguCode ?? undefined };
     const rawItems = query.category
-      ? await this.tourApiClient.fetchAreaBasedList({
-          ...baseParams,
-          contentTypeId: CATEGORY_TO_CONTENT_TYPE_ID[query.category],
-        })
+      ? await this.fetchCategoryItems(baseParams, query.category)
       : await this.fetchUncategorizedItems(baseParams);
 
     // 방문 집중도 순 정렬용 데이터 — 시군구 단위 1회 조회로 후보 전체를 커버한다
@@ -166,16 +170,40 @@ export class PlacesService {
   }
 
   /**
+   * 카테고리 하나를 지정한 조회. 맛집/카페는 TourAPI에 별도 contentTypeId가 없어
+   * 음식점(39)을 넉넉히 받은 뒤 cat3(카페/전통찻집)로 원하는 쪽만 남긴다.
+   */
+  private async fetchCategoryItems(
+    baseParams: { areaCode: string; sigunguCode?: string },
+    category: PlaceCategory,
+  ): Promise<TourApiPlaceItem[]> {
+    if (category !== 'restaurant' && category !== 'cafe') {
+      return this.tourApiClient.fetchAreaBasedList({
+        ...baseParams,
+        contentTypeId: CATEGORY_TO_CONTENT_TYPE_ID[category],
+      });
+    }
+    const items = await this.tourApiClient.fetchAreaBasedList({
+      ...baseParams,
+      contentTypeId: CONTENT_TYPE_RESTAURANT,
+      numOfRows: CATEGORY_FOOD_FETCH_ROWS,
+    });
+    const wantCafe = category === 'cafe';
+    return items.filter((item) => (item.cat3 === CAT3_CAFE) === wantCafe);
+  }
+
+  /**
    * "전체"(카테고리 미지정) 조회 — 관광지/음식점/쇼핑 세 카테고리를 각각 조회해 합친다.
    * contentTypeId 없이 한 번에 조회하면 TourAPI가 숙박·여행코스·행사 등도 함께 내려줘
-   * 부적절한 항목이 섞인다(§UNCATEGORIZED_ROWS_PER_CATEGORY 주석 참고).
+   * 부적절한 항목이 섞인다(§UNCATEGORIZED_ROWS_PER_CATEGORY 주석 참고). 음식점(39) 안의
+   * 카페는 걸러내지 않는다 — "전체" 탭은 애초에 카테고리를 가리지 않는 탭이다.
    */
   private async fetchUncategorizedItems(baseParams: {
     areaCode: string;
     sigunguCode?: string;
   }): Promise<TourApiPlaceItem[]> {
     const results = await Promise.all(
-      PLACE_CATEGORIES.map((category) =>
+      UNCATEGORIZED_FETCH_CATEGORIES.map((category) =>
         this.tourApiClient.fetchAreaBasedList({
           ...baseParams,
           contentTypeId: CATEGORY_TO_CONTENT_TYPE_ID[category],

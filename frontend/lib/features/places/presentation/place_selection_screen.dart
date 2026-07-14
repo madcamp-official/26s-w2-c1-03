@@ -153,11 +153,12 @@ class _PlaceSelectionScreenState extends ConsumerState<PlaceSelectionScreen> {
   /// 전체 후보 중 해당 카테고리를 먼저 쓰고 카테고리 전용 조회 결과를 합쳐 30곳까지 채운다.
   List<PlaceCandidate> get _visibleCandidates {
     if (_searchMode || _category == null) return _allCandidates;
-    final wanted = categoryContentTypeIds[_category];
-    if (wanted == null) return _allCandidates;
+    final category = _category!;
     return _dedupeCandidates([
-      ..._allCandidates.where((c) => c.contentTypeId == wanted),
-      ...?_categoryCandidates[_category],
+      ..._allCandidates.where(
+        (c) => placeMatchesCategory(c.contentTypeId, c.categoryCode, category),
+      ),
+      ...?_categoryCandidates[category],
     ]).take(candidatePageSize).toList();
   }
 
