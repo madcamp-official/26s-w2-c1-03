@@ -76,3 +76,13 @@ kotlin {
 flutter {
     source = "../.."
 }
+
+dependencies {
+    // google_mlkit_text_recognition은 스크립트별 인식 모델(latin/chinese/devanagari/
+    // japanese/korean)을 플러그인 자체 build.gradle에서 compileOnly로만 선언해둔다 —
+    // 컴파일은 되지만 실제 APK에는 안 들어가 있어서, 쓰려는 스크립트를 앱이 직접
+    // implementation으로 추가해야 한다(안 하면 런타임에 NoClassDefFoundError).
+    // sensitive_content_detector.dart가 TextRecognitionScript.korean을 쓰므로 그와 짝을
+    // 맞춘다(버전은 플러그인이 compileOnly로 잡은 16.0.1과 동일하게).
+    implementation("com.google.mlkit:text-recognition-korean:16.0.1")
+}
