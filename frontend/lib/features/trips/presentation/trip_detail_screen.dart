@@ -6,7 +6,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../core/network/api_exception.dart';
 import '../../../core/theme/app_colors.dart';
 import '../../../core/widgets/app_button.dart';
-import '../../records/presentation/record_intro_screen.dart';
+import '../../records/presentation/record_mode_sheet.dart';
 import '../../schedule/data/schedule_api.dart';
 import '../../schedule/data/schedule_models.dart';
 import '../../schedule/presentation/add_place_map_screen.dart';
@@ -234,9 +234,7 @@ class _TripDetailScreenState extends ConsumerState<TripDetailScreen> {
   }
 
   void _openRecordIntro(Trip trip) {
-    Navigator.of(context).push(
-      MaterialPageRoute(builder: (_) => RecordIntroScreen(trip: trip)),
-    );
+    showRecordModeSheet(context, trip);
   }
 
   @override

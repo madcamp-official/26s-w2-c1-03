@@ -4,6 +4,7 @@ import '../../../core/theme/app_colors.dart';
 import '../../../core/theme/app_gradients.dart';
 import '../data/record_summary_models.dart';
 import 'record_detail_screen.dart';
+import 'record_trip_picker_screen.dart';
 import 'records_list_controller.dart';
 import 'records_list_state.dart';
 
@@ -35,9 +36,23 @@ class _RecordsListScreenState extends ConsumerState<RecordsListScreen> {
         backgroundColor: Colors.white,
         elevation: 0,
         title: const Text('기록', style: TextStyle(color: AppColors.ink900, fontWeight: FontWeight.w800)),
+        actions: [
+          IconButton(
+            icon: const Icon(Icons.add, color: AppColors.ink900),
+            onPressed: _openTripPicker,
+          ),
+        ],
       ),
       body: SafeArea(child: _buildBody(state)),
     );
+  }
+
+  Future<void> _openTripPicker() async {
+    await Navigator.of(
+      context,
+    ).push(MaterialPageRoute(builder: (_) => const RecordTripPickerScreen()));
+    if (!mounted) return;
+    ref.read(recordsListControllerProvider.notifier).load();
   }
 
   Widget _buildBody(RecordsListState state) {

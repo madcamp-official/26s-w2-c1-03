@@ -291,11 +291,14 @@ export class RecordsService {
   }
 
   /**
-   * 사용자 최종 선택 확정(API 명세서 §4). RECOMMENDED 상태의 photoRefId만 선택할
-   * 수 있다 — 그 외(등록조차 안 됐거나 이미 폐기된 것)가 섞여 있으면 요청 자체를
-   * 거부한다(업로드/메타데이터 단계의 "조용히 건너뛰기"와 다르게, finalize는
-   * 사용자가 명시적으로 확정하는 마지막 단계라 잘못된 참조를 조용히 무시하지
-   * 않는다). 선택된 사진만 영구 스토리지로 이관하고, 그 외 추천분은 전량 폐기한다.
+   * 사용자 최종 선택 확정(API 명세서 §4). RECOMMENDED(AI 추천 경로) 또는
+   * UPLOADED(사용자 직접 선택 경로 — curate를 안 거치고 업로드분을 그대로 씀)
+   * 상태의 photoRefId만 선택할 수 있다 — 그 외(등록조차 안 됐거나 이미 폐기된
+   * 것)가 섞여 있으면 요청 자체를 거부한다(업로드/메타데이터 단계의 "조용히
+   * 건너뛰기"와 다르게, finalize는 사용자가 명시적으로 확정하는 마지막
+   * 단계라 잘못된 참조를 조용히 무시하지 않는다). 선택된 사진만 영구
+   * 스토리지로 이관하고, 그 외(추천됐지만 미선택 또는 직접 선택 모드에서
+   * 업로드했지만 최종 미선택)는 전량 폐기한다.
    */
   async finalize(
     tripId: string,
@@ -305,18 +308,18 @@ export class RecordsService {
   ): Promise<{ recordPhotos: RecordPhotoSummary[] }> {
     const record = await this.findOwnedRecord(tripId, recordId, userId);
 
-    const recommendedRefs = await this.recordPhotoRefRepository.findBy({
+    const selectableRefs = await this.recordPhotoRefRepository.findBy({
       recordId: record.id,
-      status: RecordPhotoRefStatus.RECOMMENDED,
+      status: In([RecordPhotoRefStatus.RECOMMENDED, RecordPhotoRefStatus.UPLOADED]),
     });
-    const refById = new Map(recommendedRefs.map((ref) => [ref.id, ref]));
+    const refById = new Map(selectableRefs.map((ref) => [ref.id, ref]));
 
     const selections = dto.selections.map((selection, index) => {
       const ref = refById.get(selection.photoRefId);
       if (!ref) {
         throw new BusinessException(
           CommonErrorCode.VALIDATION_ERROR,
-          `추천되지 않았거나 이미 처리된 photoRefId입니다: ${selection.photoRefId}`,
+          `추천/업로드되지 않았거나 이미 처리된 photoRefId입니다: ${selection.photoRefId}`,
         );
       }
       return {
@@ -327,7 +330,7 @@ export class RecordsService {
     });
 
     const selectedIds = new Set(selections.map((s) => s.ref.id));
-    const discarded = recommendedRefs.filter((ref) => !selectedIds.has(ref.id));
+    const discarded = selectableRefs.filter((ref) => !selectedIds.has(ref.id));
 
     const recordPhotos = await Promise.all(
       selections.map(({ ref, caption, orderIndex }) =>
