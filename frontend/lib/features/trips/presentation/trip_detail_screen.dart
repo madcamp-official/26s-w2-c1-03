@@ -10,6 +10,7 @@ import '../../places/presentation/place_selection_screen.dart';
 import '../../records/presentation/record_intro_screen.dart';
 import '../../schedule/data/schedule_api.dart';
 import '../../schedule/data/schedule_models.dart';
+import '../../schedule/presentation/add_place_map_screen.dart';
 import '../../schedule/presentation/schedule_edit_screen.dart';
 import '../../schedule/presentation/schedule_generating_screen.dart';
 import '../data/trip_models.dart';
@@ -251,6 +252,19 @@ class _TripDetailScreenState extends ConsumerState<TripDetailScreen> {
     if (changed == true) await _load();
   }
 
+  /// 지도 화면 하단 목록의 "장소 추가" 버튼 — 지금 보고 있는 일자에 넣을 장소를
+  /// place_selection_screen.dart와 같은 지도 UI로 고른다.
+  Future<void> _openAddPlace(int dayNumber) async {
+    final added = await Navigator.of(context).push<List<ScheduledTripPlace>>(
+      MaterialPageRoute(
+        builder: (_) =>
+            AddPlaceMapScreen(tripId: widget.tripId, dayNumber: dayNumber),
+      ),
+    );
+    if (!mounted) return;
+    if (added != null && added.isNotEmpty) await _load();
+  }
+
   void _openRecordIntro(Trip trip) {
     Navigator.of(context).push(
       MaterialPageRoute(builder: (_) => RecordIntroScreen(trip: trip)),
@@ -299,6 +313,7 @@ class _TripDetailScreenState extends ConsumerState<TripDetailScreen> {
                 schedule: state.schedule,
                 onEditSchedule: () => _openScheduleEdit(state.schedule),
                 onGenerateAi: () => _openAiGenerate(state.trip, state.schedule),
+                onAddPlace: _openAddPlace,
               ),
             )
           : SafeArea(child: _buildBody(state)),

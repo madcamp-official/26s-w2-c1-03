@@ -14,11 +14,16 @@ class TripScheduleMapView extends StatefulWidget {
     required this.schedule,
     required this.onEditSchedule,
     required this.onGenerateAi,
+    required this.onAddPlace,
   });
 
   final SchedulePlan schedule;
   final VoidCallback onEditSchedule;
   final VoidCallback onGenerateAi;
+
+  /// "장소 추가" 버튼 — 현재 보고 있는 일자(dayNumber)를 들고 지도 기반 장소 추가
+  /// 화면(AddPlaceMapScreen)으로 이동시킨다.
+  final ValueChanged<int> onAddPlace;
 
   @override
   State<TripScheduleMapView> createState() => _TripScheduleMapViewState();
@@ -254,24 +259,47 @@ class _TripScheduleMapViewState extends State<TripScheduleMapView> {
 
   Widget _buildStopList() {
     final places = _currentPlaces;
+    final items = <Widget>[];
     if (places.isEmpty) {
-      return const Center(
-        child: Text(
-          '이 날은 아직 장소가 없어',
-          style: TextStyle(color: AppColors.ink400, fontWeight: FontWeight.w600),
+      items.add(
+        const Padding(
+          padding: EdgeInsets.symmetric(vertical: 24),
+          child: Center(
+            child: Text(
+              '이 날은 아직 장소가 없어',
+              style: TextStyle(color: AppColors.ink400, fontWeight: FontWeight.w600),
+            ),
+          ),
         ),
       );
-    }
-    final items = <Widget>[];
-    for (var i = 0; i < places.length; i++) {
-      items.add(_StopRow(place: places[i], isLast: i == places.length - 1));
-      if (i != places.length - 1) {
-        final distance = _distanceBetween(places[i], places[i + 1]);
-        if (distance != null) {
-          items.add(_DistanceChip(label: formatDistance(distance)));
+    } else {
+      for (var i = 0; i < places.length; i++) {
+        items.add(_StopRow(place: places[i], isLast: i == places.length - 1));
+        if (i != places.length - 1) {
+          final distance = _distanceBetween(places[i], places[i + 1]);
+          if (distance != null) {
+            items.add(_DistanceChip(label: formatDistance(distance)));
+          }
         }
       }
     }
+    items.add(
+      Padding(
+        padding: const EdgeInsets.only(top: 4),
+        child: TextButton.icon(
+          onPressed: () => widget.onAddPlace(_selectedDay),
+          style: TextButton.styleFrom(
+            foregroundColor: AppColors.green800,
+            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+          ),
+          icon: const Icon(Icons.add, size: 18),
+          label: const Text(
+            '장소 추가',
+            style: TextStyle(fontSize: 13.5, fontWeight: FontWeight.w800),
+          ),
+        ),
+      ),
+    );
     return ListView(
       controller: _listController,
       padding: const EdgeInsets.fromLTRB(20, 4, 20, 16),
