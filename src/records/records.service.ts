@@ -13,6 +13,8 @@ import { TripsService } from '../trips/trips.service';
 import { PHOTO_CURATE_AI_CLIENT, PhotoCurateAiClient } from './client/photo-curate-ai.client';
 import { FinalizePhotosDto } from './dto/finalize-photos.dto';
 import { RegisterPhotoMetadataDto } from './dto/register-photo-metadata.dto';
+import { UpdateRecordDto } from './dto/update-record.dto';
+import { UpdateRecordPhotoDto } from './dto/update-record-photo.dto';
 import { RecordPhoto } from './entities/record-photo.entity';
 import { RecordPhotoRef, RecordPhotoRefStatus } from './entities/record-photo-ref.entity';
 import { TravelRecord, TravelRecordStatus } from './entities/travel-record.entity';
@@ -334,6 +336,113 @@ export class RecordsService {
     await this.discardRef(ref);
 
     return this.toPhotoSummary(saved);
+  }
+
+  /**
+   * 캡션/순서/대표사진 수정(API 명세서 §4). isCover를 true로 바꾸면 같은 트립의
+   * 다른 대표사진을 해제하고 trips.cover_image_url을 이 사진으로 갱신하며,
+   * false로 바꾸면(그리고 실제로 대표사진이었다면) trips.cover_image_url을
+   * 해제한다(§2.6). Phase 12의 전용 대표사진 엔드포인트와 별개로, 이 필드 자체가
+   * 명세서 §4 요청 스키마에 포함돼 있어 여기서도 반영한다.
+   */
+  async updatePhoto(
+    tripId: string,
+    recordId: string,
+    userId: string,
+    recordPhotoId: string,
+    dto: UpdateRecordPhotoDto,
+  ): Promise<RecordPhotoSummary> {
+    const record = await this.findOwnedRecord(tripId, recordId, userId);
+    const photo = await this.findOwnedPhoto(record.id, recordPhotoId);
+    const wasCover = photo.isCover;
+
+    if (dto.caption !== undefined) {
+      photo.caption = dto.caption;
+    }
+    if (dto.orderIndex !== undefined) {
+      photo.orderIndex = dto.orderIndex;
+    }
+    if (dto.isCover !== undefined) {
+      photo.isCover = dto.isCover;
+    }
+
+    const saved = await this.recordPhotoRepository.save(photo);
+
+    if (dto.isCover === true && !wasCover) {
+      await this.clearOtherCoverPhotos(tripId, photo.id);
+      await this.tripsService.setCoverImage(tripId, photo.storageUrl);
+    } else if (dto.isCover === false && wasCover) {
+      await this.tripsService.setCoverImage(tripId, null);
+    }
+
+    return this.toPhotoSummary(saved);
+  }
+
+  /**
+   * 개별 사진 삭제(API 명세서 §4) — 스토리지 파일도 함께 삭제하고, 대표사진이었으면
+   * trips.cover_image_url을 자동 해제한다(§2.6).
+   */
+  async deletePhoto(
+    tripId: string,
+    recordId: string,
+    userId: string,
+    recordPhotoId: string,
+  ): Promise<void> {
+    const record = await this.findOwnedRecord(tripId, recordId, userId);
+    const photo = await this.findOwnedPhoto(record.id, recordPhotoId);
+
+    const objectPath = StorageService.extractObjectPath(photo.storageUrl);
+    if (objectPath) {
+      await this.storageService.deletePermanent(objectPath);
+    }
+    await this.recordPhotoRepository.delete({ id: photo.id });
+
+    if (photo.isCover) {
+      await this.tripsService.setCoverImage(tripId, null);
+    }
+  }
+
+  /** 일기 본문 작성/수정, draft→published 전환(API 명세서 §4). */
+  async updateRecord(
+    tripId: string,
+    recordId: string,
+    userId: string,
+    dto: UpdateRecordDto,
+  ): Promise<RecordSummary> {
+    const record = await this.findOwnedRecord(tripId, recordId, userId);
+
+    if (dto.title !== undefined) {
+      record.title = dto.title;
+    }
+    if (dto.content !== undefined) {
+      record.content = dto.content;
+    }
+    if (dto.status !== undefined) {
+      record.status = dto.status;
+    }
+
+    const saved = await this.travelRecordRepository.save(record);
+    return this.toSummary(saved);
+  }
+
+  private async findOwnedPhoto(recordId: string, recordPhotoId: string): Promise<RecordPhoto> {
+    const photo = await this.recordPhotoRepository.findOneBy({ id: recordPhotoId, recordId });
+    if (!photo) {
+      throw new BusinessException(RecordsErrorCode.RECORD_PHOTO_NOT_FOUND);
+    }
+    return photo;
+  }
+
+  /** 같은 트립 안의 다른 record_photos 중 isCover=true였던 것들을 전부 해제한다. */
+  private async clearOtherCoverPhotos(tripId: string, excludePhotoId: string): Promise<void> {
+    await this.recordPhotoRepository
+      .createQueryBuilder()
+      .update(RecordPhoto)
+      .set({ isCover: false })
+      .where('is_cover = true')
+      .andWhere('id != :excludePhotoId', { excludePhotoId })
+      .andWhere('record_id IN (SELECT id FROM travel_records WHERE trip_id = :tripId)', { tripId })
+      .execute();
   }
 
   private buildPreviewUrl(photoRefId: string): string {

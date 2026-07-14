@@ -19,4 +19,9 @@ export const RecordsErrorCode = {
     status: HttpStatus.BAD_GATEWAY,
     message: 'AI 사진 선별에 실패했습니다.',
   },
+  RECORD_PHOTO_NOT_FOUND: {
+    code: 'RECORD_PHOTO_NOT_FOUND',
+    status: HttpStatus.NOT_FOUND,
+    message: '기록 사진을 찾을 수 없습니다.',
+  },
 } as const satisfies Record<string, ErrorCodeDefinition>;

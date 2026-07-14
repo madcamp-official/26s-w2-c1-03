@@ -2,6 +2,7 @@ import * as fsSync from 'fs';
 import { promises as fs } from 'fs';
 import * as os from 'os';
 import * as path from 'path';
+import { RecordPhoto } from './entities/record-photo.entity';
 import { RecordPhotoRef, RecordPhotoRefStatus } from './entities/record-photo-ref.entity';
 import { TravelRecord, TravelRecordStatus } from './entities/travel-record.entity';
 import { RecordsService } from './records.service';
@@ -64,6 +65,23 @@ function buildPhotoRef(overrides: Partial<RecordPhotoRef> = {}): RecordPhotoRef 
   };
 }
 
+function buildRecordPhoto(overrides: Partial<RecordPhoto> = {}): RecordPhoto {
+  return {
+    id: 'photo-1',
+    recordId: 'record-1',
+    record: undefined as never,
+    storageUrl:
+      'https://firebasestorage.googleapis.com/v0/b/test-bucket/o/record-photos%2Frecord-1%2Fphoto-1.jpg?alt=media&token=abc',
+    takenAt: new Date('2026-07-16T09:00:00Z'),
+    locationName: '오사카',
+    caption: null,
+    orderIndex: 0,
+    isCover: false,
+    createdAt: new Date('2026-01-01T00:00:00Z'),
+    ...overrides,
+  };
+}
+
 function buildFile(fieldname: string, content = 'fake-image-bytes'): Express.Multer.File {
   return {
     fieldname,
@@ -78,9 +96,9 @@ function buildFile(fieldname: string, content = 'fake-image-bytes'): Express.Mul
 describe('RecordsService', () => {
   let travelRecordRepository: RepoMock<TravelRecord>;
   let recordPhotoRefRepository: RepoMock<RecordPhotoRef>;
-  let recordPhotoRepository: RepoMock<import('./entities/record-photo.entity').RecordPhoto>;
-  let tripsService: { assertMember: jest.Mock };
-  let storageService: { uploadPermanent: jest.Mock };
+  let recordPhotoRepository: RepoMock<RecordPhoto>;
+  let tripsService: { assertMember: jest.Mock; setCoverImage: jest.Mock };
+  let storageService: { uploadPermanent: jest.Mock; deletePermanent: jest.Mock };
   let configService: { getOrThrow: jest.Mock };
   let photoCurateAiClient: { selectBestPhotos: jest.Mock };
   let bufferDir: string;
@@ -89,10 +107,22 @@ describe('RecordsService', () => {
   beforeEach(async () => {
     travelRecordRepository = createRepositoryMock<TravelRecord>();
     recordPhotoRefRepository = createRepositoryMock<RecordPhotoRef>();
-    recordPhotoRepository = createRepositoryMock();
-    tripsService = { assertMember: jest.fn().mockResolvedValue(undefined) };
+    recordPhotoRepository = createRepositoryMock<RecordPhoto>();
+    recordPhotoRepository.delete = jest.fn();
+    recordPhotoRepository.createQueryBuilder = jest.fn().mockReturnValue({
+      update: jest.fn().mockReturnThis(),
+      set: jest.fn().mockReturnThis(),
+      where: jest.fn().mockReturnThis(),
+      andWhere: jest.fn().mockReturnThis(),
+      execute: jest.fn().mockResolvedValue(undefined),
+    });
+    tripsService = {
+      assertMember: jest.fn().mockResolvedValue(undefined),
+      setCoverImage: jest.fn().mockResolvedValue(undefined),
+    };
     storageService = {
       uploadPermanent: jest.fn().mockResolvedValue('https://storage.example/photo.jpg'),
+      deletePermanent: jest.fn().mockResolvedValue(undefined),
     };
     photoCurateAiClient = { selectBestPhotos: jest.fn() };
 
@@ -509,6 +539,140 @@ describe('RecordsService', () => {
         { status: RecordPhotoRefStatus.DISCARDED, tempFilePath: null },
       );
       await expect(fs.access(path2)).rejects.toThrow();
+    });
+  });
+
+  describe('updatePhoto', () => {
+    it('사진이 이 기록 소속이 아니면 RECORD_PHOTO_NOT_FOUND를 던진다', async () => {
+      travelRecordRepository.findOneBy!.mockResolvedValue(buildRecord());
+      recordPhotoRepository.findOneBy!.mockResolvedValue(null);
+
+      await expect(
+        service.updatePhoto('trip-1', 'record-1', 'user-1', 'photo-1', { caption: '좋다' }),
+      ).rejects.toMatchObject({ code: 'RECORD_PHOTO_NOT_FOUND' });
+    });
+
+    it('caption/orderIndex만 바꾸면 대표사진 관련 로직은 건드리지 않는다', async () => {
+      travelRecordRepository.findOneBy!.mockResolvedValue(buildRecord());
+      recordPhotoRepository.findOneBy!.mockResolvedValue(buildRecordPhoto());
+
+      const result = await service.updatePhoto('trip-1', 'record-1', 'user-1', 'photo-1', {
+        caption: '좋았다',
+        orderIndex: 2,
+      });
+
+      expect(result).toMatchObject({ caption: '좋았다', orderIndex: 2 });
+      expect(tripsService.setCoverImage).not.toHaveBeenCalled();
+    });
+
+    it('isCover를 true로 바꾸면 다른 대표사진을 해제하고 trips.cover_image_url을 갱신한다', async () => {
+      travelRecordRepository.findOneBy!.mockResolvedValue(buildRecord());
+      const photo = buildRecordPhoto({ isCover: false });
+      recordPhotoRepository.findOneBy!.mockResolvedValue(photo);
+
+      await service.updatePhoto('trip-1', 'record-1', 'user-1', 'photo-1', { isCover: true });
+
+      const qb = recordPhotoRepository.createQueryBuilder!();
+      expect(qb.set).toHaveBeenCalledWith({ isCover: false });
+      expect(tripsService.setCoverImage).toHaveBeenCalledWith('trip-1', photo.storageUrl);
+    });
+
+    it('isCover를 false로 바꾸면(원래 대표사진이었을 때만) trips.cover_image_url을 해제한다', async () => {
+      travelRecordRepository.findOneBy!.mockResolvedValue(buildRecord());
+      recordPhotoRepository.findOneBy!.mockResolvedValue(buildRecordPhoto({ isCover: true }));
+
+      await service.updatePhoto('trip-1', 'record-1', 'user-1', 'photo-1', { isCover: false });
+
+      expect(tripsService.setCoverImage).toHaveBeenCalledWith('trip-1', null);
+    });
+
+    it('원래 대표사진이 아니었으면 isCover:false를 보내도 아무 것도 갱신하지 않는다', async () => {
+      travelRecordRepository.findOneBy!.mockResolvedValue(buildRecord());
+      recordPhotoRepository.findOneBy!.mockResolvedValue(buildRecordPhoto({ isCover: false }));
+
+      await service.updatePhoto('trip-1', 'record-1', 'user-1', 'photo-1', { isCover: false });
+
+      expect(tripsService.setCoverImage).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('deletePhoto', () => {
+    it('사진이 없으면 RECORD_PHOTO_NOT_FOUND를 던지고 스토리지를 건드리지 않는다', async () => {
+      travelRecordRepository.findOneBy!.mockResolvedValue(buildRecord());
+      recordPhotoRepository.findOneBy!.mockResolvedValue(null);
+
+      await expect(
+        service.deletePhoto('trip-1', 'record-1', 'user-1', 'photo-1'),
+      ).rejects.toMatchObject({ code: 'RECORD_PHOTO_NOT_FOUND' });
+      expect(storageService.deletePermanent).not.toHaveBeenCalled();
+    });
+
+    it('스토리지 파일과 DB 행을 함께 삭제한다', async () => {
+      travelRecordRepository.findOneBy!.mockResolvedValue(buildRecord());
+      recordPhotoRepository.findOneBy!.mockResolvedValue(buildRecordPhoto());
+
+      await service.deletePhoto('trip-1', 'record-1', 'user-1', 'photo-1');
+
+      expect(storageService.deletePermanent).toHaveBeenCalledWith(
+        'record-photos/record-1/photo-1.jpg',
+      );
+      expect(recordPhotoRepository.delete).toHaveBeenCalledWith({ id: 'photo-1' });
+    });
+
+    it('대표사진이었으면 trips.cover_image_url을 자동 해제한다', async () => {
+      travelRecordRepository.findOneBy!.mockResolvedValue(buildRecord());
+      recordPhotoRepository.findOneBy!.mockResolvedValue(buildRecordPhoto({ isCover: true }));
+
+      await service.deletePhoto('trip-1', 'record-1', 'user-1', 'photo-1');
+
+      expect(tripsService.setCoverImage).toHaveBeenCalledWith('trip-1', null);
+    });
+
+    it('대표사진이 아니었으면 trips.cover_image_url을 건드리지 않는다', async () => {
+      travelRecordRepository.findOneBy!.mockResolvedValue(buildRecord());
+      recordPhotoRepository.findOneBy!.mockResolvedValue(buildRecordPhoto({ isCover: false }));
+
+      await service.deletePhoto('trip-1', 'record-1', 'user-1', 'photo-1');
+
+      expect(tripsService.setCoverImage).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('updateRecord', () => {
+    it('본인 기록이 아니면 RECORD_FORBIDDEN을 던진다', async () => {
+      travelRecordRepository.findOneBy!.mockResolvedValue(buildRecord({ userId: 'other-user' }));
+
+      await expect(
+        service.updateRecord('trip-1', 'record-1', 'user-1', { title: '제목' }),
+      ).rejects.toMatchObject({ code: 'RECORD_FORBIDDEN' });
+    });
+
+    it('title/content/status를 부분 갱신한다', async () => {
+      travelRecordRepository.findOneBy!.mockResolvedValue(buildRecord());
+
+      const result = await service.updateRecord('trip-1', 'record-1', 'user-1', {
+        title: '오사카 3박4일',
+        content: '정말 좋았다',
+        status: TravelRecordStatus.PUBLISHED,
+      });
+
+      expect(result).toMatchObject({
+        title: '오사카 3박4일',
+        content: '정말 좋았다',
+        status: TravelRecordStatus.PUBLISHED,
+      });
+    });
+
+    it('생략한 필드는 기존 값을 유지한다', async () => {
+      travelRecordRepository.findOneBy!.mockResolvedValue(
+        buildRecord({ title: '기존 제목', content: '기존 내용' }),
+      );
+
+      const result = await service.updateRecord('trip-1', 'record-1', 'user-1', {
+        status: TravelRecordStatus.PUBLISHED,
+      });
+
+      expect(result).toMatchObject({ title: '기존 제목', content: '기존 내용' });
     });
   });
 });

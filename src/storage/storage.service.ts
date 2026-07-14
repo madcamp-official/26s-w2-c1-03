@@ -33,4 +33,20 @@ export class StorageService {
     const encodedPath = encodeURIComponent(objectPath);
     return `https://firebasestorage.googleapis.com/v0/b/${this.bucket.name}/o/${encodedPath}?alt=media&token=${downloadToken}`;
   }
+
+  /** [objectPath]의 영구 저장 객체를 삭제한다(이미 없어도 에러 없이 넘어감). */
+  async deletePermanent(objectPath: string): Promise<void> {
+    await this.bucket.file(objectPath).delete({ ignoreNotFound: true });
+  }
+
+  /**
+   * uploadPermanent()가 만든 다운로드 URL에서 objectPath를 역추출한다. 우리가
+   * 직접 생성한 형식만 다루므로(외부 입력 파싱 아님) 정규식 하나로 충분하다 —
+   * record_photos에는 objectPath를 별도 컬럼으로 두지 않고 URL만 저장하기로
+   * 했기 때문에 삭제(DELETE .../photos/{recordPhotoId}) 시 이 방식으로 복원한다.
+   */
+  static extractObjectPath(downloadUrl: string): string | null {
+    const match = downloadUrl.match(/\/o\/([^?]+)/);
+    return match ? decodeURIComponent(match[1]) : null;
+  }
 }
