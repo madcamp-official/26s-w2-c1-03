@@ -47,6 +47,12 @@ class _AddPlaceMapScreenState extends ConsumerState<AddPlaceMapScreen> {
   GoogleMapController? _mapController;
   bool _submitting = false;
 
+  /// 하단 시트 상세 탭 — null이면 목록 모드. place_selection_screen.dart와 동일한 패턴.
+  PlaceCandidate? _detailPlace;
+  PlaceCandidate? _detailData;
+  bool _detailLoading = false;
+  String? _detailError;
+
   /// 직접 입력으로 이미 추가한 장소 — CTA를 누르지 않고 뒤로 가도 함께 반환한다.
   final List<ScheduledTripPlace> _addedCustom = [];
 
@@ -216,6 +222,34 @@ class _AddPlaceMapScreenState extends ConsumerState<AddPlaceMapScreen> {
       }
     });
   }
+
+  /// 목록 행 탭 — 지도를 확대 이동하고, 하단 시트를 상세 탭(리뷰 포함)으로 전환한다.
+  Future<void> _openDetail(PlaceCandidate candidate) async {
+    _focusPlace(candidate);
+    setState(() {
+      _detailPlace = candidate;
+      _detailData = null;
+      _detailLoading = true;
+      _detailError = null;
+    });
+    try {
+      final detail = await ref.read(placesApiProvider).getDetail(candidate.id);
+      if (!mounted || _detailPlace?.id != candidate.id) return;
+      setState(() {
+        _detailData = detail;
+        _detailLoading = false;
+      });
+    } on DioException catch (e) {
+      if (!mounted || _detailPlace?.id != candidate.id) return;
+      final error = e.error;
+      setState(() {
+        _detailLoading = false;
+        _detailError = error is ApiException ? error.message : '상세 정보를 불러오지 못했어요.';
+      });
+    }
+  }
+
+  void _closeDetail() => setState(() => _detailPlace = null);
 
   void _focusPlace(PlaceCandidate candidate) {
     if (candidate.lat == null || candidate.lng == null) return;
@@ -426,8 +460,13 @@ class _AddPlaceMapScreenState extends ConsumerState<AddPlaceMapScreen> {
                   selectedDayNumbers: {
                     for (final id in _selectedIds) id: widget.dayNumber,
                   },
-                  onRowTap: _focusPlace,
+                  onRowTap: _openDetail,
                   onToggle: _toggleSelected,
+                  detailPlace: _detailPlace,
+                  detailData: _detailData,
+                  detailLoading: _detailLoading,
+                  detailError: _detailError,
+                  onCloseDetail: _closeDetail,
                 ),
               ),
             ],
