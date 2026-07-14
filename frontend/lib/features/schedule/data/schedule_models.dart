@@ -92,43 +92,9 @@ class ScheduledTripPlace {
       );
 }
 
-/// §2.5 POST /schedule/revise 응답: { requestId, proposal: { days: [...] } }.
-/// 아직 저장 전이라 tripPlace id가 없고, apply 시 이 항목들을 그대로 되돌려보낸다.
-class ScheduleProposal {
-  const ScheduleProposal({required this.requestId, required this.days});
-
-  final String requestId;
-  final List<ProposalDay> days;
-
-  factory ScheduleProposal.fromJson(Map<String, dynamic> json) {
-    final proposal = json['proposal'] as Map<String, dynamic>;
-    final daysJson = proposal['days'] as List<dynamic>? ?? const [];
-    return ScheduleProposal(
-      requestId: json['requestId'] as String,
-      days: daysJson
-          .map((e) => ProposalDay.fromJson(e as Map<String, dynamic>))
-          .toList(),
-    );
-  }
-}
-
-class ProposalDay {
-  const ProposalDay({required this.dayNumber, required this.places});
-
-  final int dayNumber;
-  final List<ProposalItem> places;
-
-  factory ProposalDay.fromJson(Map<String, dynamic> json) {
-    final placesJson = json['places'] as List<dynamic>? ?? const [];
-    return ProposalDay(
-      dayNumber: json['dayNumber'] as int,
-      places: placesJson
-          .map((e) => ProposalItem.fromJson(e as Map<String, dynamic>))
-          .toList(),
-    );
-  }
-}
-
+/// applyRevision(POST /schedule/revise/apply) 요청 항목. 원래는 §2.5 프롬프트 기반
+/// 제안(revise) 미리보기용이었으나, 그 화면은 챗봇(chat)으로 대체됐다 — 지금은
+/// [ScheduleApi.restoreSnapshot]이 "되돌리기"를 구현하려고 이 형태를 재사용한다.
 class ProposalItem {
   const ProposalItem({
     required this.placeId,

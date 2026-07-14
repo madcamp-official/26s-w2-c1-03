@@ -102,20 +102,9 @@ class ScheduleApi {
     return SchedulePlan.fromJson(schedule);
   }
 
-  /// API 명세서 §2.5 POST /schedule/revise — 자연어 프롬프트로 수정 제안(저장 안 함).
-  Future<ScheduleProposal> revise({
-    required String tripId,
-    required String prompt,
-  }) async {
-    final response = await _apiClient.dio.post<Map<String, dynamic>>(
-      '/trips/$tripId/schedule/revise',
-      data: {'prompt': prompt},
-      options: Options(receiveTimeout: const Duration(seconds: 60)),
-    );
-    return ScheduleProposal.fromJson(response.data!);
-  }
-
   /// POST /schedule/revise/apply — 유저가 확인한(일부 제외 가능) 항목으로 전체 교체.
+  /// AI로부터 프롬프트 기반 전체 제안을 받는 §2.5 POST /schedule/revise 자체는 챗봇
+  /// (chat)으로 대체됐지만, 이 apply 엔드포인트는 되돌리기(restoreSnapshot)가 재사용한다.
   Future<SchedulePlan> applyRevision({
     required String tripId,
     required List<ProposalItem> items,

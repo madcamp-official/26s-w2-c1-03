@@ -6,11 +6,11 @@ import '../../../core/theme/app_colors.dart';
 import '../data/schedule_api.dart';
 import '../data/schedule_models.dart';
 import 'add_place_sheet.dart';
-import 'schedule_revise_screen.dart';
+import 'schedule_chat_panel.dart';
 
-/// 스케줄 편집 탭 — 장소 삭제 / 메모 수정. 순서 변경(드래그앤드롭)과 장소 추가,
-/// AI 재수정은 후속 커밋에서 이 화면에 얹는다. 편집 결과가 반영됐으면 pop(true)로
-/// 알려 상세 화면이 스케줄을 재조회한다.
+/// 스케줄 편집 탭 — 장소 추가/삭제/메모 수정/드래그앤드롭 순서변경 + 우측 하단 FAB로
+/// 여닫는 AI 챗봇 패널(화면 절반 높이). 편집 결과가 반영됐으면 pop(true)로 알려
+/// 상세 화면이 스케줄을 재조회한다.
 class ScheduleEditScreen extends ConsumerStatefulWidget {
   const ScheduleEditScreen({
     super.key,
@@ -30,6 +30,7 @@ class _ScheduleEditScreenState extends ConsumerState<ScheduleEditScreen> {
   late List<ScheduledTripPlace> _places;
   bool _changed = false;
   final Set<String> _busyIds = {};
+  bool _chatOpen = false;
 
   @override
   void initState() {
@@ -123,25 +124,13 @@ class _ScheduleEditScreenState extends ConsumerState<ScheduleEditScreen> {
     }
   }
 
-  /// AI 재수정 화면으로 진입. 유저가 제안을 수용(apply)하면 true로 돌아오므로,
-  /// 이 편집 화면도 최신 스케줄로 다시 불러온다.
-  Future<void> _openRevise() async {
-    final applied = await Navigator.of(context).push<bool>(
-      MaterialPageRoute(
-        builder: (_) => ScheduleReviseScreen(tripId: widget.tripId),
-      ),
-    );
-    if (applied != true || !mounted) return;
-    try {
-      final schedule = await ref.read(scheduleApiProvider).getSchedule(widget.tripId);
-      if (!mounted) return;
-      setState(() {
-        _places = [for (final day in schedule.days) ...day.places]..sort(_byDayThenOrder);
-        _changed = true;
-      });
-    } on DioException catch (e) {
-      _showError(e.error, '수정된 일정을 불러오지 못했어요.');
-    }
+  /// 챗봇 패널이 도구를 실행해 서버 일정을 바꿀 때마다 즉시 호출된다(대화창을 닫을
+  /// 때까지 기다리지 않고 바로 화면에 반영).
+  void _onChatScheduleChanged(SchedulePlan schedule) {
+    setState(() {
+      _places = [for (final day in schedule.days) ...day.places]..sort(_byDayThenOrder);
+      _changed = true;
+    });
   }
 
   Future<void> _addPlace(int dayNumber) async {
@@ -226,50 +215,68 @@ class _ScheduleEditScreenState extends ConsumerState<ScheduleEditScreen> {
             '일정 편집',
             style: TextStyle(color: AppColors.ink900, fontWeight: FontWeight.w800),
           ),
-          actions: [
-            TextButton.icon(
-              onPressed: _openRevise,
-              style: TextButton.styleFrom(foregroundColor: AppColors.green800),
-              icon: const Icon(Icons.auto_awesome, size: 16),
-              label: const Text(
-                'AI로 수정',
-                style: TextStyle(fontSize: 13.5, fontWeight: FontWeight.w800),
-              ),
-            ),
-          ],
         ),
         body: SafeArea(
-          child: days.isEmpty
-              ? const _EmptyState()
-              : ListView(
-                  padding: const EdgeInsets.fromLTRB(22, 12, 22, 40),
-                  children: [
-                    const Padding(
-                      padding: EdgeInsets.only(bottom: 10),
-                      child: Text(
-                        '손잡이를 끌어 같은 날 안에서 순서를 바꿀 수 있어요.',
-                        style: TextStyle(
-                          fontSize: 12.5,
-                          fontWeight: FontWeight.w600,
-                          color: AppColors.ink400,
+          child: Stack(
+            children: [
+              days.isEmpty
+                  ? const _EmptyState()
+                  : ListView(
+                      padding: const EdgeInsets.fromLTRB(22, 12, 22, 100),
+                      children: [
+                        const Padding(
+                          padding: EdgeInsets.only(bottom: 10),
+                          child: Text(
+                            '손잡이를 끌어 같은 날 안에서 순서를 바꿀 수 있어요.',
+                            style: TextStyle(
+                              fontSize: 12.5,
+                              fontWeight: FontWeight.w600,
+                              color: AppColors.ink400,
+                            ),
+                          ),
                         ),
-                      ),
+                        for (final day in days) ...[
+                          _DayEditSection(
+                            dayNumber: day,
+                            places: _byDay[day]!,
+                            busyIds: _busyIds,
+                            onDelete: _delete,
+                            onEditMemo: _editMemo,
+                            onReorder: (oldIndex, newIndex) =>
+                                _reorderWithinDay(day, oldIndex, newIndex),
+                            onAddPlace: () => _addPlace(day),
+                          ),
+                          const SizedBox(height: 18),
+                        ],
+                      ],
                     ),
-                    for (final day in days) ...[
-                      _DayEditSection(
-                        dayNumber: day,
-                        places: _byDay[day]!,
-                        busyIds: _busyIds,
-                        onDelete: _delete,
-                        onEditMemo: _editMemo,
-                        onReorder: (oldIndex, newIndex) =>
-                            _reorderWithinDay(day, oldIndex, newIndex),
-                        onAddPlace: () => _addPlace(day),
-                      ),
-                      const SizedBox(height: 18),
-                    ],
-                  ],
+              // 챗봇 진입 FAB — place_selection_screen의 PlaceSheet처럼 화면 위에
+              // 겹쳐서 여닫는 절반 높이 패널을 연다.
+              if (!_chatOpen)
+                Positioned(
+                  right: 18,
+                  bottom: 18,
+                  child: FloatingActionButton(
+                    heroTag: 'schedule-chat-fab',
+                    backgroundColor: AppColors.ink900,
+                    onPressed: () => setState(() => _chatOpen = true),
+                    child: const Icon(Icons.chat_bubble_outline, color: Colors.white),
+                  ),
                 ),
+              if (_chatOpen)
+                Positioned(
+                  left: 0,
+                  right: 0,
+                  bottom: 0,
+                  height: MediaQuery.of(context).size.height * 0.5,
+                  child: ScheduleChatPanel(
+                    tripId: widget.tripId,
+                    onScheduleChanged: _onChatScheduleChanged,
+                    onClose: () => setState(() => _chatOpen = false),
+                  ),
+                ),
+            ],
+          ),
         ),
       ),
     );
