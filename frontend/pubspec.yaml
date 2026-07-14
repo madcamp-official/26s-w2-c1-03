@@ -56,6 +56,11 @@ dependencies:
   # local.properties의 mapsApiKey → AndroidManifest ${mapsApiKey}로 주입한다.
   google_maps_flutter: ^2.9.0
 
+  # 온디바이스 사진 필터링 파이프라인(plan.md Phase 11, 기능명세서 §3.1/§8.1~8.2)
+  photo_manager: ^3.10.0
+  geocoding: ^5.0.0
+  image: ^4.9.1
+
 dev_dependencies:
   flutter_test:
     sdk: flutter
