@@ -16,11 +16,9 @@ class PlaceSheet extends StatefulWidget {
     required this.hasCtaPadding,
     required this.listLabel,
     required this.emptyText,
-    required this.dayCount,
     required this.selectedDayNumbers,
     required this.onRowTap,
     required this.onToggle,
-    required this.onDaySelected,
   });
 
   final List<PlaceCandidate> candidates;
@@ -29,13 +27,10 @@ class PlaceSheet extends StatefulWidget {
   final bool hasCtaPadding;
   final String listLabel;
   final String emptyText;
-  /// 여행 일수. 1이면 날짜를 고를 필요가 없어 배지를 탭할 수 없게 한다.
-  final int dayCount;
-  /// 선택된 장소의 placeId → 배정된 날짜(1부터).
+  /// 선택된 장소의 placeId → 배정된 날짜(1부터). 상단 일차 탭에서 선택 시점에 정해진다.
   final Map<String, int> selectedDayNumbers;
   final ValueChanged<PlaceCandidate> onRowTap;
   final ValueChanged<PlaceCandidate> onToggle;
-  final void Function(PlaceCandidate candidate, int dayNumber) onDaySelected;
 
   @override
   State<PlaceSheet> createState() => _PlaceSheetState();
@@ -178,83 +173,11 @@ class _PlaceSheetState extends State<PlaceSheet> {
           candidate: candidate,
           selected: widget.selectedIds.contains(candidate.id),
           dayNumber: widget.selectedDayNumbers[candidate.id],
-          dayCount: widget.dayCount,
           showDivider: index != widget.candidates.length - 1,
           onTap: () => widget.onRowTap(candidate),
           onToggle: () => widget.onToggle(candidate),
-          onDayTap: () => _pickDay(candidate),
         );
       },
-    );
-  }
-
-  /// 날짜 배지 탭 → 하단 시트로 1~dayCount 중 하나를 고르게 한다.
-  Future<void> _pickDay(PlaceCandidate candidate) async {
-    if (widget.dayCount <= 1) return;
-    final picked = await showModalBottomSheet<int>(
-      context: context,
-      backgroundColor: Colors.white,
-      shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
-      ),
-      builder: (context) => _DayPickerSheet(
-        dayCount: widget.dayCount,
-        current: widget.selectedDayNumbers[candidate.id] ?? 1,
-      ),
-    );
-    if (picked != null) {
-      widget.onDaySelected(candidate, picked);
-    }
-  }
-}
-
-/// 날짜 배지를 탭했을 때 뜨는 "N일차" 선택 목록.
-class _DayPickerSheet extends StatelessWidget {
-  const _DayPickerSheet({required this.dayCount, required this.current});
-
-  final int dayCount;
-  final int current;
-
-  @override
-  Widget build(BuildContext context) {
-    return SafeArea(
-      top: false,
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          const _SheetHandle(),
-          const Padding(
-            padding: EdgeInsets.fromLTRB(20, 4, 20, 12),
-            child: Align(
-              alignment: Alignment.centerLeft,
-              child: Text(
-                '몇 일차에 넣을까?',
-                style: TextStyle(
-                  fontSize: 16,
-                  fontWeight: FontWeight.w800,
-                  color: AppColors.ink900,
-                ),
-              ),
-            ),
-          ),
-          for (var day = 1; day <= dayCount; day++)
-            ListTile(
-              onTap: () => Navigator.of(context).pop(day),
-              title: Text(
-                '$day일차',
-                style: const TextStyle(
-                  fontSize: 15,
-                  fontWeight: FontWeight.w700,
-                  color: AppColors.ink900,
-                ),
-              ),
-              trailing: day == current
-                  ? const Icon(Icons.check, color: AppColors.green800)
-                  : null,
-            ),
-          const SizedBox(height: 8),
-        ],
-      ),
     );
   }
 }
@@ -324,22 +247,18 @@ class _PlaceListRow extends StatelessWidget {
     required this.candidate,
     required this.selected,
     required this.dayNumber,
-    required this.dayCount,
     required this.showDivider,
     required this.onTap,
     required this.onToggle,
-    required this.onDayTap,
   });
 
   final PlaceCandidate candidate;
   final bool selected;
-  /// 선택된 경우에만 값이 있다(선택 안 됐으면 null).
+  /// 선택된 경우에만 값이 있다(선택 안 됐으면 null) — 상단 일차 탭에서 정해진 날짜.
   final int? dayNumber;
-  final int dayCount;
   final bool showDivider;
   final VoidCallback onTap; // 행 탭 = 지도 확대 이동
   final VoidCallback onToggle; // 오른쪽 원 = 선택 토글
-  final VoidCallback onDayTap; // 날짜 배지 탭 = 날짜 선택 시트 열기
 
   @override
   Widget build(BuildContext context) {
@@ -388,14 +307,7 @@ class _PlaceListRow extends StatelessWidget {
                   ],
                   if (selected) ...[
                     const SizedBox(height: 6),
-                    GestureDetector(
-                      onTap: dayCount > 1 ? onDayTap : null,
-                      behavior: HitTestBehavior.opaque,
-                      child: _DayBadge(
-                        dayNumber: dayNumber ?? 1,
-                        editable: dayCount > 1,
-                      ),
-                    ),
+                    _DayBadge(dayNumber: dayNumber ?? 1),
                   ],
                 ],
               ),
@@ -428,12 +340,11 @@ class _PlaceListRow extends StatelessWidget {
   }
 }
 
-/// 선택된 장소 행에 붙는 "N일차" 배지. 여행이 여러 날이면 탭해서 날짜를 바꿀 수 있다.
+/// 선택된 장소 행에 붙는 "N일차" 배지 — 선택 당시 상단 일차 탭에서 정해진 날짜를 보여준다.
 class _DayBadge extends StatelessWidget {
-  const _DayBadge({required this.dayNumber, required this.editable});
+  const _DayBadge({required this.dayNumber});
 
   final int dayNumber;
-  final bool editable;
 
   @override
   Widget build(BuildContext context) {
@@ -443,26 +354,13 @@ class _DayBadge extends StatelessWidget {
         color: AppColors.green800.withValues(alpha: 0.1),
         borderRadius: BorderRadius.circular(999),
       ),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Text(
-            '$dayNumber일차',
-            style: const TextStyle(
-              fontSize: 11.5,
-              fontWeight: FontWeight.w800,
-              color: AppColors.green800,
-            ),
-          ),
-          if (editable) ...[
-            const SizedBox(width: 2),
-            const Icon(
-              Icons.keyboard_arrow_down_rounded,
-              size: 14,
-              color: AppColors.green800,
-            ),
-          ],
-        ],
+      child: Text(
+        '$dayNumber일차',
+        style: const TextStyle(
+          fontSize: 11.5,
+          fontWeight: FontWeight.w800,
+          color: AppColors.green800,
+        ),
       ),
     );
   }

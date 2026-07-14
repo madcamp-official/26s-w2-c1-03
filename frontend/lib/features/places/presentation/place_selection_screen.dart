@@ -12,6 +12,7 @@ import '../../schedule/data/schedule_api.dart';
 import '../../schedule/presentation/schedule_generating_screen.dart';
 import 'place_selection_constants.dart';
 import 'widgets/category_chip_row.dart';
+import 'widgets/day_tab_row.dart';
 import 'widgets/place_error_overlay.dart';
 import 'widgets/place_floating_cta.dart';
 import 'widgets/place_search_bar.dart';
@@ -65,12 +66,24 @@ class _PlaceSelectionScreenState extends ConsumerState<PlaceSelectionScreen> {
   GoogleMapController? _mapController;
   bool _generating = false;
 
+  /// 상단 일차 탭에서 현재 골라 둔 날짜 — 지금부터 선택하는 장소는 이 날짜로 배정된다.
+  int _currentDay = 1;
+
   /// 여행 일수(최소 1일). 백엔드 computeDurationDays와 동일한 로직(포함 일수).
   int get _dayCount {
     final start = DateTime.parse(widget.startDate);
     final end = DateTime.parse(widget.endDate);
     final days = end.difference(start).inDays + 1;
     return days < 1 ? 1 : days;
+  }
+
+  /// 일차별로 이미 선택해 둔 장소 수 — 상단 탭 배지에 쓴다.
+  Map<int, int> get _placeCountByDay {
+    final counts = <int, int>{};
+    for (final day in _selectedDayNumbers.values) {
+      counts[day] = (counts[day] ?? 0) + 1;
+    }
+    return counts;
   }
 
   // 검색 상태. _searchMode면 _allCandidates가 지역 후보가 아니라 검색 결과다.
@@ -253,14 +266,14 @@ class _PlaceSelectionScreenState extends ConsumerState<PlaceSelectionScreen> {
         _selectedDayNumbers.remove(candidate.id);
       } else {
         _selectedCandidates[candidate.id] = candidate;
-        _selectedDayNumbers[candidate.id] = 1;
+        // 상단 일차 탭에서 골라 둔 날짜로 배정한다.
+        _selectedDayNumbers[candidate.id] = _currentDay;
       }
     });
   }
 
-  void _setDayNumber(PlaceCandidate candidate, int dayNumber) {
-    if (!_selectedCandidates.containsKey(candidate.id)) return;
-    setState(() => _selectedDayNumbers[candidate.id] = dayNumber);
+  void _selectDay(int day) {
+    setState(() => _currentDay = day);
   }
 
   /// 지도를 해당 장소로 확대 이동한다(선택 상태는 건드리지 않음).
@@ -404,6 +417,16 @@ class _PlaceSelectionScreenState extends ConsumerState<PlaceSelectionScreen> {
                       onClear: _clearSearch,
                     ),
                   ),
+                  // 여러 날 여행이면 일차 탭으로 "지금부터 고르는 장소"의 배정 날짜를 고른다.
+                  if (_dayCount > 1) ...[
+                    const SizedBox(height: 8),
+                    DayTabRow(
+                      dayCount: _dayCount,
+                      selectedDay: _currentDay,
+                      placeCountByDay: _placeCountByDay,
+                      onSelect: _selectDay,
+                    ),
+                  ],
                   // 검색 결과는 카테고리로 거르지 않으므로 검색 중엔 칩을 숨긴다.
                   if (!_searchMode) ...[
                     const SizedBox(height: 8),
@@ -439,11 +462,9 @@ class _PlaceSelectionScreenState extends ConsumerState<PlaceSelectionScreen> {
                     : (_category != null
                           ? '이 카테고리엔 장소가 없어'
                           : '이 지역에서 찾은 장소가 없어'),
-                dayCount: _dayCount,
                 selectedDayNumbers: _selectedDayNumbers,
                 onRowTap: _focusPlace,
                 onToggle: _toggleSelected,
-                onDaySelected: _setDayNumber,
               ),
             ),
           ],
