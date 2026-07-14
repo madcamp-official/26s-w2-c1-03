@@ -6,6 +6,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:google_maps_flutter/google_maps_flutter.dart';
 import '../../../core/network/api_exception.dart';
 import '../../../core/theme/app_colors.dart';
+import '../../../core/widgets/app_back_button.dart';
 import '../data/places_api.dart';
 import '../data/places_models.dart';
 import '../../schedule/data/schedule_api.dart';
@@ -385,6 +386,7 @@ class _PlaceSelectionScreenState extends ConsumerState<PlaceSelectionScreen> {
       appBar: AppBar(
         backgroundColor: Colors.white,
         elevation: 0,
+        leading: const AppBackButton(),
         iconTheme: const IconThemeData(color: AppColors.ink900),
         title: const Text(
           '가고 싶은 곳 골라봐',

@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:photo_manager/photo_manager.dart';
 import '../../../core/theme/app_colors.dart';
+import '../../../core/widgets/app_back_button.dart';
 import '../../../core/widgets/app_button.dart';
 import '../../trips/data/trip_models.dart';
 import '../data/exif_location_service.dart';
@@ -170,6 +171,7 @@ class _RecordManualPickScreenState extends State<RecordManualPickScreen> {
       appBar: AppBar(
         backgroundColor: Colors.white,
         elevation: 0,
+        leading: const AppBackButton(),
         title: const Text('사진 고르기', style: TextStyle(color: AppColors.ink900, fontWeight: FontWeight.w800)),
         iconTheme: const IconThemeData(color: AppColors.ink900),
       ),

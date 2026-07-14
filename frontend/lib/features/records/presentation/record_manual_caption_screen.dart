@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../core/theme/app_colors.dart';
+import '../../../core/widgets/app_back_button.dart';
 import '../../../core/widgets/app_button.dart';
 import '../data/photo_candidate.dart';
 import '../data/record_photo_models.dart';
@@ -93,6 +94,7 @@ class _RecordManualCaptionScreenState extends ConsumerState<RecordManualCaptionS
       appBar: AppBar(
         backgroundColor: Colors.white,
         elevation: 0,
+        leading: const AppBackButton(),
         title: const Text('캡션 달기', style: TextStyle(color: AppColors.ink900, fontWeight: FontWeight.w800)),
         iconTheme: const IconThemeData(color: AppColors.ink900),
       ),

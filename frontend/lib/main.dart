@@ -32,6 +32,7 @@ class TripAndEndApp extends StatelessWidget {
         colorSchemeSeed: const Color(0xFF191F28),
         scaffoldBackgroundColor: Colors.white,
         useMaterial3: true,
+        appBarTheme: const AppBarTheme(centerTitle: true),
       ),
       home: const _StartupGate(),
     );

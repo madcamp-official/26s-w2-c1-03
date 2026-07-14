@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../core/network/api_exception.dart';
 import '../../../core/theme/app_colors.dart';
+import '../../../core/widgets/app_back_button.dart';
 import '../../../core/widgets/app_button.dart';
 import '../../trips/presentation/trip_list_controller.dart' show tripsApiProvider;
 import '../data/record_photo_models.dart';
@@ -173,6 +174,7 @@ class _RecordDetailScreenState extends ConsumerState<RecordDetailScreen> {
       appBar: AppBar(
         backgroundColor: Colors.white,
         elevation: 0,
+        leading: const AppBackButton(),
         title: const Text('기록', style: TextStyle(color: AppColors.ink900, fontWeight: FontWeight.w800)),
         iconTheme: const IconThemeData(color: AppColors.ink900),
         actions: [

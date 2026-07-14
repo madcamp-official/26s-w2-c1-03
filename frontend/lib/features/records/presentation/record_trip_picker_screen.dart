@@ -4,6 +4,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../core/network/api_exception.dart';
 import '../../../core/theme/app_colors.dart';
 import '../../../core/theme/app_gradients.dart';
+import '../../../core/widgets/app_back_button.dart';
 import '../../trips/data/trip_models.dart';
 import '../../trips/presentation/trip_list_controller.dart' show tripsApiProvider;
 import 'record_mode_sheet.dart';
@@ -74,6 +75,7 @@ class _RecordTripPickerScreenState extends ConsumerState<RecordTripPickerScreen>
       appBar: AppBar(
         backgroundColor: Colors.white,
         elevation: 0,
+        leading: const AppBackButton(),
         title: const Text(
           '기록할 여행 고르기',
           style: TextStyle(color: AppColors.ink900, fontWeight: FontWeight.w800),
