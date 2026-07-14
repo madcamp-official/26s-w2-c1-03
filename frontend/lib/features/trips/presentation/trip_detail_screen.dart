@@ -16,6 +16,7 @@ import '../../schedule/presentation/schedule_edit_screen.dart';
 import '../../schedule/presentation/schedule_generating_screen.dart';
 import '../data/trip_models.dart';
 import 'trip_list_controller.dart';
+import 'trip_members_screen.dart';
 import 'widgets/trip_schedule_map_view.dart';
 
 sealed class _DetailState {
@@ -239,6 +240,19 @@ class _TripDetailScreenState extends ConsumerState<TripDetailScreen> {
     showRecordModeSheet(context, trip);
   }
 
+  /// 참여자 목록 화면. 자진 탈퇴(true 반환) 시 더 이상 이 여행의 멤버가 아니므로
+  /// 상세 화면도 함께 닫고 목록을 갱신한다.
+  Future<void> _openMembers() async {
+    final leftTrip = await Navigator.of(context).push<bool>(
+      MaterialPageRoute(builder: (_) => TripMembersScreen(tripId: widget.tripId)),
+    );
+    if (!mounted) return;
+    if (leftTrip == true) {
+      unawaited(ref.read(tripListControllerProvider.notifier).load());
+      Navigator.of(context).pop();
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final state = _state;
@@ -253,6 +267,11 @@ class _TripDetailScreenState extends ConsumerState<TripDetailScreen> {
         title: _buildAppBarTitle(state),
         iconTheme: const IconThemeData(color: AppColors.ink900),
         actions: [
+          if (state is _DetailLoaded && !_editing)
+            IconButton(
+              icon: const Icon(Icons.group_outlined, color: AppColors.ink900),
+              onPressed: _openMembers,
+            ),
           if (state is _DetailLoaded && !_editing)
             IconButton(
               icon: const Icon(Icons.edit_outlined, color: AppColors.ink900),
