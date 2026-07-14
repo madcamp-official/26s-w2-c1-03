@@ -15,6 +15,8 @@ export interface ScheduleAiPlaceInput {
   lng: number | null;
   category: 'attraction' | 'restaurant' | 'cafe';
   isRequired: boolean;
+  /** 사용자가 이 장소를 배치하고 싶다고 고른 날짜(1부터). 지정 없으면 null — Service가 결과를 강제 보정하므로 AI는 참고만 하면 된다. */
+  fixedDayNumber?: number | null;
 }
 
 export interface ScheduleAiRequest {
@@ -282,7 +284,7 @@ export class OpenAiScheduleClient implements ScheduleAiClient {
       'C) 하루는 하나의 권역이다: 서로 가까운(대략 10km 이내) 장소끼리 같은 날에 묶고, 지역이 넓으면 동쪽/서쪽처럼 권역을 날짜별로 나눈다. 멀리 떨어진 두 장소를 같은 날 왔다갔다하지 않는다.',
       '',
       '하루 일정 구성 규칙:',
-      '1) [필수 장소]는 반드시 전부, 정확히 한 번씩 배치한다. 각 필수 장소가 속한 권역이 그날의 중심이 된다.',
+      '1) [필수 장소]는 반드시 전부, 정확히 한 번씩 배치한다. 각 필수 장소가 속한 권역이 그날의 중심이 된다. "지정 날짜"가 표기된 필수 장소는 반드시 그 날짜(dayNumber)에 배치한다.',
       '2) 각 날짜는 시간순으로 채운다: 오전(09:30~11:30) 관광 1~2곳 → 점심(12:00~13:00) 식당 1곳 → 오후(13:30~17:30) 관광 1~2곳 → 동선에 여유가 있으면 오후 중간에 카페 1곳 → 저녁(18:00~19:30) 식당 1곳.',
       '3) 매일 점심과 저녁에 [식당 후보]에서 각각 1곳씩 반드시 배치한다. 관광 항목은 하루 2~4곳으로 유지한다.',
       '4) 하루 안에서는 총 이동 거리가 최소가 되는 방문 순서로 정렬한다(인접한 장소를 연달아 방문).',
@@ -320,6 +322,9 @@ export class OpenAiScheduleClient implements ScheduleAiClient {
           const km = haversineKm(anchor.lat, anchor.lng, place.lat, place.lng);
           line += ` | 기준점에서 ${km.toFixed(1)}km`;
         }
+      }
+      if (place.fixedDayNumber != null) {
+        line += ` | 지정 날짜: ${place.fixedDayNumber}일차`;
       }
       return line;
     };

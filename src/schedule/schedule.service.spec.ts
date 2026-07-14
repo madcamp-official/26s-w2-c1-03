@@ -23,6 +23,11 @@ function buildRestaurant(id: string): ScheduledPlaceInfo {
 
 const emptyPools = { attractions: [], restaurants: [], cafes: [] };
 
+/** [placeId, dayNumber] 쌍을 GenerateScheduleDto.selectedPlaces 형태로 바꾼다. */
+function sp(entries: Array<[string, number]>): Array<{ placeId: string; dayNumber: number }> {
+  return entries.map(([placeId, dayNumber]) => ({ placeId, dayNumber }));
+}
+
 /**
  * 트랜잭션 매니저 목 — delete/create/save만 쓴다. create는 저장 시 부여될 id를 흉내내
  * 순번 id를 붙이고, save는 받은 행을 그대로 돌려준다(실제 저장 없이 배정 로직만 검증).
@@ -106,7 +111,11 @@ describe('ScheduleService', () => {
     scheduleAiClient.requestSchedule.mockResolvedValue(aiResult);
 
     const { schedule } = await service.generate('trip-1', 'user-1', {
-      selectedPlaceIds: ['p1', 'p2', 'p3'],
+      selectedPlaces: sp([
+        ['p1', 1],
+        ['p2', 1],
+        ['p3', 2],
+      ]),
     });
 
     // owner/editor 역할까지 검증한다.
@@ -131,6 +140,44 @@ describe('ScheduleService', () => {
     expect(schedule.days[0].places[0]).toMatchObject({ name: 'place-p1', address: '주소-p1' });
   });
 
+  it('사용자가 지정한 날짜는 AI가 다른 날에 배치해도 그대로 강제된다', async () => {
+    placesService.resolveForSchedule.mockResolvedValue([buildInfo('p1'), buildInfo('p2')]);
+    // 사용자는 p1을 2일차에 두고 싶어 했지만 AI는 1일차에 배치함
+    scheduleAiClient.requestSchedule.mockResolvedValue({
+      days: [
+        {
+          dayNumber: 1,
+          entries: [
+            { placeId: 'p1', startTime: '10:00' },
+            { placeId: 'p2', startTime: '14:00' },
+          ],
+        },
+      ],
+    });
+
+    const { schedule } = await service.generate('trip-1', 'user-1', {
+      selectedPlaces: sp([
+        ['p1', 2],
+        ['p2', 1],
+      ]),
+    });
+
+    expect(scheduleAiClient.requestSchedule).toHaveBeenCalledWith(
+      expect.objectContaining({
+        places: expect.arrayContaining([
+          expect.objectContaining({ id: 'p1', fixedDayNumber: 2 }),
+          expect.objectContaining({ id: 'p2', fixedDayNumber: 1 }),
+        ]),
+      }),
+    );
+    expect(schedule.days.find((d) => d.dayNumber === 1)?.places.map((p) => p.placeId)).toEqual([
+      'p2',
+    ]);
+    expect(schedule.days.find((d) => d.dayNumber === 2)?.places.map((p) => p.placeId)).toEqual([
+      'p1',
+    ]);
+  });
+
   it('AI가 누락한 필수 장소는 마지막 날에 이어 붙여 선택 장소가 모두 포함되게 한다', async () => {
     placesService.resolveForSchedule.mockResolvedValue([
       buildInfo('p1'),
@@ -151,12 +198,16 @@ describe('ScheduleService', () => {
     });
 
     const { schedule } = await service.generate('trip-1', 'user-1', {
-      selectedPlaceIds: ['p1', 'p2', 'p3'],
+      selectedPlaces: sp([
+        ['p1', 1],
+        ['p2', 1],
+        ['p3', 2],
+      ]),
     });
 
     const allPlaceIds = schedule.days.flatMap((day) => day.places.map((p) => p.placeId));
     expect(allPlaceIds.sort()).toEqual(['p1', 'p2', 'p3']);
-    // 누락분 p3는 마지막 날(durationDays=2)에 붙는다.
+    // 누락분 p3는 사용자가 지정한 날짜(2)에 붙는다.
     const lastDay = schedule.days.find((day) => day.dayNumber === 2);
     expect(lastDay?.places.map((p) => p.placeId)).toContain('p3');
   });
@@ -191,7 +242,10 @@ describe('ScheduleService', () => {
     });
 
     const { schedule } = await service.generate('trip-1', 'user-1', {
-      selectedPlaceIds: ['p1', 'p2'],
+      selectedPlaces: sp([
+        ['p1', 1],
+        ['p2', 2],
+      ]),
     });
 
     // 2일 여행: 관광지 2*3-2+2=6, 식당 2*2*2=8, 카페 2+2=4곳 한도로 풀을 요청한다.
@@ -240,7 +294,10 @@ describe('ScheduleService', () => {
     });
 
     const { schedule } = await service.generate('trip-1', 'user-1', {
-      selectedPlaceIds: ['p1', 'p2'],
+      selectedPlaces: sp([
+        ['p1', 1],
+        ['p2', 2],
+      ]),
     });
 
     // 1일차: 점심(12:00)+저녁(18:00) 식당이 시간순으로 삽입된다.
@@ -261,17 +318,27 @@ describe('ScheduleService', () => {
 
   it('여행 일수를 넘는 dayNumber는 마지막 날로 클램프한다', async () => {
     placesService.resolveForSchedule.mockResolvedValue([buildInfo('p1')]);
-    // 2일 여행인데 AI가 5일차로 배치
+    placesService.getScheduleCandidatePools.mockResolvedValue({
+      attractions: [buildInfo('a1')],
+      restaurants: [],
+      cafes: [],
+    });
+    // 2일 여행인데 AI가 필수 아닌 후보 a1을 5일차로 배치(사용자 지정 날짜가 없는 후보)
     scheduleAiClient.requestSchedule.mockResolvedValue({
-      days: [{ dayNumber: 5, entries: [{ placeId: 'p1', startTime: '10:00' }] }],
+      days: [
+        { dayNumber: 1, entries: [{ placeId: 'p1', startTime: '10:00' }] },
+        { dayNumber: 5, entries: [{ placeId: 'a1', startTime: '11:00' }] },
+      ],
     });
 
     const { schedule } = await service.generate('trip-1', 'user-1', {
-      selectedPlaceIds: ['p1'],
+      selectedPlaces: sp([['p1', 1]]),
     });
 
-    expect(schedule.days).toHaveLength(1);
-    expect(schedule.days[0].dayNumber).toBe(2);
+    expect(schedule.days).toHaveLength(2);
+    expect(schedule.days.find((d) => d.dayNumber === 2)?.places.map((p) => p.placeId)).toEqual([
+      'a1',
+    ]);
   });
 
   it('존재하지 않는 place가 섞여 있으면 SELECTED_PLACES_INVALID를 던지고 AI를 호출하지 않는다', async () => {
@@ -279,7 +346,13 @@ describe('ScheduleService', () => {
     placesService.resolveForSchedule.mockResolvedValue([buildInfo('p1'), buildInfo('p2')]);
 
     await expect(
-      service.generate('trip-1', 'user-1', { selectedPlaceIds: ['p1', 'p2', 'p3'] }),
+      service.generate('trip-1', 'user-1', {
+        selectedPlaces: sp([
+          ['p1', 1],
+          ['p2', 1],
+          ['p3', 1],
+        ]),
+      }),
     ).rejects.toMatchObject({ code: 'SELECTED_PLACES_INVALID' });
 
     expect(scheduleAiClient.requestSchedule).not.toHaveBeenCalled();
@@ -293,7 +366,7 @@ describe('ScheduleService', () => {
     );
 
     await expect(
-      service.generate('trip-1', 'user-1', { selectedPlaceIds: ['p1'] }),
+      service.generate('trip-1', 'user-1', { selectedPlaces: sp([['p1', 1]]) }),
     ).rejects.toMatchObject({ code: 'OPENAI_REQUEST_FAILED' });
     expect(dataSource.transaction).not.toHaveBeenCalled();
   });

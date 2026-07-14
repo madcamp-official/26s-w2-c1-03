@@ -174,14 +174,24 @@ export class ScheduleService {
   ): Promise<{ schedule: ScheduleView }> {
     const trip = await this.assertEditor(tripId, userId);
 
-    const selectedInfos = await this.placesService.resolveForSchedule(dto.selectedPlaceIds);
-    const requestedCount = new Set(dto.selectedPlaceIds).size;
+    const selectedPlaceIds = dto.selectedPlaces.map((p) => p.placeId);
+    const selectedInfos = await this.placesService.resolveForSchedule(selectedPlaceIds);
+    const requestedCount = new Set(selectedPlaceIds).size;
     if (selectedInfos.length !== requestedCount) {
       // 존재하지 않거나 조회 실패한 place가 섞여 있으면 부분 생성하지 않고 거부한다.
       throw new BusinessException(ScheduleErrorCode.SELECTED_PLACES_INVALID);
     }
 
     const durationDays = this.computeDurationDays(trip.startDate, trip.endDate);
+
+    // 사용자가 지정한 날짜(dayNumber)는 여행 일수 범위 안이어야 한다.
+    const fixedDayByPlaceId = new Map<string, number>();
+    for (const selected of dto.selectedPlaces) {
+      if (selected.dayNumber > durationDays) {
+        throw new BusinessException(ScheduleErrorCode.SCHEDULE_PLACE_INPUT_INVALID);
+      }
+      fixedDayByPlaceId.set(selected.placeId, selected.dayNumber);
+    }
 
     // 선택 장소의 중심좌표에서 가까운 순으로 정렬된 카테고리별 보강 후보 풀. 관광지는
     // 하루 목표 수만큼, 식당은 매일 점심·저녁을 채울 수 있게, 카페는 하루 1곳 수준으로 준다.
@@ -227,6 +237,7 @@ export class ScheduleService {
         lng: info.lng,
         category: info.category,
         isRequired: requiredPlaceIds.has(info.id),
+        fixedDayNumber: fixedDayByPlaceId.get(info.id) ?? null,
       })),
       durationDays,
     });
@@ -238,6 +249,7 @@ export class ScheduleService {
       durationDays,
       requiredPlaceIds,
       infoById,
+      fixedDayByPlaceId,
     );
 
     const saved = await this.dataSource.transaction(async (manager) => {
@@ -1005,22 +1017,25 @@ export class ScheduleService {
     durationDays: number,
     requiredPlaceIds: Set<string>,
     infoById: Map<string, ScheduledPlaceInfo>,
+    fixedDayByPlaceId: Map<string, number>,
   ): PlaceAssignment[] {
     const dayToEntries = new Map<number, DayEntry[]>();
     const placed = new Set<string>();
 
     const sortedDays = [...aiResult.days].sort((a, b) => a.dayNumber - b.dayNumber);
     for (const day of sortedDays) {
-      const dayNumber = Math.min(Math.max(Math.trunc(day.dayNumber), 1), durationDays);
-      const list = dayToEntries.get(dayNumber) ?? [];
+      const aiDayNumber = Math.min(Math.max(Math.trunc(day.dayNumber), 1), durationDays);
       for (const entry of day.entries) {
         if (placed.has(entry.placeId)) {
           continue;
         }
         placed.add(entry.placeId);
+        // 사용자가 지정한 날짜가 있으면 AI가 고른 날짜 대신 그 날짜로 강제한다.
+        const dayNumber = fixedDayByPlaceId.get(entry.placeId) ?? aiDayNumber;
+        const list = dayToEntries.get(dayNumber) ?? [];
         list.push({ placeId: entry.placeId, startTime: entry.startTime });
+        dayToEntries.set(dayNumber, list);
       }
-      dayToEntries.set(dayNumber, list);
     }
 
     // 각 날짜를 시간순으로 정리한다(시간이 없는 항목은 AI가 준 순서를 유지하며 뒤로).
@@ -1030,13 +1045,15 @@ export class ScheduleService {
 
     this.fillMissingMeals(dayToEntries, infos, placed, infoById);
 
-    const requiredLeftovers = infos
-      .filter((info) => requiredPlaceIds.has(info.id) && !placed.has(info.id))
-      .map((info): DayEntry => ({ placeId: info.id, startTime: null }));
-    if (requiredLeftovers.length > 0) {
-      const lastDay = dayToEntries.get(durationDays) ?? [];
-      lastDay.push(...requiredLeftovers);
-      dayToEntries.set(durationDays, lastDay);
+    // AI가 빠뜨린 필수 장소는 사용자가 지정한 날짜(없으면 마지막 날)에 강제로 채운다.
+    const requiredLeftovers = infos.filter(
+      (info) => requiredPlaceIds.has(info.id) && !placed.has(info.id),
+    );
+    for (const info of requiredLeftovers) {
+      const dayNumber = fixedDayByPlaceId.get(info.id) ?? durationDays;
+      const list = dayToEntries.get(dayNumber) ?? [];
+      list.push({ placeId: info.id, startTime: null });
+      dayToEntries.set(dayNumber, list);
     }
 
     const assignments: PlaceAssignment[] = [];
