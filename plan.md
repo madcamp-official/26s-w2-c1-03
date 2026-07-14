@@ -460,13 +460,13 @@ erDiagram
 
 ### Phase 10 — 공동 여행 계획 수립 (Collaboration)
 - **목표**: 초대 링크로 함께 계획을 편집(REST는 필수, WebSocket 실시간 동기화는 선택)
-- **BE 체크리스트 (REST, 필수)**:
-  - [ ] `POST /trips/{tripId}/invite-links` — 생성 권한은 `owner`/`editor`, `expiresInHours` 옵션, 토큰은 추측 불가능한 랜덤 문자열
-  - [ ] `POST /trips/invite-links/{token}/join` — 로그인 필요, 만료된 토큰 거부, 기본 `role=editor`로 `trip_members` insert, 이미 멤버면 멱등 처리(중복 insert 방지)
-  - [ ] `GET /trips/{tripId}/members` — 참여자 목록
-  - [ ] `PATCH /trips/{tripId}/members/{userId}` — 역할 변경, `owner`만 가능
-  - [ ] `DELETE /trips/{tripId}/members/{userId}` — 멤버 내보내기, `owner`만 가능
-  - [ ] `DELETE /trips/{tripId}/members/me` — 자진 탈퇴
+- **BE 체크리스트 (REST, 필수)** — ✅ 완료(2026-07-14). 유닛테스트 18건 포함 전체 스위트(20 suites/238 tests) 통과. 마지막 owner 보호 규칙(강등/추방/탈퇴 모두 `LAST_OWNER_CANNOT_LEAVE` 409)과 초대 URL base env(`INVITE_LINK_BASE_URL`, 기본 `tripandend://join`)를 추가로 확정:
+  - [x] `POST /trips/{tripId}/invite-links` — 생성 권한은 `owner`/`editor`, `expiresInHours` 옵션(1~720h, 생략 시 무기한), 토큰은 32바이트 난수 base64url(43자)
+  - [x] `POST /trips/invite-links/{token}/join` — 로그인 필요, 만료된 토큰 `INVITE_LINK_EXPIRED`(410) 거부, 기본 `role=editor`로 `trip_members` insert, 이미 멤버면 멱등 처리(중복 insert 방지), 삭제된 여행은 `TRIP_NOT_FOUND`
+  - [x] `GET /trips/{tripId}/members` — 참여자 목록(viewer도 조회 가능, 닉네임/프로필 포함)
+  - [x] `PATCH /trips/{tripId}/members/{userId}` — 역할 변경, `owner`만 가능, 마지막 owner 강등 차단
+  - [x] `DELETE /trips/{tripId}/members/{userId}` — 멤버 내보내기, `owner`만 가능, 마지막 owner 추방 차단
+  - [x] `DELETE /trips/{tripId}/members/me` — 자진 탈퇴(`:userId` 라우트보다 먼저 선언해 `me` 매칭 보장), 마지막 owner는 탈퇴 불가
 - **BE 체크리스트 (WebSocket, 선택)**:
   - [ ] `collaboration/collaboration.gateway.ts` — 연결 시 JWT 검증 + `trip_members` 소속 확인, 미소속/토큰 만료 시 **4403**으로 close(§10, API 명세서 §0)
   - [ ] `schedule:op` 수신(`opId`, `type: add|remove|move|editMemo`) → 다른 멤버에게 브로드캐스트(+ `authorUserId`)
