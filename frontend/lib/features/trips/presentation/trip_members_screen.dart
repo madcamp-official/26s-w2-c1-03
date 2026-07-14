@@ -7,6 +7,7 @@ import '../../../core/widgets/app_back_button.dart';
 import '../../profile/presentation/profile_controller.dart' show usersApiProvider;
 import '../data/trip_member_models.dart';
 import '../data/trip_members_api.dart';
+import 'invite_link_sheet.dart';
 
 sealed class _MembersState {
   const _MembersState();
@@ -150,6 +151,15 @@ class _TripMembersScreenState extends ConsumerState<TripMembersScreen> {
           '함께하는 사람들',
           style: TextStyle(color: AppColors.ink900, fontWeight: FontWeight.w700),
         ),
+        actions: [
+          // 초대 링크 생성은 owner/editor만(API 명세서 §3.1) — viewer에겐 숨긴다.
+          if (_state case _MembersLoaded(:final myRole)
+              when myRole == TripMemberRole.owner || myRole == TripMemberRole.editor)
+            IconButton(
+              icon: const Icon(Icons.person_add_alt_1_outlined, color: AppColors.ink900),
+              onPressed: () => showInviteLinkSheet(context, tripId: widget.tripId),
+            ),
+        ],
       ),
       body: SafeArea(child: _buildBody()),
     );
