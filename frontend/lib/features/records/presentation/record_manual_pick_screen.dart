@@ -4,8 +4,10 @@ import '../../../core/theme/app_colors.dart';
 import '../../../core/widgets/app_button.dart';
 import '../../trips/data/trip_models.dart';
 import '../data/exif_location_service.dart';
+import '../data/photo_candidate.dart';
 import '../data/photo_filter_pipeline.dart';
 import '../data/photo_library_service.dart';
+import '../data/sensitive_content_detector.dart';
 import 'record_upload_screen.dart';
 import 'widgets/local_asset_thumbnail.dart';
 
@@ -29,12 +31,11 @@ class _PickLoaded extends _PickState {
   final List<AssetEntity> assets;
 }
 
-/// "사용자 직접 선택" 모드의 진입 화면 — 온디바이스 1차 필터(흔들림/노출/중복/
-/// OCR/얼굴감지) 없이 여행 기간 내 사진첩 전체를 그대로 보여주고 사용자가 직접
-/// 고르게 한다(기능명세서 §8.1의 "기록 시작 시점에만 조회" 원칙은 이 화면
-/// 진입 자체가 그 시점이라 동일하게 지킨다). 고른 뒤 EXIF/지명은 선택된
-/// 사진에 한해서만 추출한다 — 전체 사진에 미리 돌리면 느리고 원본 좌표를
-/// 불필요하게 많이 만지게 된다.
+/// "사용자 직접 선택" 모드의 진입 화면 — 온디바이스 1차 필터 중 흔들림/노출/
+/// 중복/얼굴감지는 취향 문제라 생략하지만(사용자가 직접 고른 사진이니 존중),
+/// 문서(여권/신분증/카드) 자동 제외(§8.4)만은 개인정보 안전장치라 이 모드에도
+/// 그대로 적용한다 — 선택 직후 조용히 걸러내고 사용자에게 알린다.
+/// 사진첩 조회 자체는(§8.1 "기록 시작 시점에만 조회") 이 화면 진입이 그 시점.
 class RecordManualPickScreen extends StatefulWidget {
   const RecordManualPickScreen({super.key, required this.trip});
 
@@ -47,6 +48,7 @@ class RecordManualPickScreen extends StatefulWidget {
 class _RecordManualPickScreenState extends State<RecordManualPickScreen> {
   final _libraryService = PhotoLibraryService();
   final _exifLocationService = ExifLocationService();
+  final _sensitiveContentDetector = SensitiveContentDetector();
   _PickState _state = const _PickLoading();
   final Set<String> _selectedIds = {};
   bool _preparing = false;
@@ -55,6 +57,12 @@ class _RecordManualPickScreenState extends State<RecordManualPickScreen> {
   void initState() {
     super.initState();
     _load();
+  }
+
+  @override
+  void dispose() {
+    _sensitiveContentDetector.dispose();
+    super.dispose();
   }
 
   Future<void> _load() async {
@@ -104,6 +112,23 @@ class _RecordManualPickScreenState extends State<RecordManualPickScreen> {
     final candidates = await Future.wait(selected.map(_exifLocationService.buildCandidate));
     if (!mounted) return;
 
+    final filtered = await _excludeDocuments(candidates);
+    if (!mounted) return;
+
+    if (filtered.isEmpty) {
+      setState(() => _preparing = false);
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('선택한 사진이 전부 문서로 보여 제외됐어요. 다른 사진을 골라주세요.')),
+      );
+      return;
+    }
+    if (filtered.length < candidates.length) {
+      final excludedCount = candidates.length - filtered.length;
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text('문서로 보이는 사진 $excludedCount장은 자동으로 제외했어요.')));
+    }
+
     // push(+ 결과 전달 후 스스로 pop)로 체인을 만든다 — pushReplacement를 쓰면
     // 이 화면이 스택에서 사라져서, 맨 끝(finalize)에서 원래 호출한 화면까지
     // 같이 닫혀버린다.
@@ -111,13 +136,30 @@ class _RecordManualPickScreenState extends State<RecordManualPickScreen> {
       MaterialPageRoute(
         builder: (_) => RecordUploadScreen(
           trip: widget.trip,
-          result: PhotoFilterResult(candidates: candidates, totalScanned: assets.length),
+          result: PhotoFilterResult(candidates: filtered, totalScanned: assets.length),
           useAiCurate: false,
         ),
       ),
     );
     if (!mounted) return;
     Navigator.of(context).pop(success);
+  }
+
+  /// 여권/신분증/카드 등 문서성 사진 자동 제외(§8.4) — 직접 선택 모드에서도
+  /// 유일하게 유지하는 온디바이스 안전장치. 선택된(최대 100장) 것에만 돌려서
+  /// 전체 사진첩에 미리 돌리는 비용을 피한다.
+  Future<List<PhotoCandidate>> _excludeDocuments(List<PhotoCandidate> candidates) async {
+    final kept = <PhotoCandidate>[];
+    for (final candidate in candidates) {
+      final file = await candidate.asset.file;
+      if (file == null) {
+        kept.add(candidate); // 원본 파일을 못 읽으면(드묾) 안전하게 통과시킨다.
+        continue;
+      }
+      final isDocument = await _sensitiveContentDetector.isDocument(file.path);
+      if (!isDocument) kept.add(candidate);
+    }
+    return kept;
   }
 
   @override
