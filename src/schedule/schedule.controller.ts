@@ -42,6 +42,15 @@ export class ScheduleController {
     return this.scheduleService.generate(tripId, user.userId, dto);
   }
 
+  @Post('places/bulk')
+  addSelectedPlaces(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param('tripId') tripId: string,
+    @Body() dto: GenerateScheduleDto,
+  ) {
+    return this.scheduleService.addSelectedPlaces(tripId, user.userId, dto);
+  }
+
   @Post('places')
   addPlace(
     @CurrentUser() user: AuthenticatedUser,

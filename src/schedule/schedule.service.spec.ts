@@ -371,6 +371,57 @@ describe('ScheduleService', () => {
     expect(dataSource.transaction).not.toHaveBeenCalled();
   });
 
+  describe('addSelectedPlaces', () => {
+    it('AI 호출 없이 사용자가 고른 날짜·순서 그대로 등록한다', async () => {
+      placesService.resolveForSchedule.mockResolvedValue([
+        buildInfo('p1'),
+        buildInfo('p2'),
+        buildInfo('p3'),
+      ]);
+
+      const { schedule } = await service.addSelectedPlaces('trip-1', 'user-1', {
+        selectedPlaces: sp([
+          ['p1', 1],
+          ['p2', 1],
+          ['p3', 2],
+        ]),
+      });
+
+      expect(scheduleAiClient.requestSchedule).not.toHaveBeenCalled();
+      expect(manager.delete).toHaveBeenCalledWith(expect.anything(), { tripId: 'trip-1' });
+      const day1 = schedule.days.find((d) => d.dayNumber === 1)!;
+      expect(day1.places.map((p) => [p.placeId, p.orderInDay])).toEqual([
+        ['p1', 1],
+        ['p2', 2],
+      ]);
+      const day2 = schedule.days.find((d) => d.dayNumber === 2)!;
+      expect(day2.places.map((p) => p.placeId)).toEqual(['p3']);
+    });
+
+    it('여행 일수를 넘는 dayNumber는 SCHEDULE_PLACE_INPUT_INVALID를 던진다', async () => {
+      placesService.resolveForSchedule.mockResolvedValue([buildInfo('p1')]);
+
+      await expect(
+        service.addSelectedPlaces('trip-1', 'user-1', { selectedPlaces: sp([['p1', 5]]) }),
+      ).rejects.toMatchObject({ code: 'SCHEDULE_PLACE_INPUT_INVALID' });
+      expect(dataSource.transaction).not.toHaveBeenCalled();
+    });
+
+    it('존재하지 않는 place가 섞여 있으면 SELECTED_PLACES_INVALID를 던진다', async () => {
+      placesService.resolveForSchedule.mockResolvedValue([buildInfo('p1')]);
+
+      await expect(
+        service.addSelectedPlaces('trip-1', 'user-1', {
+          selectedPlaces: sp([
+            ['p1', 1],
+            ['p2', 1],
+          ]),
+        }),
+      ).rejects.toMatchObject({ code: 'SELECTED_PLACES_INVALID' });
+      expect(dataSource.transaction).not.toHaveBeenCalled();
+    });
+  });
+
   // ── Phase 9 수동 편집 ────────────────────────────────────────────────────
   // 트랜잭션 안에서 repo.find가 돌려준 행 객체를 직접 수정·저장하는 구현이므로,
   // 인메모리 rows 배열을 공유하는 repo 목으로 최종 상태를 검증한다.

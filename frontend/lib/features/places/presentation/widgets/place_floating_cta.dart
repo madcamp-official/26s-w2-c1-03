@@ -30,10 +30,9 @@ class PlaceFloatingCta extends StatelessWidget {
       child: SafeArea(
         top: false,
         child: AppButton(
-          label: '$count곳으로 최적 동선 짜기',
+          label: '$count곳 일정에 담기',
           variant: AppButtonVariant.lime,
           loading: loading,
-          aiSparkle: true,
           onPressed: onTap,
         ),
       ),

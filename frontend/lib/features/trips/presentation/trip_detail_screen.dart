@@ -11,6 +11,7 @@ import '../../records/presentation/record_intro_screen.dart';
 import '../../schedule/data/schedule_api.dart';
 import '../../schedule/data/schedule_models.dart';
 import '../../schedule/presentation/schedule_edit_screen.dart';
+import '../../schedule/presentation/schedule_generating_screen.dart';
 import '../data/trip_models.dart';
 import 'trip_detail_read_only_view.dart';
 import 'trip_list_controller.dart';
@@ -215,6 +216,29 @@ class _TripDetailScreenState extends ConsumerState<TripDetailScreen> {
     }
   }
 
+  /// "AI로 스케줄 짜기" — 지금까지 등록된(수동/이전 AI 결과 불문) 장소를 각자
+  /// 배정된 날짜 그대로 다시 AI에 넘겨 최적 동선으로 교체한다. custom(직접 입력)
+  /// 장소는 placeId가 없어 AI 생성 대상에서 제외한다.
+  Future<void> _openAiGenerate(Trip trip, SchedulePlan schedule) async {
+    final selectedPlaces = [
+      for (final day in schedule.days)
+        for (final place in day.places)
+          if (place.placeId != null)
+            SelectedPlace(placeId: place.placeId!, dayNumber: day.dayNumber),
+    ];
+    if (selectedPlaces.isEmpty) return;
+    final completed = await Navigator.of(context).push<bool>(
+      MaterialPageRoute(
+        builder: (_) => ScheduleGeneratingScreen(
+          tripId: trip.id,
+          selectedPlaces: selectedPlaces,
+        ),
+      ),
+    );
+    if (!mounted) return;
+    if (completed == true) await _load();
+  }
+
   Future<void> _openScheduleEdit(SchedulePlan schedule) async {
     final changed = await Navigator.of(context).push<bool>(
       MaterialPageRoute(
@@ -384,6 +408,7 @@ class _TripDetailScreenState extends ConsumerState<TripDetailScreen> {
         onSelectPlaces: () =>
             _openPlaceSelection(trip.id, trip.startDate, trip.endDate),
         onEditSchedule: () => _openScheduleEdit(schedule),
+        onGenerateAi: () => _openAiGenerate(trip, schedule),
         onStartRecord: () => _openRecordIntro(trip),
       ),
     ];

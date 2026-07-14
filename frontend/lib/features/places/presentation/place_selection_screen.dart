@@ -9,7 +9,6 @@ import '../../../core/theme/app_colors.dart';
 import '../data/places_api.dart';
 import '../data/places_models.dart';
 import '../../schedule/data/schedule_api.dart';
-import '../../schedule/presentation/schedule_generating_screen.dart';
 import 'place_selection_constants.dart';
 import 'widgets/category_chip_row.dart';
 import 'widgets/day_tab_row.dart';
@@ -287,27 +286,37 @@ class _PlaceSelectionScreenState extends ConsumerState<PlaceSelectionScreen> {
     );
   }
 
-  Future<void> _openScheduleGeneration() async {
+  /// CTA — AI 없이 선택한 장소를 각자 고른 날짜에 그대로 등록만 한다.
+  /// AI 최적 동선 생성은 여행 상세 화면의 "AI로 스케줄 짜기" 버튼에서 별도로 트리거한다.
+  Future<void> _addSelectedPlaces() async {
     if (_selectedCandidates.isEmpty || _generating) return;
     setState(() => _generating = true);
-    final completed = await Navigator.of(context).push<bool>(
-      MaterialPageRoute(
-        builder: (_) => ScheduleGeneratingScreen(
-          tripId: widget.tripId,
-          selectedPlaces: [
-            for (final id in _selectedCandidates.keys)
-              SelectedPlace(
-                placeId: id,
-                dayNumber: _selectedDayNumbers[id] ?? 1,
-              ),
-          ],
-        ),
-      ),
-    );
-    if (!mounted) return;
-    setState(() => _generating = false);
-    if (completed == true) {
+    try {
+      await ref
+          .read(scheduleApiProvider)
+          .addSelectedPlaces(
+            tripId: widget.tripId,
+            selectedPlaces: [
+              for (final id in _selectedCandidates.keys)
+                SelectedPlace(
+                  placeId: id,
+                  dayNumber: _selectedDayNumbers[id] ?? 1,
+                ),
+            ],
+          );
+      if (!mounted) return;
       Navigator.of(context).pop(true);
+    } on DioException catch (e) {
+      if (!mounted) return;
+      final error = e.error;
+      setState(() => _generating = false);
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            error is ApiException ? error.message : '장소를 추가하지 못했어요.',
+          ),
+        ),
+      );
     }
   }
 
@@ -475,7 +484,7 @@ class _PlaceSelectionScreenState extends ConsumerState<PlaceSelectionScreen> {
           : PlaceFloatingCta(
               count: _selectedIds.length,
               loading: _generating,
-              onTap: _openScheduleGeneration,
+              onTap: _addSelectedPlaces,
             ),
     );
   }

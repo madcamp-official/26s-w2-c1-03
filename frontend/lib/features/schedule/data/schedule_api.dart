@@ -33,6 +33,23 @@ class ScheduleApi {
     return SchedulePlan.fromJson(schedule);
   }
 
+  /// POST /trips/{tripId}/schedule/places/bulk — AI 없이 사용자가 고른 장소를
+  /// 각자 지정한 날짜에 그대로 등록한다(장소 선택 화면 CTA가 호출). 이후 사용자가
+  /// 별도로 [generate]를 호출하면 이 초안을 AI가 다듬은 일정으로 교체한다.
+  Future<SchedulePlan> addSelectedPlaces({
+    required String tripId,
+    required List<SelectedPlace> selectedPlaces,
+  }) async {
+    final response = await _apiClient.dio.post<Map<String, dynamic>>(
+      '/trips/$tripId/schedule/places/bulk',
+      data: {
+        'selectedPlaces': selectedPlaces.map((p) => p.toJson()).toList(),
+      },
+    );
+    final schedule = response.data!['schedule'] as Map<String, dynamic>;
+    return SchedulePlan.fromJson(schedule);
+  }
+
   /// API 명세서 §2.4 POST /schedule/places — placeId 참조 또는 custom 직접입력 추가.
   Future<ScheduledTripPlace> addPlace({
     required String tripId,

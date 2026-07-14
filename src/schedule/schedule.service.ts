@@ -270,6 +270,62 @@ export class ScheduleService {
     return { schedule: this.buildView(saved, infoById) };
   }
 
+  /**
+   * 후보 선택 화면에서 "AI 스케줄 짜기" 없이 사용자가 고른 장소만 각자 지정한 날짜에
+   * 그대로 등록한다(AI 호출·후보 풀 보강 없음). 이후 사용자가 별도로 generate()를
+   * 호출하면 이 초안을 AI가 다듬은 최종 일정으로 교체한다.
+   */
+  async addSelectedPlaces(
+    tripId: string,
+    userId: string,
+    dto: GenerateScheduleDto,
+  ): Promise<{ schedule: ScheduleView }> {
+    const trip = await this.assertEditor(tripId, userId);
+
+    const selectedPlaceIds = dto.selectedPlaces.map((p) => p.placeId);
+    const selectedInfos = await this.placesService.resolveForSchedule(selectedPlaceIds);
+    const requestedCount = new Set(selectedPlaceIds).size;
+    if (selectedInfos.length !== requestedCount) {
+      throw new BusinessException(ScheduleErrorCode.SELECTED_PLACES_INVALID);
+    }
+
+    const durationDays = this.computeDurationDays(trip.startDate, trip.endDate);
+
+    // 사용자가 고른 순서를 그대로 유지해 일차별 orderInDay를 매긴다(AI 개입 없음).
+    const dayToPlaceIds = new Map<number, string[]>();
+    for (const selected of dto.selectedPlaces) {
+      if (selected.dayNumber > durationDays) {
+        throw new BusinessException(ScheduleErrorCode.SCHEDULE_PLACE_INPUT_INVALID);
+      }
+      const list = dayToPlaceIds.get(selected.dayNumber) ?? [];
+      list.push(selected.placeId);
+      dayToPlaceIds.set(selected.dayNumber, list);
+    }
+
+    const infoById = new Map(selectedInfos.map((info) => [info.id, info]));
+    const saved = await this.dataSource.transaction(async (manager) => {
+      await manager.delete(TripPlace, { tripId });
+      const rows: TripPlace[] = [];
+      for (const [dayNumber, placeIds] of dayToPlaceIds) {
+        placeIds.forEach((placeId, index) => {
+          rows.push(
+            manager.create(TripPlace, {
+              tripId,
+              placeId,
+              dayNumber,
+              orderInDay: index + 1,
+              startTime: null,
+              addedBy: userId,
+            }),
+          );
+        });
+      }
+      return manager.save(rows);
+    });
+
+    return { schedule: this.buildView(saved, infoById) };
+  }
+
   async getSchedule(tripId: string, userId: string): Promise<{ schedule: ScheduleView }> {
     await this.tripsService.getDetail(tripId, userId);
 

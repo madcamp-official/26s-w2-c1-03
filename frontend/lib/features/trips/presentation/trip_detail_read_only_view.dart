@@ -14,6 +14,7 @@ class TripDetailReadOnlyView extends StatelessWidget {
     required this.hasSchedule,
     required this.onSelectPlaces,
     required this.onEditSchedule,
+    required this.onGenerateAi,
     required this.onStartRecord,
   });
 
@@ -22,6 +23,7 @@ class TripDetailReadOnlyView extends StatelessWidget {
   final bool hasSchedule;
   final VoidCallback onSelectPlaces;
   final VoidCallback onEditSchedule;
+  final VoidCallback onGenerateAi;
   final VoidCallback onStartRecord;
 
   @override
@@ -32,7 +34,11 @@ class TripDetailReadOnlyView extends StatelessWidget {
         _TripHero(trip: trip),
         const SizedBox(height: 22),
         if (hasSchedule)
-          _ScheduleOverview(schedule: schedule, onEditSchedule: onEditSchedule)
+          _ScheduleOverview(
+            schedule: schedule,
+            onEditSchedule: onEditSchedule,
+            onGenerateAi: onGenerateAi,
+          )
         else
           _NoScheduleCard(onSelectPlaces: onSelectPlaces),
         // 여행 종료 후에만 사진첩 접근이 의미 있다(§8.1: 실제 조회는 여행 종료 후
@@ -132,10 +138,15 @@ class _TripHero extends StatelessWidget {
 }
 
 class _ScheduleOverview extends StatelessWidget {
-  const _ScheduleOverview({required this.schedule, required this.onEditSchedule});
+  const _ScheduleOverview({
+    required this.schedule,
+    required this.onEditSchedule,
+    required this.onGenerateAi,
+  });
 
   final SchedulePlan schedule;
   final VoidCallback onEditSchedule;
+  final VoidCallback onGenerateAi;
 
   @override
   Widget build(BuildContext context) {
@@ -170,6 +181,13 @@ class _ScheduleOverview extends StatelessWidget {
               ),
             ),
           ],
+        ),
+        const SizedBox(height: 14),
+        AppButton(
+          label: 'AI로 스케줄 짜기',
+          variant: AppButtonVariant.lime,
+          aiSparkle: true,
+          onPressed: onGenerateAi,
         ),
         const SizedBox(height: 14),
         for (final day in days.where((day) => day.places.isNotEmpty)) ...[
