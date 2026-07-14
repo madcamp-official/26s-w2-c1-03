@@ -7,6 +7,7 @@ import '../../../core/network/api_exception.dart';
 import '../../../core/theme/app_colors.dart';
 import '../../../core/widgets/app_button.dart';
 import '../../places/presentation/place_selection_screen.dart';
+import '../../records/presentation/record_intro_screen.dart';
 import '../../schedule/data/schedule_api.dart';
 import '../../schedule/data/schedule_models.dart';
 import '../../schedule/presentation/schedule_edit_screen.dart';
@@ -225,6 +226,12 @@ class _TripDetailScreenState extends ConsumerState<TripDetailScreen> {
     if (changed == true) await _load();
   }
 
+  void _openRecordIntro(Trip trip) {
+    Navigator.of(context).push(
+      MaterialPageRoute(builder: (_) => RecordIntroScreen(trip: trip)),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final state = _state;
@@ -377,6 +384,7 @@ class _TripDetailScreenState extends ConsumerState<TripDetailScreen> {
         onSelectPlaces: () =>
             _openPlaceSelection(trip.id, trip.startDate, trip.endDate),
         onEditSchedule: () => _openScheduleEdit(schedule),
+        onStartRecord: () => _openRecordIntro(trip),
       ),
     ];
   }

@@ -4,6 +4,11 @@
     <!-- Android 13(API 33)+ 런타임 알림 권한. firebase_messaging의 requestPermission()이
          이 권한을 요청한다(plan.md Phase 5). -->
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS"/>
+    <!-- 여행 기록용 온디바이스 사진 필터링(photo_manager, plan.md Phase 11)에 필요.
+         API 33+는 READ_MEDIA_IMAGES, 그 이하는 READ_EXTERNAL_STORAGE로 갈린다
+         (photo_manager 공식 설정 가이드). -->
+    <uses-permission android:name="android.permission.READ_MEDIA_IMAGES"/>
+    <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" android:maxSdkVersion="32"/>
 
     <application
         android:label="tripandend"

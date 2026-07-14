@@ -14,6 +14,7 @@ class TripDetailReadOnlyView extends StatelessWidget {
     required this.hasSchedule,
     required this.onSelectPlaces,
     required this.onEditSchedule,
+    required this.onStartRecord,
   });
 
   final Trip trip;
@@ -21,6 +22,7 @@ class TripDetailReadOnlyView extends StatelessWidget {
   final bool hasSchedule;
   final VoidCallback onSelectPlaces;
   final VoidCallback onEditSchedule;
+  final VoidCallback onStartRecord;
 
   @override
   Widget build(BuildContext context) {
@@ -33,7 +35,47 @@ class TripDetailReadOnlyView extends StatelessWidget {
           _ScheduleOverview(schedule: schedule, onEditSchedule: onEditSchedule)
         else
           _NoScheduleCard(onSelectPlaces: onSelectPlaces),
+        // 여행 종료 후에만 사진첩 접근이 의미 있다(§8.1: 실제 조회는 여행 종료 후
+        // 기록 시작 시점에만 발생). ongoing/planning에서는 버튼 자체를 숨긴다.
+        if (trip.status == 'completed') ...[
+          const SizedBox(height: 22),
+          _RecordEntryCard(onStartRecord: onStartRecord),
+        ],
       ],
+    );
+  }
+}
+
+class _RecordEntryCard extends StatelessWidget {
+  const _RecordEntryCard({required this.onStartRecord});
+
+  final VoidCallback onStartRecord;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(18),
+      decoration: BoxDecoration(
+        color: AppColors.surfaceSubtle,
+        borderRadius: BorderRadius.circular(22),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Text(
+            '여행이 끝났어요',
+            style: TextStyle(fontSize: 17, fontWeight: FontWeight.w800, color: AppColors.ink900),
+          ),
+          const SizedBox(height: 6),
+          const Text(
+            '사진첩에서 이 기간 사진을 찾아 여행 기록을 시작해볼까?',
+            style: TextStyle(fontSize: 13.5, height: 1.4, fontWeight: FontWeight.w600, color: AppColors.ink600),
+          ),
+          const SizedBox(height: 16),
+          AppButton(label: '기록 시작', variant: AppButtonVariant.lime, aiSparkle: true, onPressed: onStartRecord),
+        ],
+      ),
     );
   }
 }
