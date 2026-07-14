@@ -1,22 +1,30 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:google_maps_flutter/google_maps_flutter.dart';
 import '../../../../core/theme/app_colors.dart';
 import '../../../../core/utils/geo.dart';
+import '../../../places/data/places_api.dart';
 import '../../../schedule/data/schedule_models.dart';
+import '../../data/trip_models.dart';
 import 'schedule_marker_icons.dart';
 
 /// 여행 상세 — 지도 위에 그날 장소를 순번 마커로 찍고, 아래 드래그 시트에 일자 탭 +
 /// 장소 목록(카테고리색 배지 + 장소 간 거리)을 띄운다. place_selection_screen.dart의
-/// 지도+드래그시트 레이아웃을 재사용한 패턴이다.
-class TripScheduleMapView extends StatefulWidget {
+/// 지도+드래그시트 레이아웃을 재사용한 패턴이다. 일정이 하나도 없어도(여행을 막
+/// 만들었을 때) 이 화면을 그대로 쓴다 — 일차 탭은 trip 기간으로 채우고, 지도는
+/// 장소 좌표가 없으니 여행 지역(대략 좌표)으로 줌한다.
+class TripScheduleMapView extends ConsumerStatefulWidget {
   const TripScheduleMapView({
     super.key,
+    required this.trip,
     required this.schedule,
     required this.onEditSchedule,
     required this.onGenerateAi,
     required this.onAddPlace,
+    required this.onStartRecord,
   });
 
+  final Trip trip;
   final SchedulePlan schedule;
   final VoidCallback onEditSchedule;
   final VoidCallback onGenerateAi;
@@ -25,11 +33,14 @@ class TripScheduleMapView extends StatefulWidget {
   /// 화면(AddPlaceMapScreen)으로 이동시킨다.
   final ValueChanged<int> onAddPlace;
 
+  /// 여행이 끝난 뒤(trip.status=='completed') 기록 시작 진입점.
+  final VoidCallback onStartRecord;
+
   @override
-  State<TripScheduleMapView> createState() => _TripScheduleMapViewState();
+  ConsumerState<TripScheduleMapView> createState() => _TripScheduleMapViewState();
 }
 
-class _TripScheduleMapViewState extends State<TripScheduleMapView> {
+class _TripScheduleMapViewState extends ConsumerState<TripScheduleMapView> {
   static const double _min = 0.18;
   static const double _mid = 0.48;
   static const double _max = 0.92;
@@ -39,42 +50,45 @@ class _TripScheduleMapViewState extends State<TripScheduleMapView> {
   bool _dragging = false;
   final _listController = ScrollController();
   GoogleMapController? _mapController;
-  late int _selectedDay;
+  int _selectedDay = 1;
   Set<Marker> _markers = {};
 
-  List<ScheduleDay> get _sortedDays {
-    final days = [...widget.schedule.days]
-      ..sort((a, b) => a.dayNumber.compareTo(b.dayNumber));
-    return days;
+  /// 장소가 하나도 없을 때 지도를 맞출 여행 지역 대략 좌표. 후보 조회(§2.2) 결과의
+  /// 첫 좌표를 재사용한다 — 지오코딩 API를 새로 붙이지 않고도 정확한 지역 중심을 얻는다.
+  LatLng? _regionCenter;
+
+  /// 여행 일수(최소 1일). place_selection_screen.dart의 계산과 동일하다.
+  int get _dayCount {
+    final start = DateTime.parse(widget.trip.startDate);
+    final end = DateTime.parse(widget.trip.endDate);
+    final days = end.difference(start).inDays + 1;
+    return days < 1 ? 1 : days;
   }
 
-  ScheduleDay? get _currentDay {
-    for (final day in _sortedDays) {
-      if (day.dayNumber == _selectedDay) return day;
-    }
-    return _sortedDays.isEmpty ? null : _sortedDays.first;
-  }
+  List<int> get _dayNumbers => List.generate(_dayCount, (i) => i + 1);
 
   List<ScheduledTripPlace> get _currentPlaces {
-    final day = _currentDay;
-    if (day == null) return const [];
-    return [...day.places]..sort((a, b) => a.orderInDay.compareTo(b.orderInDay));
+    for (final day in widget.schedule.days) {
+      if (day.dayNumber == _selectedDay) {
+        return [...day.places]..sort((a, b) => a.orderInDay.compareTo(b.orderInDay));
+      }
+    }
+    return const [];
   }
 
   @override
   void initState() {
     super.initState();
-    _selectedDay = _sortedDays.isNotEmpty ? _sortedDays.first.dayNumber : 1;
     _loadMarkers();
+    if (widget.schedule.days.isEmpty) {
+      _loadRegionCenter();
+    }
   }
 
   @override
   void didUpdateWidget(covariant TripScheduleMapView oldWidget) {
     super.didUpdateWidget(oldWidget);
     if (oldWidget.schedule != widget.schedule) {
-      if (_currentDay == null && _sortedDays.isNotEmpty) {
-        _selectedDay = _sortedDays.first.dayNumber;
-      }
       _loadMarkers();
     }
   }
@@ -89,6 +103,23 @@ class _TripScheduleMapViewState extends State<TripScheduleMapView> {
   void _selectDay(int day) {
     setState(() => _selectedDay = day);
     _loadMarkers();
+  }
+
+  /// 일정이 비어 있을 때만 쓰는 폴백 — 후보 목록 첫 좌표를 여행 지역 중심으로 삼는다.
+  Future<void> _loadRegionCenter() async {
+    try {
+      final candidates =
+          await ref.read(placesApiProvider).getCandidates(widget.trip.id);
+      final withCoords = candidates.firstWhere(
+        (c) => c.lat != null && c.lng != null,
+        orElse: () => candidates.first,
+      );
+      if (!mounted || withCoords.lat == null || withCoords.lng == null) return;
+      setState(() => _regionCenter = LatLng(withCoords.lat!, withCoords.lng!));
+      _fitCamera();
+    } catch (_) {
+      // 지역 후보 조회 실패는 화면 진입을 막지 않는다 — 지도는 기본 위치를 유지한다.
+    }
   }
 
   Future<void> _loadMarkers() async {
@@ -120,7 +151,13 @@ class _TripScheduleMapViewState extends State<TripScheduleMapView> {
     final coords = _currentPlaces
         .where((p) => p.lat != null && p.lng != null)
         .toList();
-    if (coords.isEmpty) return;
+
+    if (coords.isEmpty) {
+      final region = _regionCenter;
+      if (region == null) return;
+      await controller.animateCamera(CameraUpdate.newLatLngZoom(region, 12));
+      return;
+    }
 
     if (coords.length == 1) {
       await controller.animateCamera(
@@ -229,9 +266,13 @@ class _TripScheduleMapViewState extends State<TripScheduleMapView> {
                               ),
                             ),
                           ),
-                          if (_sortedDays.length > 1) ...[
+                          if (widget.trip.status == 'completed') ...[
+                            _RecordBanner(onTap: widget.onStartRecord),
+                            const SizedBox(height: 8),
+                          ],
+                          if (_dayCount > 1) ...[
                             _DayTabs(
-                              days: _sortedDays,
+                              dayNumbers: _dayNumbers,
                               selectedDay: _selectedDay,
                               onSelect: _selectDay,
                             ),
@@ -314,9 +355,13 @@ class _TripScheduleMapViewState extends State<TripScheduleMapView> {
 }
 
 class _DayTabs extends StatelessWidget {
-  const _DayTabs({required this.days, required this.selectedDay, required this.onSelect});
+  const _DayTabs({
+    required this.dayNumbers,
+    required this.selectedDay,
+    required this.onSelect,
+  });
 
-  final List<ScheduleDay> days;
+  final List<int> dayNumbers;
   final int selectedDay;
   final ValueChanged<int> onSelect;
 
@@ -327,13 +372,13 @@ class _DayTabs extends StatelessWidget {
       child: ListView.separated(
         scrollDirection: Axis.horizontal,
         padding: const EdgeInsets.symmetric(horizontal: 20),
-        itemCount: days.length,
+        itemCount: dayNumbers.length,
         separatorBuilder: (_, _) => const SizedBox(width: 8),
         itemBuilder: (context, index) {
-          final day = days[index];
-          final isSelected = day.dayNumber == selectedDay;
+          final dayNumber = dayNumbers[index];
+          final isSelected = dayNumber == selectedDay;
           return InkWell(
-            onTap: () => onSelect(day.dayNumber),
+            onTap: () => onSelect(dayNumber),
             borderRadius: BorderRadius.circular(999),
             child: Container(
               padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 7),
@@ -343,7 +388,7 @@ class _DayTabs extends StatelessWidget {
               ),
               alignment: Alignment.center,
               child: Text(
-                'DAY ${day.dayNumber}',
+                'DAY $dayNumber',
                 style: TextStyle(
                   fontSize: 12.5,
                   fontWeight: FontWeight.w800,
@@ -353,6 +398,50 @@ class _DayTabs extends StatelessWidget {
             ),
           );
         },
+      ),
+    );
+  }
+}
+
+/// 여행 종료(trip.status=='completed') 후 지도 화면에서도 기록을 시작할 수 있게
+/// 하는 배너 — 예전엔 TripDetailReadOnlyView의 _RecordEntryCard가 이 역할이었다.
+class _RecordBanner extends StatelessWidget {
+  const _RecordBanner({required this.onTap});
+
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 20),
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(14),
+        child: Container(
+          width: double.infinity,
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+          decoration: BoxDecoration(
+            color: AppColors.lime,
+            borderRadius: BorderRadius.circular(14),
+          ),
+          child: Row(
+            children: [
+              const Icon(Icons.auto_stories_outlined, size: 18, color: AppColors.green800),
+              const SizedBox(width: 8),
+              const Expanded(
+                child: Text(
+                  '여행이 끝났어요 · 기록을 시작해볼까?',
+                  style: TextStyle(
+                    fontSize: 13,
+                    fontWeight: FontWeight.w800,
+                    color: AppColors.green800,
+                  ),
+                ),
+              ),
+              const Icon(Icons.chevron_right, size: 18, color: AppColors.green800),
+            ],
+          ),
+        ),
       ),
     );
   }

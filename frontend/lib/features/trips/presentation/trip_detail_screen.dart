@@ -6,7 +6,6 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../core/network/api_exception.dart';
 import '../../../core/theme/app_colors.dart';
 import '../../../core/widgets/app_button.dart';
-import '../../places/presentation/place_selection_screen.dart';
 import '../../records/presentation/record_intro_screen.dart';
 import '../../schedule/data/schedule_api.dart';
 import '../../schedule/data/schedule_models.dart';
@@ -14,7 +13,6 @@ import '../../schedule/presentation/add_place_map_screen.dart';
 import '../../schedule/presentation/schedule_edit_screen.dart';
 import '../../schedule/presentation/schedule_generating_screen.dart';
 import '../data/trip_models.dart';
-import 'trip_detail_read_only_view.dart';
 import 'trip_list_controller.dart';
 import 'widgets/trip_schedule_map_view.dart';
 
@@ -56,7 +54,6 @@ class _TripDetailScreenState extends ConsumerState<TripDetailScreen> {
   bool _editing = false;
   bool _saving = false;
   bool _deleting = false;
-  bool _redirectedToPlaceSelection = false;
 
   @override
   void initState() {
@@ -84,10 +81,6 @@ class _TripDetailScreenState extends ConsumerState<TripDetailScreen> {
       );
       if (!mounted) return;
       setState(() => _state = _DetailLoaded(trip, schedule));
-      if (!_hasSchedule(schedule) && !_redirectedToPlaceSelection) {
-        _redirectedToPlaceSelection = true;
-        unawaited(_openPlaceSelection(trip.id, trip.startDate, trip.endDate));
-      }
     } on DioException catch (e) {
       if (!mounted) return;
       final error = e.error;
@@ -193,31 +186,6 @@ class _TripDetailScreenState extends ConsumerState<TripDetailScreen> {
     return '${date.year}-$month-$day';
   }
 
-  bool _hasSchedule(SchedulePlan schedule) {
-    return schedule.days.any((day) => day.places.isNotEmpty);
-  }
-
-  Future<void> _openPlaceSelection(
-    String tripId,
-    String startDate,
-    String endDate,
-  ) async {
-    final generated = await Navigator.of(context).push<bool>(
-      MaterialPageRoute(
-        builder: (_) => PlaceSelectionScreen(
-          tripId: tripId,
-          startDate: startDate,
-          endDate: endDate,
-        ),
-      ),
-    );
-    if (!mounted) return;
-    if (generated == true) {
-      _redirectedToPlaceSelection = false;
-      await _load();
-    }
-  }
-
   /// "AI로 스케줄 짜기" — 지금까지 등록된(수동/이전 AI 결과 불문) 장소를 각자
   /// 배정된 날짜 그대로 다시 AI에 넘겨 최적 동선으로 교체한다. custom(직접 입력)
   /// 장소는 placeId가 없어 AI 생성 대상에서 제외한다.
@@ -274,8 +242,7 @@ class _TripDetailScreenState extends ConsumerState<TripDetailScreen> {
   @override
   Widget build(BuildContext context) {
     final state = _state;
-    final showMapView =
-        state is _DetailLoaded && !_editing && _hasSchedule(state.schedule);
+    final showMapView = state is _DetailLoaded && !_editing;
     return Scaffold(
       backgroundColor: Colors.white,
       appBar: AppBar(
@@ -310,10 +277,12 @@ class _TripDetailScreenState extends ConsumerState<TripDetailScreen> {
           ? SafeArea(
               top: false,
               child: TripScheduleMapView(
+                trip: state.trip,
                 schedule: state.schedule,
                 onEditSchedule: () => _openScheduleEdit(state.schedule),
                 onGenerateAi: () => _openAiGenerate(state.trip, state.schedule),
                 onAddPlace: _openAddPlace,
+                onStartRecord: () => _openRecordIntro(state.trip),
               ),
             )
           : SafeArea(child: _buildBody(state)),
@@ -373,16 +342,14 @@ class _TripDetailScreenState extends ConsumerState<TripDetailScreen> {
       );
     }
 
-    // 일정이 있고 편집 중이 아니면 build()가 대신 TripScheduleMapView를 띄운다.
-    final loaded = state as _DetailLoaded;
+    // 로딩 완료 후 편집 중이 아니면 build()가 대신 TripScheduleMapView를 띄우므로,
+    // 여기 도달했다는 건 편집 중이라는 뜻이다.
     return RefreshIndicator(
       onRefresh: _load,
       color: AppColors.ink900,
       child: ListView(
         padding: const EdgeInsets.fromLTRB(22, 14, 22, 120),
-        children: _editing
-            ? _buildEditFields()
-            : _buildReadOnlyFields(loaded.trip),
+        children: _buildEditFields(),
       ),
     );
   }
@@ -451,17 +418,6 @@ class _TripDetailScreenState extends ConsumerState<TripDetailScreen> {
             ),
           ),
         ],
-      ),
-    ];
-  }
-
-  List<Widget> _buildReadOnlyFields(Trip trip) {
-    return [
-      TripDetailReadOnlyView(
-        trip: trip,
-        onSelectPlaces: () =>
-            _openPlaceSelection(trip.id, trip.startDate, trip.endDate),
-        onStartRecord: () => _openRecordIntro(trip),
       ),
     ];
   }
