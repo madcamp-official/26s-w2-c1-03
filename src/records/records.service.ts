@@ -81,6 +81,7 @@ export interface PaginatedRecords {
 }
 
 export interface RecordDetail extends RecordSummary {
+  tripCityName: string;
   photos: RecordPhotoSummary[];
 }
 
@@ -532,14 +533,34 @@ export class RecordsService {
     };
   }
 
-  /** 기록 상세(API 명세서 §5 GET /records/{recordId}) — 사진 목록 포함, 작성자 본인만. */
+  /**
+   * 기록 상세(API 명세서 §5 GET /records/{recordId}) — 사진 목록 포함, 작성자
+   * 본인만. 화면 상단에 여행 이름을 보여주려면 트립 정보가 필요해 trip을 함께
+   * 조인한다(findOwnedRecordById는 트립을 안 가져오므로 여기서만 직접 조회).
+   */
   async getRecordDetail(recordId: string, userId: string): Promise<RecordDetail> {
-    const record = await this.findOwnedRecordById(recordId, userId);
+    const record = await this.travelRecordRepository
+      .createQueryBuilder('record')
+      .innerJoinAndSelect('record.trip', 'trip')
+      .where('record.id = :recordId', { recordId })
+      .andWhere('record.deletedAt IS NULL')
+      .getOne();
+    if (!record) {
+      throw new BusinessException(RecordsErrorCode.RECORD_NOT_FOUND);
+    }
+    if (record.userId !== userId) {
+      throw new BusinessException(RecordsErrorCode.RECORD_FORBIDDEN);
+    }
+
     const photos = await this.recordPhotoRepository.find({
       where: { recordId: record.id },
       order: { orderIndex: 'ASC' },
     });
-    return { ...this.toSummary(record), photos: photos.map((photo) => this.toPhotoSummary(photo)) };
+    return {
+      ...this.toSummary(record),
+      tripCityName: record.trip.cityName,
+      photos: photos.map((photo) => this.toPhotoSummary(photo)),
+    };
   }
 
   /**

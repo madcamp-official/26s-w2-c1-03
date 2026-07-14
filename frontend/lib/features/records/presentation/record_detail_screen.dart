@@ -175,7 +175,10 @@ class _RecordDetailScreenState extends ConsumerState<RecordDetailScreen> {
         backgroundColor: Colors.white,
         elevation: 0,
         leading: const AppBackButton(),
-        title: const Text('기록', style: TextStyle(color: AppColors.ink900, fontWeight: FontWeight.w800)),
+        title: Text(
+          state is _DetailLoaded ? state.record.tripCityName : '기록',
+          style: const TextStyle(color: AppColors.ink900, fontWeight: FontWeight.w800),
+        ),
         iconTheme: const IconThemeData(color: AppColors.ink900),
         actions: [
           if (state is _DetailLoaded)
@@ -293,11 +296,6 @@ class _RecordDetailBody extends StatelessWidget {
           onPressed: addingPhotos ? null : onAddPhotos,
         ),
         const SizedBox(height: 20),
-        Text(
-          record.title?.isNotEmpty == true ? record.title! : '제목 없음',
-          style: const TextStyle(fontSize: 20, fontWeight: FontWeight.w800, color: AppColors.ink900),
-        ),
-        const SizedBox(height: 10),
         Text(
           record.content?.isNotEmpty == true ? record.content! : '아직 작성된 글이 없어요. 오른쪽 위 연필 아이콘으로 글을 써보세요.',
           style: const TextStyle(
