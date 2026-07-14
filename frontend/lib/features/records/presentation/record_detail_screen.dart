@@ -67,6 +67,12 @@ class _RecordDetailScreenState extends ConsumerState<RecordDetailScreen> {
       setState(
         () => _state = _DetailFailed(error is ApiException ? error.message : '네트워크 연결을 확인해주세요.'),
       );
+    } catch (_) {
+      // DioException이 아닌 예외(응답 파싱 실패 등)까지 여기서 잡아야 화면이
+      // 로딩 상태로 영원히 멈추지 않는다 — 실기기에서 실제로 겪었던 문제
+      // (서버가 예상과 다른 응답을 줬을 때 화면이 그대로 멈춤).
+      if (!mounted) return;
+      setState(() => _state = const _DetailFailed('기록을 불러오지 못했어요. 다시 시도해주세요.'));
     }
   }
 
@@ -111,6 +117,10 @@ class _RecordDetailScreenState extends ConsumerState<RecordDetailScreen> {
       ScaffoldMessenger.of(
         context,
       ).showSnackBar(SnackBar(content: Text(error is ApiException ? error.message : '삭제하지 못했어요.')));
+    } catch (_) {
+      if (!mounted) return;
+      setState(() => _deleting = false);
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('삭제하지 못했어요.')));
     }
   }
 
@@ -138,6 +148,12 @@ class _RecordDetailScreenState extends ConsumerState<RecordDetailScreen> {
       ScaffoldMessenger.of(
         context,
       ).showSnackBar(SnackBar(content: Text(error is ApiException ? error.message : '여행 정보를 불러오지 못했어요.')));
+    } catch (_) {
+      if (!mounted) return;
+      setState(() => _openingPicker = false);
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('여행 정보를 불러오지 못했어요.')));
     }
   }
 
@@ -161,6 +177,11 @@ class _RecordDetailScreenState extends ConsumerState<RecordDetailScreen> {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text(error is ApiException ? error.message : '대표사진 설정에 실패했어요.')),
       );
+    } catch (_) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('대표사진 설정에 실패했어요.')));
     } finally {
       if (mounted) setState(() => _togglingCoverPhotoId = null);
     }
