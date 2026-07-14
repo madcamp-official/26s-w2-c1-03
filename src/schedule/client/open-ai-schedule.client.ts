@@ -59,12 +59,52 @@ export interface ScheduleReviseAiRequest {
 export interface ScheduleAiClient {
   requestSchedule(request: ScheduleAiRequest): Promise<ScheduleAiResult>;
   requestRevision(request: ScheduleReviseAiRequest): Promise<ScheduleAiResult>;
+  requestChatTurn(
+    messages: ChatMessageInput[],
+    tools: ChatToolDefinition[],
+  ): Promise<ChatTurnResult>;
 }
 
 export const SCHEDULE_AI_CLIENT = Symbol('SCHEDULE_AI_CLIENT');
 
+/** 챗봇 스케줄 편집(Phase 9 chat) — OpenAI function calling 도구 정의. */
+export interface ChatToolDefinition {
+  name: string;
+  description: string;
+  /** JSON Schema 객체(OpenAI tools[].function.parameters 그대로). */
+  parameters: Record<string, unknown>;
+}
+
+/** AI가 요청한 도구 호출 1건. arguments는 원문 JSON 문자열 — 파싱/실행은 ScheduleService가 한다. */
+export interface ChatToolCall {
+  id: string;
+  name: string;
+  argumentsJson: string;
+}
+
+export type ChatRole = 'system' | 'user' | 'assistant' | 'tool';
+
+export interface ChatMessageInput {
+  role: ChatRole;
+  content: string;
+  /** role='tool'일 때 어느 tool_call에 대한 응답인지 OpenAI가 매칭하는 데 필요. */
+  toolCallId?: string;
+  /** role='assistant'가 도구를 호출했던 턴이면, 다음 요청에도 그 호출 목록을 그대로 되돌려줘야 한다. */
+  toolCalls?: ChatToolCall[];
+}
+
+/** 한 번의 OpenAI 왕복 결과 — 최종 답장이거나, 실행해야 할 도구 호출 목록. */
+export type ChatTurnResult =
+  | { type: 'message'; content: string }
+  | { type: 'tool_calls'; calls: ChatToolCall[] };
+
 interface ChatCompletionResponse {
-  choices?: Array<{ message?: { content?: string } }>;
+  choices?: Array<{
+    message?: {
+      content?: string | null;
+      tool_calls?: Array<{ id: string; function: { name: string; arguments: string } }>;
+    };
+  }>;
 }
 
 /**
@@ -100,6 +140,92 @@ export class OpenAiScheduleClient implements ScheduleAiClient {
       ...request.candidates.map((item) => item.id),
     ]);
     return this.parseResult(content, validIds);
+  }
+
+  /**
+   * 챗봇 스케줄 편집 한 턴 — function calling. AI가 최종 답장을 하면 message,
+   * 도구를 부르고 싶으면 tool_calls를 반환한다. 실행은 하지 않는다(ScheduleService가
+   * 실제 addPlace/removePlace 등을 실행한 뒤 role='tool' 메시지로 결과를 돌려줘야 다음
+   * 턴을 이어갈 수 있다 — OpenAI function calling 프로토콜).
+   */
+  async requestChatTurn(
+    messages: ChatMessageInput[],
+    tools: ChatToolDefinition[],
+  ): Promise<ChatTurnResult> {
+    let response: globalThis.Response;
+    try {
+      response = await fetch(`${this.config.baseUrl}/chat/completions`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${this.config.apiKey}`,
+        },
+        body: JSON.stringify({
+          model: this.config.scheduleModel,
+          temperature: 0.4,
+          messages: this.toWireMessages(messages),
+          tools: this.toWireTools(tools),
+        }),
+      });
+    } catch (error) {
+      this.logger.warn(
+        `OpenAI 채팅 요청 ${isNetworkError(error) ? '네트워크 오류' : '실패'}: ${
+          (error as Error).message
+        }`,
+      );
+      throw new BusinessException(ScheduleErrorCode.OPENAI_REQUEST_FAILED);
+    }
+
+    if (!response.ok) {
+      this.logger.warn(`OpenAI 채팅 요청 실패: status=${response.status}`);
+      throw new BusinessException(ScheduleErrorCode.OPENAI_REQUEST_FAILED);
+    }
+
+    const body = (await response.json()) as ChatCompletionResponse;
+    const message = body.choices?.[0]?.message;
+    if (!message) {
+      this.logger.warn('OpenAI 채팅 응답에 message가 없음');
+      throw new BusinessException(ScheduleErrorCode.OPENAI_REQUEST_FAILED);
+    }
+
+    if (message.tool_calls && message.tool_calls.length > 0) {
+      return {
+        type: 'tool_calls',
+        calls: message.tool_calls.map((call) => ({
+          id: call.id,
+          name: call.function.name,
+          argumentsJson: call.function.arguments,
+        })),
+      };
+    }
+    return { type: 'message', content: message.content ?? '' };
+  }
+
+  private toWireMessages(messages: ChatMessageInput[]): Array<Record<string, unknown>> {
+    return messages.map((message) => {
+      if (message.role === 'tool') {
+        return { role: 'tool', tool_call_id: message.toolCallId, content: message.content };
+      }
+      if (message.role === 'assistant' && message.toolCalls && message.toolCalls.length > 0) {
+        return {
+          role: 'assistant',
+          content: message.content || null,
+          tool_calls: message.toolCalls.map((call) => ({
+            id: call.id,
+            type: 'function',
+            function: { name: call.name, arguments: call.argumentsJson },
+          })),
+        };
+      }
+      return { role: message.role, content: message.content };
+    });
+  }
+
+  private toWireTools(tools: ChatToolDefinition[]): Array<Record<string, unknown>> {
+    return tools.map((tool) => ({
+      type: 'function',
+      function: { name: tool.name, description: tool.description, parameters: tool.parameters },
+    }));
   }
 
   private async callChatCompletion(systemPrompt: string, userPrompt: string): Promise<string> {
