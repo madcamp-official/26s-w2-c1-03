@@ -15,6 +15,7 @@ import '../../schedule/presentation/schedule_generating_screen.dart';
 import '../data/trip_models.dart';
 import 'trip_detail_read_only_view.dart';
 import 'trip_list_controller.dart';
+import 'widgets/trip_schedule_map_view.dart';
 
 sealed class _DetailState {
   const _DetailState();
@@ -259,18 +260,15 @@ class _TripDetailScreenState extends ConsumerState<TripDetailScreen> {
   @override
   Widget build(BuildContext context) {
     final state = _state;
+    final showMapView =
+        state is _DetailLoaded && !_editing && _hasSchedule(state.schedule);
     return Scaffold(
       backgroundColor: Colors.white,
       appBar: AppBar(
         backgroundColor: Colors.white,
         elevation: 0,
-        title: const Text(
-          '여행 상세',
-          style: TextStyle(
-            color: AppColors.ink900,
-            fontWeight: FontWeight.w700,
-          ),
-        ),
+        titleSpacing: 0,
+        title: _buildAppBarTitle(state),
         iconTheme: const IconThemeData(color: AppColors.ink900),
         actions: [
           if (state is _DetailLoaded && !_editing)
@@ -294,7 +292,49 @@ class _TripDetailScreenState extends ConsumerState<TripDetailScreen> {
             ),
         ],
       ),
-      body: SafeArea(child: _buildBody(state)),
+      body: showMapView
+          ? SafeArea(
+              top: false,
+              child: TripScheduleMapView(
+                schedule: state.schedule,
+                onEditSchedule: () => _openScheduleEdit(state.schedule),
+                onGenerateAi: () => _openAiGenerate(state.trip, state.schedule),
+              ),
+            )
+          : SafeArea(child: _buildBody(state)),
+    );
+  }
+
+  Widget _buildAppBarTitle(_DetailState state) {
+    if (state is _DetailLoaded && !_editing) {
+      return Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Text(
+            state.trip.title,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: const TextStyle(
+              fontSize: 17,
+              fontWeight: FontWeight.w800,
+              color: AppColors.ink900,
+            ),
+          ),
+          Text(
+            '${state.trip.startDate} - ${state.trip.endDate}',
+            style: const TextStyle(
+              fontSize: 12,
+              fontWeight: FontWeight.w600,
+              color: AppColors.ink400,
+            ),
+          ),
+        ],
+      );
+    }
+    return const Text(
+      '여행 상세',
+      style: TextStyle(color: AppColors.ink900, fontWeight: FontWeight.w700),
     );
   }
 
@@ -318,6 +358,7 @@ class _TripDetailScreenState extends ConsumerState<TripDetailScreen> {
       );
     }
 
+    // 일정이 있고 편집 중이 아니면 build()가 대신 TripScheduleMapView를 띄운다.
     final loaded = state as _DetailLoaded;
     return RefreshIndicator(
       onRefresh: _load,
@@ -326,7 +367,7 @@ class _TripDetailScreenState extends ConsumerState<TripDetailScreen> {
         padding: const EdgeInsets.fromLTRB(22, 14, 22, 120),
         children: _editing
             ? _buildEditFields()
-            : _buildReadOnlyFields(loaded.trip, loaded.schedule),
+            : _buildReadOnlyFields(loaded.trip),
       ),
     );
   }
@@ -399,16 +440,12 @@ class _TripDetailScreenState extends ConsumerState<TripDetailScreen> {
     ];
   }
 
-  List<Widget> _buildReadOnlyFields(Trip trip, SchedulePlan schedule) {
+  List<Widget> _buildReadOnlyFields(Trip trip) {
     return [
       TripDetailReadOnlyView(
         trip: trip,
-        schedule: schedule,
-        hasSchedule: _hasSchedule(schedule),
         onSelectPlaces: () =>
             _openPlaceSelection(trip.id, trip.startDate, trip.endDate),
-        onEditSchedule: () => _openScheduleEdit(schedule),
-        onGenerateAi: () => _openAiGenerate(trip, schedule),
         onStartRecord: () => _openRecordIntro(trip),
       ),
     ];

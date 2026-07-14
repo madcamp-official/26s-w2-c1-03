@@ -136,8 +136,12 @@ describe('ScheduleService', () => {
     expect(schedule.days[0].places.map((p) => p.startTime)).toEqual(['10:00', '14:00']);
     expect(schedule.days[0].places.map((p) => p.orderInDay)).toEqual([1, 2]);
     expect(schedule.days[1].places.map((p) => p.placeId)).toEqual(['p3']);
-    // 장소 정보(이름/주소)가 DTO에 채워진다.
-    expect(schedule.days[0].places[0]).toMatchObject({ name: 'place-p1', address: '주소-p1' });
+    // 장소 정보(이름/주소/카테고리)가 DTO에 채워진다(지도 마커·배지 색 구분용).
+    expect(schedule.days[0].places[0]).toMatchObject({
+      name: 'place-p1',
+      address: '주소-p1',
+      category: 'attraction',
+    });
   });
 
   it('사용자가 지정한 날짜는 AI가 다른 날에 배치해도 그대로 강제된다', async () => {

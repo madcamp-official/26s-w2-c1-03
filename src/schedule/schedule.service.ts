@@ -2,7 +2,12 @@ import { Inject, Injectable } from '@nestjs/common';
 import { InjectDataSource } from '@nestjs/typeorm';
 import { DataSource } from 'typeorm';
 import { BusinessException } from '../common/exceptions/business-exception';
-import { PlaceCandidateDto, PlacesService, ScheduledPlaceInfo } from '../places/places.service';
+import {
+  PlaceCandidateDto,
+  PlacesService,
+  ScheduledPlaceInfo,
+  SchedulePlaceCategory,
+} from '../places/places.service';
 import { TripMemberRole } from '../trips/entities/trip-member.entity';
 import { TripsService } from '../trips/trips.service';
 import {
@@ -37,6 +42,8 @@ export interface ScheduledTripPlaceDto {
   lng: number | null;
   imageUrl: string | null;
   memo: string | null;
+  /** attraction/restaurant/cafe — 지도 마커·목록 배지 색 구분용. custom 장소(placeId 없음)는 null. */
+  category: SchedulePlaceCategory | null;
 }
 
 export interface ScheduleDayDto {
@@ -1239,6 +1246,7 @@ export class ScheduleService {
       lng: info?.lng ?? null,
       imageUrl: info?.imageUrl ?? null,
       memo: row.memo ?? null,
+      category: info?.category ?? null,
     };
   }
 }

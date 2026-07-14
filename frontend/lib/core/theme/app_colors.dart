@@ -26,4 +26,10 @@ abstract final class AppColors {
   // 상태
   static const danger = Color(0xFFD14343);
   static const dangerBg = Color(0xFFFFF1F1);
+
+  /// 여행 상세 화면 지도 마커·목록 배지 — 장소 카테고리 색 구분(attraction/restaurant/cafe/기타).
+  static const categoryAttraction = Color(0xFF7C6FF0);
+  static const categoryRestaurant = Color(0xFFE0575B);
+  static const categoryCafe = Color(0xFFC9832E);
+  static const categoryDefault = Color(0xFF4C86E0);
 }

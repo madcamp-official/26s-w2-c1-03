@@ -45,6 +45,7 @@ class ScheduledTripPlace {
     required this.lng,
     required this.imageUrl,
     required this.memo,
+    required this.category,
   });
 
   final String id;
@@ -61,6 +62,10 @@ class ScheduledTripPlace {
   final String? imageUrl;
   final String? memo;
 
+  /// 'attraction' | 'restaurant' | 'cafe'. custom(직접 입력) 장소는 null — 지도
+  /// 마커·목록 배지 색 구분에 쓴다.
+  final String? category;
+
   factory ScheduledTripPlace.fromJson(Map<String, dynamic> json) =>
       ScheduledTripPlace(
         id: json['id'] as String,
@@ -74,6 +79,7 @@ class ScheduledTripPlace {
         lng: (json['lng'] as num?)?.toDouble(),
         imageUrl: json['imageUrl'] as String?,
         memo: json['memo'] as String?,
+        category: json['category'] as String?,
       );
 
   ScheduledTripPlace copyWith({int? dayNumber, int? orderInDay}) =>
@@ -89,6 +95,7 @@ class ScheduledTripPlace {
         lng: lng,
         imageUrl: imageUrl,
         memo: memo,
+        category: category,
       );
 }
 
