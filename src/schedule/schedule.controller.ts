@@ -12,6 +12,7 @@ import {
 } from '@nestjs/common';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { AuthenticatedUser, CurrentUser } from '../common/decorators/current-user.decorator';
+import { ChatScheduleDto } from './dto/chat-schedule.dto';
 import {
   AddSchedulePlaceDto,
   ReorderScheduleDto,
@@ -86,6 +87,15 @@ export class ScheduleController {
     @Body() dto: ApplyScheduleDto,
   ) {
     return this.scheduleService.applyRevision(tripId, user.userId, dto);
+  }
+
+  @Post('chat')
+  chat(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param('tripId') tripId: string,
+    @Body() dto: ChatScheduleDto,
+  ) {
+    return this.scheduleService.chat(tripId, user.userId, dto);
   }
 
   @Patch('reorder')

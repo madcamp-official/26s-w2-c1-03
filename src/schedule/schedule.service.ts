@@ -2,14 +2,18 @@ import { Inject, Injectable } from '@nestjs/common';
 import { InjectDataSource } from '@nestjs/typeorm';
 import { DataSource } from 'typeorm';
 import { BusinessException } from '../common/exceptions/business-exception';
-import { PlacesService, ScheduledPlaceInfo } from '../places/places.service';
+import { PlaceCandidateDto, PlacesService, ScheduledPlaceInfo } from '../places/places.service';
 import { TripMemberRole } from '../trips/entities/trip-member.entity';
 import { TripsService } from '../trips/trips.service';
 import {
+  ChatMessageInput,
+  ChatToolCall,
+  ChatToolDefinition,
   SCHEDULE_AI_CLIENT,
   ScheduleAiClient,
   ScheduleAiResult,
 } from './client/open-ai-schedule.client';
+import { ChatScheduleDto } from './dto/chat-schedule.dto';
 import {
   AddSchedulePlaceDto,
   ReorderScheduleDto,
@@ -89,6 +93,62 @@ const LUNCH_TIME = '12:00';
 const DINNER_TIME = '18:00';
 /** 이 시각 전에 배치된 식당은 점심으로 간주한다(이후면 저녁). */
 const LUNCH_DINNER_BOUNDARY = '15:00';
+
+/** 챗봇 한 요청당 최대 도구 호출 왕복 횟수(무한루프 방지). */
+const MAX_CHAT_TURNS = 5;
+
+/** 챗봇 스케줄 편집(Phase 9)이 AI에 제공하는 도구 — 실제 실행은 executeTool이 한다. */
+const CHAT_TOOLS: ChatToolDefinition[] = [
+  {
+    name: 'search_places',
+    description:
+      '이름/키워드로 장소를 검색한다. 장소를 추가하기 전에는 항상 이 도구로 먼저 후보를 찾아야 한다.',
+    parameters: {
+      type: 'object',
+      properties: {
+        keyword: { type: 'string', description: '검색할 장소 이름이나 키워드' },
+      },
+      required: ['keyword'],
+    },
+  },
+  {
+    name: 'add_place',
+    description:
+      'search_places로 찾은 장소를 특정 날짜에 추가한다. placeId를 채우면 그 검색 결과를 추가하고, ' +
+      '사용자가 검색으로 찾을 수 없는 장소를 직접 말한 경우에만 placeId 없이 customName으로 추가한다.',
+    parameters: {
+      type: 'object',
+      properties: {
+        placeId: { type: 'string', description: 'search_places 결과의 id' },
+        customName: { type: 'string', description: 'placeId가 없을 때만: 장소 이름 그대로' },
+        dayNumber: { type: 'integer', description: '추가할 날짜(1부터 시작)' },
+      },
+      required: ['dayNumber'],
+    },
+  },
+  {
+    name: 'remove_place',
+    description: '현재 일정에서 tripPlaceId로 지정된 장소를 제거한다.',
+    parameters: {
+      type: 'object',
+      properties: { tripPlaceId: { type: 'string', description: '제거할 일정 항목의 id' } },
+      required: ['tripPlaceId'],
+    },
+  },
+  {
+    name: 'move_place',
+    description: '현재 일정에 있는 장소를 다른 날짜/순서로 옮긴다.',
+    parameters: {
+      type: 'object',
+      properties: {
+        tripPlaceId: { type: 'string', description: '옮길 일정 항목의 id' },
+        dayNumber: { type: 'integer', description: '옮길 날짜(1부터 시작)' },
+        orderInDay: { type: 'integer', description: '그 날짜 안에서의 순서(1부터 시작)' },
+      },
+      required: ['tripPlaceId', 'dayNumber', 'orderInDay'],
+    },
+  },
+];
 
 @Injectable()
 export class ScheduleService {
@@ -582,6 +642,274 @@ export class ScheduleService {
       lng: info.lng,
       imageUrl: info.imageUrl,
     };
+  }
+
+  /**
+   * 챗봇 스케줄 편집(Phase 9) — 자연어 대화에서 AI가 도구(search_places/add_place/
+   * remove_place/move_place)를 호출하면 그 자리에서 실제로 실행하고 답장을 만든다.
+   * 대화는 세션(프론트) 한정이라 서버는 무상태이며, 매 호출마다 프론트가 전체
+   * user/assistant 히스토리를 보낸다 — system/tool 메시지는 이 요청 안에서만 쓰고
+   * 저장하지 않는다. 실행된 변경은 즉시 반영되며(트랜잭션은 각 도구 실행 내부에서
+   * 처리), 되돌리기는 프론트가 이전 스냅샷으로 전체 교체(applyRevision)해 구현한다.
+   */
+  async chat(
+    tripId: string,
+    userId: string,
+    dto: ChatScheduleDto,
+  ): Promise<{ reply: string; schedule: ScheduleView; changed: boolean }> {
+    const trip = await this.assertEditor(tripId, userId);
+    const durationDays = this.computeDurationDays(trip.startDate, trip.endDate);
+
+    const history: ChatMessageInput[] = [
+      { role: 'system', content: await this.buildChatSystemPrompt(tripId, userId, durationDays) },
+      ...dto.messages.map((m) => ({ role: m.role, content: m.content }) as ChatMessageInput),
+    ];
+
+    let changed = false;
+    let finalReply: string | null = null;
+    for (let turn = 0; turn < MAX_CHAT_TURNS && finalReply === null; turn++) {
+      const result = await this.scheduleAiClient.requestChatTurn(history, CHAT_TOOLS);
+      if (result.type === 'message') {
+        finalReply = result.content;
+        break;
+      }
+      history.push({ role: 'assistant', content: '', toolCalls: result.calls });
+      for (const call of result.calls) {
+        const executed = await this.executeTool(tripId, userId, call, durationDays);
+        if (executed.changed) {
+          changed = true;
+        }
+        history.push({ role: 'tool', toolCallId: call.id, content: executed.content });
+      }
+    }
+    // 도구 호출만 반복하다 왕복 한도(MAX_CHAT_TURNS)에 닿아도 사용자에게는 답을 줘야 한다.
+    finalReply ??= '요청하신 작업을 처리했어요. 최신 일정을 확인해주세요.';
+
+    const { schedule } = await this.getSchedule(tripId, userId);
+
+    const lastUserMessage = [...dto.messages].reverse().find((m) => m.role === 'user')?.content;
+    const requestRepo = this.dataSource.getRepository(AiPlanRequest);
+    await requestRepo.save(
+      requestRepo.create({
+        tripId,
+        requestedBy: userId,
+        promptText: lastUserMessage ?? '',
+        responseSummary: finalReply.slice(0, 500),
+      }),
+    );
+
+    return { reply: finalReply, schedule, changed };
+  }
+
+  /** AI가 tripPlaceId로 참조할 수 있도록 현재 일정을 id 포함 목록으로 시스템 프롬프트에 넣는다. */
+  private async buildChatSystemPrompt(
+    tripId: string,
+    userId: string,
+    durationDays: number,
+  ): Promise<string> {
+    const { schedule } = await this.getSchedule(tripId, userId);
+    const lines: string[] = [];
+    for (const day of [...schedule.days].sort((a, b) => a.dayNumber - b.dayNumber)) {
+      lines.push(`Day ${day.dayNumber}:`);
+      for (const place of [...day.places].sort((a, b) => a.orderInDay - b.orderInDay)) {
+        lines.push(
+          `- tripPlaceId=${place.id} | ${place.startTime ?? '시간미정'} | ${place.name}` +
+            (place.address ? ` | ${place.address}` : ''),
+        );
+      }
+    }
+    if (lines.length === 0) {
+      lines.push('(아직 일정에 장소가 없음)');
+    }
+
+    return [
+      '당신은 여행 일정을 채팅으로 편집해주는 도우미다. 사용자의 자연어 요청을 이해해 필요한 도구를 호출해 실제로 일정을 바꾸고, 무엇을 했는지 친근한 채팅 말투로 답한다.',
+      `이 여행은 총 ${durationDays}일이다. 각 날짜는 1부터 ${durationDays}까지의 dayNumber로 부른다.`,
+      '',
+      '현재 일정(각 항목의 tripPlaceId는 remove_place/move_place에 쓴다):',
+      ...lines,
+      '',
+      '행동 규칙:',
+      'A) 장소를 추가하기 전에는 사용자가 이미 구체적인 이름을 말했더라도 반드시 search_places로 먼저 후보를 찾는다.',
+      'B) search_places 결과에 needsClarification=true가 있으면, 이름이 비슷한 후보들이 같은 지역에 여러 곳 있다는 뜻이다 — 이번 턴에는 add_place를 호출하지 말고 후보 목록을 사용자에게 보여주며 어느 곳인지 물어본다.',
+      'C) needsClarification이 없으면 되묻지 말고 가장 관련성 높은 후보 하나를 스스로 골라 add_place를 바로 호출한다.',
+      'D) search_places로 전혀 찾지 못했는데 사용자가 이름을 명확히 지정했다면, customName으로 직접 추가할 수 있다.',
+      'E) 도구 실행 결과에 error가 있으면 원인을 사용자에게 알기 쉽게 설명하고, 필요하면 다시 시도한다.',
+      'F) 한 번의 답장에서 여러 도구를 순서대로 호출해도 된다. 모든 변경이 끝나면 마지막에 무엇을 했는지 요약해 답한다.',
+    ].join('\n');
+  }
+
+  /** 도구 호출 1건을 실제로 실행하고, AI에게 돌려줄 role='tool' 메시지 content(JSON)를 만든다. */
+  private async executeTool(
+    tripId: string,
+    userId: string,
+    call: ChatToolCall,
+    durationDays: number,
+  ): Promise<{ content: string; changed: boolean }> {
+    let args: Record<string, unknown>;
+    try {
+      args = call.argumentsJson ? JSON.parse(call.argumentsJson) : {};
+    } catch {
+      return { content: JSON.stringify({ error: '요청 형식이 올바르지 않습니다.' }), changed: false };
+    }
+
+    try {
+      switch (call.name) {
+        case 'search_places':
+          return await this.executeSearchPlaces(tripId, userId, args);
+        case 'add_place':
+          return await this.executeAddPlace(tripId, userId, args, durationDays);
+        case 'remove_place':
+          return await this.executeRemovePlace(tripId, userId, args);
+        case 'move_place':
+          return await this.executeMovePlace(tripId, userId, args, durationDays);
+        default:
+          return { content: JSON.stringify({ error: `알 수 없는 도구: ${call.name}` }), changed: false };
+      }
+    } catch (error) {
+      const message = error instanceof BusinessException ? error.message : '처리 중 오류가 발생했습니다.';
+      return { content: JSON.stringify({ error: message }), changed: false };
+    }
+  }
+
+  private async executeSearchPlaces(
+    tripId: string,
+    userId: string,
+    args: Record<string, unknown>,
+  ): Promise<{ content: string; changed: boolean }> {
+    const keyword = typeof args.keyword === 'string' ? args.keyword.trim() : '';
+    if (!keyword) {
+      return { content: JSON.stringify({ error: 'keyword가 비어 있습니다.' }), changed: false };
+    }
+    const { candidates } = await this.placesService.searchCandidates(tripId, userId, keyword);
+    const top = candidates.slice(0, 8);
+    return {
+      content: JSON.stringify({
+        candidates: top.map((c) => ({ id: c.id, name: c.name, address: c.address })),
+        needsClarification: this.hasAmbiguousCandidates(top),
+      }),
+      changed: false,
+    };
+  }
+
+  private async executeAddPlace(
+    tripId: string,
+    userId: string,
+    args: Record<string, unknown>,
+    durationDays: number,
+  ): Promise<{ content: string; changed: boolean }> {
+    const dayNumber = Number(args.dayNumber);
+    if (!Number.isInteger(dayNumber) || dayNumber < 1 || dayNumber > durationDays) {
+      return {
+        content: JSON.stringify({ error: `dayNumber는 1~${durationDays} 사이여야 합니다.` }),
+        changed: false,
+      };
+    }
+    const placeId = typeof args.placeId === 'string' && args.placeId ? args.placeId : undefined;
+    const customName =
+      typeof args.customName === 'string' && args.customName ? args.customName : undefined;
+    if ((placeId !== undefined) === (customName !== undefined)) {
+      return {
+        content: JSON.stringify({ error: 'placeId 또는 customName 중 정확히 하나가 필요합니다.' }),
+        changed: false,
+      };
+    }
+
+    const { tripPlace } = await this.addPlace(tripId, userId, {
+      placeId,
+      customName,
+      dayNumber,
+    } as AddSchedulePlaceDto);
+    return {
+      content: JSON.stringify({
+        added: { tripPlaceId: tripPlace.id, name: tripPlace.name, dayNumber: tripPlace.dayNumber },
+      }),
+      changed: true,
+    };
+  }
+
+  private async executeRemovePlace(
+    tripId: string,
+    userId: string,
+    args: Record<string, unknown>,
+  ): Promise<{ content: string; changed: boolean }> {
+    const tripPlaceId = typeof args.tripPlaceId === 'string' ? args.tripPlaceId : '';
+    if (!tripPlaceId) {
+      return { content: JSON.stringify({ error: 'tripPlaceId가 필요합니다.' }), changed: false };
+    }
+    await this.removePlace(tripId, userId, tripPlaceId);
+    return { content: JSON.stringify({ removed: tripPlaceId }), changed: true };
+  }
+
+  private async executeMovePlace(
+    tripId: string,
+    userId: string,
+    args: Record<string, unknown>,
+    durationDays: number,
+  ): Promise<{ content: string; changed: boolean }> {
+    const tripPlaceId = typeof args.tripPlaceId === 'string' ? args.tripPlaceId : '';
+    const dayNumber = Number(args.dayNumber);
+    const orderInDay = Number(args.orderInDay);
+    if (!tripPlaceId) {
+      return { content: JSON.stringify({ error: 'tripPlaceId가 필요합니다.' }), changed: false };
+    }
+    if (!Number.isInteger(dayNumber) || dayNumber < 1 || dayNumber > durationDays) {
+      return {
+        content: JSON.stringify({ error: `dayNumber는 1~${durationDays} 사이여야 합니다.` }),
+        changed: false,
+      };
+    }
+    if (!Number.isInteger(orderInDay) || orderInDay < 1) {
+      return { content: JSON.stringify({ error: 'orderInDay는 1 이상의 정수여야 합니다.' }), changed: false };
+    }
+    const { tripPlace } = await this.updatePlace(tripId, userId, tripPlaceId, {
+      dayNumber,
+      orderInDay,
+    });
+    return {
+      content: JSON.stringify({
+        moved: { tripPlaceId: tripPlace.id, dayNumber: tripPlace.dayNumber, orderInDay: tripPlace.orderInDay },
+      }),
+      changed: true,
+    };
+  }
+
+  /**
+   * 검색 결과 중 "같은 지역 + 비슷한 이름"이 2개 이상이면 모호하다고 본다 — 이때만
+   * AI가 사용자에게 되물어야 한다(요청 A안). 그 외에는 AI가 알아서 최선의 후보를
+   * 골라 바로 추가한다. PlaceCandidateDto엔 지역코드가 없어 주소 앞부분을 지역 신호로
+   * 대신 쓴다(예: "제주특별자치도 제주시").
+   */
+  private hasAmbiguousCandidates(candidates: PlaceCandidateDto[]): boolean {
+    for (let i = 0; i < candidates.length; i++) {
+      for (let j = i + 1; j < candidates.length; j++) {
+        const regionA = this.regionKeyOf(candidates[i].address);
+        const regionB = this.regionKeyOf(candidates[j].address);
+        if (regionA && regionA === regionB && this.areNamesSimilar(candidates[i].name, candidates[j].name)) {
+          return true;
+        }
+      }
+    }
+    return false;
+  }
+
+  private regionKeyOf(address: string | null): string {
+    if (!address) {
+      return '';
+    }
+    return address.trim().split(/\s+/).slice(0, 2).join(' ');
+  }
+
+  private areNamesSimilar(a: string, b: string): boolean {
+    const na = a.replace(/\s+/g, '').toLowerCase();
+    const nb = b.replace(/\s+/g, '').toLowerCase();
+    if (!na || !nb) {
+      return false;
+    }
+    if (na === nb) {
+      return true;
+    }
+    return (na.includes(nb) || nb.includes(na)) && Math.abs(na.length - nb.length) <= 3;
   }
 
   /** API 명세서 §2.5 GET /trips/{tripId}/ai-requests — AI 생성/수정 요청 이력(최신순). */
