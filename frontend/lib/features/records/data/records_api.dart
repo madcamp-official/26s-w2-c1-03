@@ -130,4 +130,17 @@ class RecordsApi {
       },
     );
   }
+
+  /// API 명세서 §2.6 PUT /trips/{tripId}/cover — recordPhotoId는 요청자 본인이
+  /// 작성한 기록의 사진이어야 한다(아니면 403).
+  Future<void> setTripCover(String tripId, String recordPhotoId) {
+    return _apiClient.dio.put<void>(
+      '/trips/$tripId/cover',
+      data: {'recordPhotoId': recordPhotoId},
+    );
+  }
+
+  Future<void> clearTripCover(String tripId) {
+    return _apiClient.dio.delete<void>('/trips/$tripId/cover');
+  }
 }

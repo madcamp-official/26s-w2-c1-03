@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../core/network/api_exception.dart';
 import '../../../core/theme/app_colors.dart';
+import '../data/record_photo_models.dart';
 import '../data/record_summary_models.dart';
 import 'record_upload_screen.dart' show recordsApiProvider;
 import 'record_write_screen.dart';
@@ -41,6 +42,7 @@ class RecordDetailScreen extends ConsumerStatefulWidget {
 class _RecordDetailScreenState extends ConsumerState<RecordDetailScreen> {
   _DetailState _state = const _DetailLoading();
   bool _deleting = false;
+  String? _togglingCoverPhotoId;
 
   @override
   void initState() {
@@ -107,6 +109,31 @@ class _RecordDetailScreenState extends ConsumerState<RecordDetailScreen> {
     }
   }
 
+  /// 여행 대표사진 지정/해제(API 명세서 §2.6 PUT/DELETE /trips/{tripId}/cover).
+  /// 이미 대표사진인 걸 다시 누르면 해제, 아니면 지정 — 트립당 대표사진은
+  /// 하나뿐이라 새로 지정하면 서버가 기존 것을 알아서 덮어쓴다.
+  Future<void> _toggleCover(RecordDetail record, RecordPhoto photo) async {
+    setState(() => _togglingCoverPhotoId = photo.id);
+    try {
+      final api = ref.read(recordsApiProvider);
+      if (photo.isCover) {
+        await api.clearTripCover(record.tripId);
+      } else {
+        await api.setTripCover(record.tripId, photo.id);
+      }
+      if (!mounted) return;
+      await _load();
+    } on DioException catch (e) {
+      if (!mounted) return;
+      final error = e.error;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(error is ApiException ? error.message : '대표사진 설정에 실패했어요.')),
+      );
+    } finally {
+      if (mounted) setState(() => _togglingCoverPhotoId = null);
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final state = _state;
@@ -156,21 +183,37 @@ class _RecordDetailScreenState extends ConsumerState<RecordDetailScreen> {
           ),
         ),
       ),
-      _DetailLoaded(:final record) => _RecordDetailBody(record: record),
+      _DetailLoaded(:final record) => _RecordDetailBody(
+        record: record,
+        togglingCoverPhotoId: _togglingCoverPhotoId,
+        onToggleCover: (photo) => _toggleCover(record, photo),
+      ),
     };
   }
 }
 
 class _RecordDetailBody extends StatelessWidget {
-  const _RecordDetailBody({required this.record});
+  const _RecordDetailBody({
+    required this.record,
+    required this.togglingCoverPhotoId,
+    required this.onToggleCover,
+  });
+
   final RecordDetail record;
+  final String? togglingCoverPhotoId;
+  final ValueChanged<RecordPhoto> onToggleCover;
 
   @override
   Widget build(BuildContext context) {
     return ListView(
       padding: const EdgeInsets.fromLTRB(20, 8, 20, 40),
       children: [
-        if (record.photos.isNotEmpty)
+        if (record.photos.isNotEmpty) ...[
+          const Text(
+            '사진을 눌러 여행 대표사진으로 지정할 수 있어요',
+            style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: AppColors.ink400),
+          ),
+          const SizedBox(height: 10),
           GridView.builder(
             shrinkWrap: true,
             physics: const NeverScrollableScrollPhysics(),
@@ -182,18 +225,14 @@ class _RecordDetailBody extends StatelessWidget {
             itemCount: record.photos.length,
             itemBuilder: (context, index) {
               final photo = record.photos[index];
-              return ClipRRect(
-                borderRadius: BorderRadius.circular(10),
-                child: Image.network(
-                  photo.storageUrl,
-                  fit: BoxFit.cover,
-                  errorBuilder: (context, error, stackTrace) =>
-                      Container(color: AppColors.surfaceSubtle),
-                ),
+              return _CoverablePhotoTile(
+                photo: photo,
+                toggling: togglingCoverPhotoId == photo.id,
+                onTap: () => onToggleCover(photo),
               );
             },
-          )
-        else
+          ),
+        ] else
           Container(
             padding: const EdgeInsets.all(20),
             decoration: BoxDecoration(
@@ -222,6 +261,57 @@ class _RecordDetailBody extends StatelessWidget {
           ),
         ),
       ],
+    );
+  }
+}
+
+class _CoverablePhotoTile extends StatelessWidget {
+  const _CoverablePhotoTile({required this.photo, required this.toggling, required this.onTap});
+
+  final RecordPhoto photo;
+  final bool toggling;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      onTap: toggling ? null : onTap,
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(10),
+        child: Stack(
+          fit: StackFit.expand,
+          children: [
+            Image.network(
+              photo.storageUrl,
+              fit: BoxFit.cover,
+              errorBuilder: (context, error, stackTrace) => Container(color: AppColors.surfaceSubtle),
+            ),
+            if (photo.isCover)
+              Container(
+                decoration: BoxDecoration(border: Border.all(color: AppColors.lime, width: 3)),
+              ),
+            Positioned(
+              top: 4,
+              right: 4,
+              child: Container(
+                padding: const EdgeInsets.all(4),
+                decoration: const BoxDecoration(color: Color(0x99000000), shape: BoxShape.circle),
+                child: toggling
+                    ? const SizedBox(
+                        width: 12,
+                        height: 12,
+                        child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
+                      )
+                    : Icon(
+                        photo.isCover ? Icons.star : Icons.star_border,
+                        color: photo.isCover ? AppColors.lime : Colors.white,
+                        size: 16,
+                      ),
+              ),
+            ),
+          ],
+        ),
+      ),
     );
   }
 }
