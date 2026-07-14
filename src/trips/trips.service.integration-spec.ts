@@ -1,8 +1,10 @@
 import 'reflect-metadata';
+import { ConfigService } from '@nestjs/config';
 import { DataSource } from 'typeorm';
 import { buildDataSourceOptions } from '../config/database.config';
 import { User } from '../users/entities/user.entity';
 import { Trip, TripStatus } from './entities/trip.entity';
+import { TripInviteLink } from './entities/trip-invite-link.entity';
 import { TripMember } from './entities/trip-member.entity';
 import { TripsService } from './trips.service';
 
@@ -27,7 +29,9 @@ describeIfDb('TripsService (Phase 6, 실DB)', () => {
     service = new TripsService(
       dataSource.getRepository(Trip),
       dataSource.getRepository(TripMember),
+      dataSource.getRepository(TripInviteLink),
       dataSource,
+      new ConfigService(),
     );
   });
 

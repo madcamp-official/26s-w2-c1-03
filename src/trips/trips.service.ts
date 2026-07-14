@@ -1,14 +1,18 @@
 import { Injectable } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import { InjectDataSource, InjectRepository } from '@nestjs/typeorm';
 import { DataSource, IsNull, Repository } from 'typeorm';
 import { BusinessException } from '../common/exceptions/business-exception';
 import { CommonErrorCode } from '../common/exceptions/error-code';
+import { CreateInviteLinkDto } from './dto/create-invite-link.dto';
 import { CreateTripDto } from './dto/create-trip.dto';
 import { ListTripsQueryDto } from './dto/list-trips-query.dto';
 import { UpdateTripDto } from './dto/update-trip.dto';
+import { TripInviteLink } from './entities/trip-invite-link.entity';
 import { TripMember, TripMemberRole } from './entities/trip-member.entity';
 import { Trip } from './entities/trip.entity';
 import { TripsErrorCode } from './exceptions/trips-error-code';
+import { generateInviteToken } from './util/invite-token';
 
 export interface TripSummary {
   id: string;
@@ -30,6 +34,22 @@ export interface PaginatedTrips {
   nextCursor: string | null;
 }
 
+/** API 명세서 §3.1 POST invite-links 응답: { token, url, expiresAt }. */
+export interface InviteLinkView {
+  token: string;
+  url: string;
+  expiresAt: string | null;
+}
+
+/** API 명세서 §3.1 GET members 응답의 member 항목. */
+export interface TripMemberView {
+  userId: string;
+  nickname: string;
+  profileImageUrl: string | null;
+  role: TripMemberRole;
+  joinedAt: Date;
+}
+
 interface DecodedCursor {
   createdAt: string;
   id: string;
@@ -42,7 +62,10 @@ export class TripsService {
   constructor(
     @InjectRepository(Trip) private readonly tripRepository: Repository<Trip>,
     @InjectRepository(TripMember) private readonly tripMemberRepository: Repository<TripMember>,
+    @InjectRepository(TripInviteLink)
+    private readonly inviteLinkRepository: Repository<TripInviteLink>,
     @InjectDataSource() private readonly dataSource: DataSource,
+    private readonly configService: ConfigService,
   ) {}
 
   async create(ownerId: string, dto: CreateTripDto): Promise<TripSummary> {
@@ -165,6 +188,155 @@ export class TripsService {
    */
   async setCoverImage(tripId: string, coverImageUrl: string | null): Promise<void> {
     await this.tripRepository.update({ id: tripId }, { coverImageUrl });
+  }
+
+  // ── Phase 10: 초대 링크 ─────────────────────────────────────────────
+
+  /** API 명세서 §3.1: 생성 권한은 owner/editor. expiresInHours 생략 시 무기한. */
+  async createInviteLink(
+    tripId: string,
+    userId: string,
+    dto: CreateInviteLinkDto,
+  ): Promise<InviteLinkView> {
+    await this.findActiveTrip(tripId);
+    await this.assertMember(tripId, userId, [TripMemberRole.OWNER, TripMemberRole.EDITOR]);
+
+    const expiresAt = dto.expiresInHours
+      ? new Date(Date.now() + dto.expiresInHours * 60 * 60 * 1000)
+      : null;
+    const link = await this.inviteLinkRepository.save(
+      this.inviteLinkRepository.create({
+        tripId,
+        token: generateInviteToken(),
+        createdBy: userId,
+        expiresAt,
+      }),
+    );
+    return this.toInviteLinkView(link);
+  }
+
+  /**
+   * API 명세서 §3.1: 만료 토큰 거부, 기본 role=editor, 이미 멤버면 멱등(재-insert
+   * 없이 성공 응답). 삭제된 여행의 링크는 TRIP_NOT_FOUND로 처리한다.
+   */
+  async joinByToken(token: string, userId: string): Promise<{ tripId: string }> {
+    const link = await this.inviteLinkRepository.findOneBy({ token });
+    if (!link) {
+      throw new BusinessException(TripsErrorCode.INVITE_LINK_NOT_FOUND);
+    }
+    if (link.expiresAt && link.expiresAt.getTime() < Date.now()) {
+      throw new BusinessException(TripsErrorCode.INVITE_LINK_EXPIRED);
+    }
+    await this.findActiveTrip(link.tripId);
+
+    const existing = await this.tripMemberRepository.findOneBy({ tripId: link.tripId, userId });
+    if (!existing) {
+      await this.tripMemberRepository.save(
+        this.tripMemberRepository.create({
+          tripId: link.tripId,
+          userId,
+          role: TripMemberRole.EDITOR,
+        }),
+      );
+    }
+    return { tripId: link.tripId };
+  }
+
+  // ── Phase 10: 멤버 관리 ─────────────────────────────────────────────
+
+  /** 참여자 목록 — viewer 포함 모든 멤버가 조회 가능. */
+  async listMembers(tripId: string, userId: string): Promise<{ items: TripMemberView[] }> {
+    await this.findActiveTrip(tripId);
+    await this.assertMember(tripId, userId);
+
+    const members = await this.tripMemberRepository.find({
+      where: { tripId },
+      relations: { user: true },
+      order: { joinedAt: 'ASC' },
+    });
+    return { items: members.map((member) => this.toMemberView(member)) };
+  }
+
+  /** 역할 변경 — owner만. 마지막 owner의 강등은 LAST_OWNER_CANNOT_LEAVE로 차단. */
+  async updateMemberRole(
+    tripId: string,
+    actorUserId: string,
+    targetUserId: string,
+    role: TripMemberRole,
+  ): Promise<TripMemberView> {
+    await this.findActiveTrip(tripId);
+    await this.assertMember(tripId, actorUserId, [TripMemberRole.OWNER]);
+
+    const target = await this.tripMemberRepository.findOne({
+      where: { tripId, userId: targetUserId },
+      relations: { user: true },
+    });
+    if (!target) {
+      throw new BusinessException(TripsErrorCode.MEMBER_NOT_FOUND);
+    }
+    if (target.role === TripMemberRole.OWNER && role !== TripMemberRole.OWNER) {
+      await this.assertNotLastOwner(tripId);
+    }
+
+    target.role = role;
+    const saved = await this.tripMemberRepository.save(target);
+    return this.toMemberView(saved);
+  }
+
+  /** 멤버 내보내기 — owner만. 마지막 owner(자기 자신 포함)는 내보낼 수 없다. */
+  async removeMember(tripId: string, actorUserId: string, targetUserId: string): Promise<void> {
+    await this.findActiveTrip(tripId);
+    await this.assertMember(tripId, actorUserId, [TripMemberRole.OWNER]);
+
+    const target = await this.tripMemberRepository.findOneBy({ tripId, userId: targetUserId });
+    if (!target) {
+      throw new BusinessException(TripsErrorCode.MEMBER_NOT_FOUND);
+    }
+    if (target.role === TripMemberRole.OWNER) {
+      await this.assertNotLastOwner(tripId);
+    }
+    await this.tripMemberRepository.delete({ id: target.id });
+  }
+
+  /** 자진 탈퇴 — 마지막 owner는 나갈 수 없다(여행 삭제로 유도). */
+  async leaveTrip(tripId: string, userId: string): Promise<void> {
+    await this.findActiveTrip(tripId);
+    const member = await this.assertMember(tripId, userId);
+
+    if (member.role === TripMemberRole.OWNER) {
+      await this.assertNotLastOwner(tripId);
+    }
+    await this.tripMemberRepository.delete({ id: member.id });
+  }
+
+  /** owner가 1명뿐이면 강등/추방/탈퇴를 막는다(여행이 주인 없는 상태가 되는 것 방지). */
+  private async assertNotLastOwner(tripId: string): Promise<void> {
+    const ownerCount = await this.tripMemberRepository.countBy({
+      tripId,
+      role: TripMemberRole.OWNER,
+    });
+    if (ownerCount <= 1) {
+      throw new BusinessException(TripsErrorCode.LAST_OWNER_CANNOT_LEAVE);
+    }
+  }
+
+  private toInviteLinkView(link: TripInviteLink): InviteLinkView {
+    const baseUrl = this.configService.get<string>('INVITE_LINK_BASE_URL', 'tripandend://join');
+    return {
+      token: link.token,
+      url: `${baseUrl}?token=${link.token}`,
+      expiresAt: link.expiresAt ? link.expiresAt.toISOString() : null,
+    };
+  }
+
+  private toMemberView(member: TripMember): TripMemberView {
+    return {
+      userId: member.userId,
+      nickname: member.user?.nickname ?? '',
+      profileImageUrl: member.user?.profileImageUrl ?? null,
+      role: member.role,
+      joinedAt: member.joinedAt,
+    };
   }
 
   private async findActiveTrip(tripId: string): Promise<Trip> {

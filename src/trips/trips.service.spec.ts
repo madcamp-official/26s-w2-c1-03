@@ -41,18 +41,24 @@ function buildTrip(overrides: Partial<Trip> = {}): Trip {
 describe('TripsService', () => {
   let tripRepository: RepoMock<Trip>;
   let tripMemberRepository: RepoMock<TripMember>;
+  let inviteLinkRepository: RepoMock<import('./entities/trip-invite-link.entity').TripInviteLink>;
   let dataSource: { transaction: jest.Mock };
+  let configService: { get: jest.Mock };
   let service: TripsService;
 
   beforeEach(() => {
     tripRepository = createRepositoryMock<Trip>();
     tripMemberRepository = createRepositoryMock<TripMember>();
+    inviteLinkRepository = createRepositoryMock();
     dataSource = { transaction: jest.fn() };
+    configService = { get: jest.fn((_key, defaultValue) => defaultValue) };
 
     service = new TripsService(
       tripRepository as never,
       tripMemberRepository as never,
+      inviteLinkRepository as never,
       dataSource as unknown as DataSource,
+      configService as never,
     );
   });
 

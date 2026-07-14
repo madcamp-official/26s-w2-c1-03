@@ -27,6 +27,10 @@ export const envValidationSchema = Joi.object({
   // 전체 origin 허용(로컬 개발 편의), 배포 전엔 실제 프론트 origin으로 채울 것.
   CORS_ORIGIN: Joi.string().optional(),
 
+  // Phase 10(공동 편집) — 초대 링크 url 조립용 base. 딥링크 스킴이 기본값이며,
+  // 웹 랜딩 페이지를 만들면 https URL로 교체한다. 토큰은 `?token=` 쿼리로 붙는다.
+  INVITE_LINK_BASE_URL: Joi.string().default('tripandend://join'),
+
   // Phase 7(Place 후보 추천) — TourAPI(국내 전용, §areaCode2 확인 완료)
   TOUR_API_SERVICE_KEY: Joi.string().required(),
   TOUR_API_BASE_URL: Joi.string().uri().required(),
