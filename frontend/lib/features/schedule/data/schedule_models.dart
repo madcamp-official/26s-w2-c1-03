@@ -75,4 +75,19 @@ class ScheduledTripPlace {
         imageUrl: json['imageUrl'] as String?,
         memo: json['memo'] as String?,
       );
+
+  ScheduledTripPlace copyWith({int? dayNumber, int? orderInDay}) =>
+      ScheduledTripPlace(
+        id: id,
+        placeId: placeId,
+        dayNumber: dayNumber ?? this.dayNumber,
+        orderInDay: orderInDay ?? this.orderInDay,
+        startTime: startTime,
+        name: name,
+        address: address,
+        lat: lat,
+        lng: lng,
+        imageUrl: imageUrl,
+        memo: memo,
+      );
 }

@@ -76,6 +76,51 @@ class _ScheduleEditScreenState extends ConsumerState<ScheduleEditScreen> {
     }
   }
 
+  /// Day 내 드래그 순서 변경. Flutter 표준 인덱스 보정(newIndex>oldIndex면 -1)을 적용해
+  /// 로컬 목록을 먼저 낙관적으로 재배열하고, 그 Day 전체를 1..n으로 renumber해 서버에
+  /// 보낸다. 실패하면 스냅샷으로 원복해 화면과 서버가 어긋나지 않게 한다.
+  Future<void> _reorderWithinDay(int dayNumber, int oldIndex, int newIndex) async {
+    final snapshot = [..._places];
+    final dayPlaces = _byDay[dayNumber]!
+      ..sort((a, b) => a.orderInDay.compareTo(b.orderInDay));
+    if (newIndex > oldIndex) newIndex -= 1;
+    if (oldIndex == newIndex) return;
+
+    final moved = dayPlaces.removeAt(oldIndex);
+    dayPlaces.insert(newIndex, moved);
+
+    // 그 Day 항목만 orderInDay를 1..n으로 다시 매기고, 나머지 Day는 그대로 둔다.
+    final reindexed = <ScheduledTripPlace>[];
+    for (var i = 0; i < dayPlaces.length; i++) {
+      reindexed.add(dayPlaces[i].copyWith(orderInDay: i + 1));
+    }
+    setState(() {
+      _places
+        ..removeWhere((p) => p.dayNumber == dayNumber)
+        ..addAll(reindexed);
+      _places.sort(_byDayThenOrder);
+      _changed = true;
+    });
+
+    try {
+      await ref.read(scheduleApiProvider).reorder(
+            tripId: widget.tripId,
+            operations: [
+              for (final p in reindexed)
+                ReorderOperation(
+                  tripPlaceId: p.id,
+                  dayNumber: dayNumber,
+                  orderInDay: p.orderInDay,
+                ),
+            ],
+          );
+    } on DioException catch (e) {
+      if (!mounted) return;
+      setState(() => _places = snapshot);
+      _showError(e.error, '순서를 저장하지 못했어요.');
+    }
+  }
+
   Future<void> _editMemo(ScheduledTripPlace place) async {
     final result = await showDialog<String?>(
       context: context,
@@ -134,6 +179,17 @@ class _ScheduleEditScreenState extends ConsumerState<ScheduleEditScreen> {
               : ListView(
                   padding: const EdgeInsets.fromLTRB(22, 12, 22, 40),
                   children: [
+                    const Padding(
+                      padding: EdgeInsets.only(bottom: 10),
+                      child: Text(
+                        '손잡이를 끌어 같은 날 안에서 순서를 바꿀 수 있어요.',
+                        style: TextStyle(
+                          fontSize: 12.5,
+                          fontWeight: FontWeight.w600,
+                          color: AppColors.ink400,
+                        ),
+                      ),
+                    ),
                     for (final day in days) ...[
                       _DayEditSection(
                         dayNumber: day,
@@ -141,6 +197,8 @@ class _ScheduleEditScreenState extends ConsumerState<ScheduleEditScreen> {
                         busyIds: _busyIds,
                         onDelete: _delete,
                         onEditMemo: _editMemo,
+                        onReorder: (oldIndex, newIndex) =>
+                            _reorderWithinDay(day, oldIndex, newIndex),
                       ),
                       const SizedBox(height: 18),
                     ],
@@ -159,6 +217,7 @@ class _DayEditSection extends StatelessWidget {
     required this.busyIds,
     required this.onDelete,
     required this.onEditMemo,
+    required this.onReorder,
   });
 
   final int dayNumber;
@@ -166,6 +225,7 @@ class _DayEditSection extends StatelessWidget {
   final Set<String> busyIds;
   final ValueChanged<ScheduledTripPlace> onDelete;
   final ValueChanged<ScheduledTripPlace> onEditMemo;
+  final void Function(int oldIndex, int newIndex) onReorder;
 
   @override
   Widget build(BuildContext context) {
@@ -189,14 +249,27 @@ class _DayEditSection extends StatelessWidget {
               color: AppColors.ink900,
             ),
           ),
-          const SizedBox(height: 12),
-          for (final place in sorted)
-            _PlaceEditRow(
-              place: place,
-              busy: busyIds.contains(place.id),
-              onDelete: () => onDelete(place),
-              onEditMemo: () => onEditMemo(place),
-            ),
+          const SizedBox(height: 4),
+          // 부모가 스크롤하는 ListView라 이 리스트는 shrinkWrap + 스크롤 비활성으로
+          // 높이를 내용만큼만 차지하게 한다. 각 행에 안정적인 ValueKey(place.id)를 줘야
+          // 드래그 중 위젯이 뒤섞이거나 잘못된 항목이 움직이는 UI 오류를 막을 수 있다.
+          ReorderableListView(
+            shrinkWrap: true,
+            physics: const NeverScrollableScrollPhysics(),
+            buildDefaultDragHandles: false,
+            onReorder: onReorder,
+            children: [
+              for (var i = 0; i < sorted.length; i++)
+                _PlaceEditRow(
+                  key: ValueKey(sorted[i].id),
+                  index: i,
+                  place: sorted[i],
+                  busy: busyIds.contains(sorted[i].id),
+                  onDelete: () => onDelete(sorted[i]),
+                  onEditMemo: () => onEditMemo(sorted[i]),
+                ),
+            ],
+          ),
         ],
       ),
     );
@@ -205,12 +278,15 @@ class _DayEditSection extends StatelessWidget {
 
 class _PlaceEditRow extends StatelessWidget {
   const _PlaceEditRow({
+    super.key,
+    required this.index,
     required this.place,
     required this.busy,
     required this.onDelete,
     required this.onEditMemo,
   });
 
+  final int index;
   final ScheduledTripPlace place;
   final bool busy;
   final VoidCallback onDelete;
@@ -225,6 +301,14 @@ class _PlaceEditRow extends StatelessWidget {
         child: Row(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
+            ReorderableDragStartListener(
+              index: index,
+              enabled: !busy,
+              child: const Padding(
+                padding: EdgeInsets.only(top: 1, right: 8),
+                child: Icon(Icons.drag_indicator, size: 20, color: AppColors.ink200),
+              ),
+            ),
             if (place.startTime != null) ...[
               Padding(
                 padding: const EdgeInsets.only(top: 1),
