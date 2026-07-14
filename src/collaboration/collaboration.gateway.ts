@@ -2,6 +2,8 @@ import { Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { JwtService } from '@nestjs/jwt';
 import {
+  ConnectedSocket,
+  MessageBody,
   OnGatewayConnection,
   OnGatewayDisconnect,
   SubscribeMessage,
@@ -9,7 +11,9 @@ import {
   WebSocketServer,
 } from '@nestjs/websockets';
 import { Server, Socket } from 'socket.io';
+import { BusinessException } from '../common/exceptions/business-exception';
 import { TripsService } from '../trips/trips.service';
+import { ConflictResolutionService, ScheduleOpInput } from './conflict-resolution.service';
 
 /**
  * API 명세서 §0/§3.2: 미소속/토큰 만료 시 4403으로 close. Socket.IO는 원시 WS
@@ -41,6 +45,7 @@ export class CollaborationGateway implements OnGatewayConnection, OnGatewayDisco
     private readonly jwtService: JwtService,
     private readonly configService: ConfigService,
     private readonly tripsService: TripsService,
+    private readonly conflictResolutionService: ConflictResolutionService,
   ) {}
 
   async handleConnection(socket: Socket): Promise<void> {
@@ -78,6 +83,37 @@ export class CollaborationGateway implements OnGatewayConnection, OnGatewayDisco
   @SubscribeMessage('presence:ping')
   handlePresencePing(): { ok: true } {
     return { ok: true };
+  }
+
+  /**
+   * 편집 동작 수신(§3.2). 적용에 성공하면 같은 여행의 다른 참여자에게 authorUserId를
+   * 붙여 그대로 전파하고, 낙관적 잠금에 걸리면(다른 멤버가 먼저 수정/삭제) 요청자에게만
+   * schedule:conflict로 서버 최신 상태를 강제 전달한다(§10.1). ack로 결과를 돌려주므로
+   * 클라이언트는 실패를 조용히 놓치지 않는다.
+   */
+  @SubscribeMessage('schedule:op')
+  async handleScheduleOp(
+    @ConnectedSocket() socket: Socket,
+    @MessageBody() op: ScheduleOpInput,
+  ): Promise<{ ok: boolean; conflict?: boolean; errorCode?: string }> {
+    const { userId, tripId } = socket.data as TripSocketData;
+    try {
+      const outcome = await this.conflictResolutionService.applyOp(tripId, userId, op);
+      if (outcome.status === 'conflict') {
+        socket.emit('schedule:conflict', {
+          tripPlaceId: outcome.tripPlaceId,
+          serverState: outcome.serverState,
+        });
+        return { ok: false, conflict: true };
+      }
+      this.broadcastToTrip(tripId, 'schedule:op', { ...op, authorUserId: userId }, socket.id);
+      return { ok: true };
+    } catch (error) {
+      // 검증 실패(권한/유효성)는 연결을 끊을 일이 아니다 — ack로만 알린다.
+      const errorCode = error instanceof BusinessException ? error.code : 'INTERNAL_SERVER_ERROR';
+      this.logger.warn(`schedule:op 실패(trip=${tripId}, type=${op?.type}): ${errorCode}`);
+      return { ok: false, errorCode };
+    }
   }
 
   /**

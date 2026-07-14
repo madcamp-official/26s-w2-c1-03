@@ -25,6 +25,7 @@ import { ScheduleService } from './schedule.service';
     ScheduleService,
     { provide: SCHEDULE_AI_CLIENT, useClass: OpenAiScheduleClient },
   ],
-  exports: [TypeOrmModule],
+  // ScheduleService는 CollaborationModule(Phase 10 WS)이 schedule:op 적용에 재사용한다.
+  exports: [TypeOrmModule, ScheduleService],
 })
 export class ScheduleModule {}
