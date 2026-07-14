@@ -1,6 +1,7 @@
 import 'package:dio/dio.dart';
 import '../../../core/network/api_client.dart';
 import 'record_photo_models.dart';
+import 'record_summary_models.dart';
 
 /// API 명세서 §4 사진 파이프라인 전 구간(records 세션 시작 ~ finalize).
 class RecordsApi {
@@ -93,5 +94,40 @@ class RecordsApi {
     return (response.data!['recordPhotos'] as List)
         .map((e) => RecordPhoto.fromJson(e as Map<String, dynamic>))
         .toList();
+  }
+
+  /// API 명세서 §5 GET /records — 내 모든 기록 목록. 트립 목록(TripsApi.list)과
+  /// 같은 이유로 이번 스코프는 첫 페이지만 로드한다(무한 스크롤은 나중 스코프).
+  Future<PaginatedRecords> listRecords() async {
+    final response = await _apiClient.dio.get<Map<String, dynamic>>('/records');
+    return PaginatedRecords.fromJson(response.data!);
+  }
+
+  Future<RecordDetail> getRecordDetail(String recordId) async {
+    final response = await _apiClient.dio.get<Map<String, dynamic>>('/records/$recordId');
+    return RecordDetail.fromJson(response.data!);
+  }
+
+  Future<void> deleteRecord(String recordId) {
+    return _apiClient.dio.delete<void>('/records/$recordId');
+  }
+
+  /// API 명세서 §4 PATCH .../records/{recordId} — 일기 본문 작성/수정,
+  /// draft→published 전환.
+  Future<void> updateRecordText(
+    String tripId,
+    String recordId, {
+    String? title,
+    String? content,
+    String? status,
+  }) {
+    return _apiClient.dio.patch<void>(
+      '/trips/$tripId/records/$recordId',
+      data: {
+        if (title != null) 'title': title,
+        if (content != null) 'content': content,
+        if (status != null) 'status': status,
+      },
+    );
   }
 }
