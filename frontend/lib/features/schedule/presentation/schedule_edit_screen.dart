@@ -5,6 +5,7 @@ import '../../../core/network/api_exception.dart';
 import '../../../core/theme/app_colors.dart';
 import '../data/schedule_api.dart';
 import '../data/schedule_models.dart';
+import 'add_place_sheet.dart';
 
 /// 스케줄 편집 탭 — 장소 삭제 / 메모 수정. 순서 변경(드래그앤드롭)과 장소 추가,
 /// AI 재수정은 후속 커밋에서 이 화면에 얹는다. 편집 결과가 반영됐으면 pop(true)로
@@ -121,6 +122,37 @@ class _ScheduleEditScreenState extends ConsumerState<ScheduleEditScreen> {
     }
   }
 
+  Future<void> _addPlace(int dayNumber) async {
+    final result = await showModalBottomSheet<AddPlaceResult>(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.white,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+      ),
+      builder: (_) => AddPlaceSheet(tripId: widget.tripId, dayNumber: dayNumber),
+    );
+    if (result == null || !mounted) return;
+
+    try {
+      final added = await ref.read(scheduleApiProvider).addPlace(
+            tripId: widget.tripId,
+            placeId: result.placeId,
+            customName: result.customName,
+            customAddress: result.customAddress,
+            dayNumber: dayNumber,
+          );
+      if (!mounted) return;
+      setState(() {
+        _places.add(added);
+        _places.sort(_byDayThenOrder);
+        _changed = true;
+      });
+    } on DioException catch (e) {
+      _showError(e.error, '장소를 추가하지 못했어요.');
+    }
+  }
+
   Future<void> _editMemo(ScheduledTripPlace place) async {
     final result = await showDialog<String?>(
       context: context,
@@ -199,6 +231,7 @@ class _ScheduleEditScreenState extends ConsumerState<ScheduleEditScreen> {
                         onEditMemo: _editMemo,
                         onReorder: (oldIndex, newIndex) =>
                             _reorderWithinDay(day, oldIndex, newIndex),
+                        onAddPlace: () => _addPlace(day),
                       ),
                       const SizedBox(height: 18),
                     ],
@@ -218,6 +251,7 @@ class _DayEditSection extends StatelessWidget {
     required this.onDelete,
     required this.onEditMemo,
     required this.onReorder,
+    required this.onAddPlace,
   });
 
   final int dayNumber;
@@ -226,6 +260,7 @@ class _DayEditSection extends StatelessWidget {
   final ValueChanged<ScheduledTripPlace> onDelete;
   final ValueChanged<ScheduledTripPlace> onEditMemo;
   final void Function(int oldIndex, int newIndex) onReorder;
+  final VoidCallback onAddPlace;
 
   @override
   Widget build(BuildContext context) {
@@ -269,6 +304,22 @@ class _DayEditSection extends StatelessWidget {
                   onEditMemo: () => onEditMemo(sorted[i]),
                 ),
             ],
+          ),
+          const SizedBox(height: 4),
+          Align(
+            alignment: Alignment.centerLeft,
+            child: TextButton.icon(
+              onPressed: onAddPlace,
+              style: TextButton.styleFrom(
+                foregroundColor: AppColors.green800,
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+              ),
+              icon: const Icon(Icons.add, size: 18),
+              label: const Text(
+                '장소 추가',
+                style: TextStyle(fontSize: 13.5, fontWeight: FontWeight.w800),
+              ),
+            ),
           ),
         ],
       ),
