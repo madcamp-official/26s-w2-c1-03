@@ -217,57 +217,63 @@ class _ScheduleEditScreenState extends ConsumerState<ScheduleEditScreen> {
           ),
         ),
         body: SafeArea(
-          child: Stack(
+          // 채팅창이 열리면 일정 영역을 Stack으로 덮는 대신 실제로 위쪽 절반만
+          // 차지하도록 Column으로 공간을 나눈다 — 오버레이 방식은 아래쪽 일정이
+          // 패널 뒤로 완전히 가려 안 보이는 문제가 있었다. 닫히면 Column이 다시
+          // 계산되어 일정 영역이 자동으로 전체 높이를 되찾는다.
+          child: Column(
             children: [
-              days.isEmpty
-                  ? const _EmptyState()
-                  : ListView(
-                      padding: const EdgeInsets.fromLTRB(22, 12, 22, 100),
-                      children: [
-                        const Padding(
-                          padding: EdgeInsets.only(bottom: 10),
-                          child: Text(
-                            '손잡이를 끌어 같은 날 안에서 순서를 바꿀 수 있어요.',
-                            style: TextStyle(
-                              fontSize: 12.5,
-                              fontWeight: FontWeight.w600,
-                              color: AppColors.ink400,
-                            ),
+              Expanded(
+                child: Stack(
+                  children: [
+                    days.isEmpty
+                        ? const _EmptyState()
+                        : ListView(
+                            padding: const EdgeInsets.fromLTRB(22, 12, 22, 100),
+                            children: [
+                              const Padding(
+                                padding: EdgeInsets.only(bottom: 10),
+                                child: Text(
+                                  '손잡이를 끌어 같은 날 안에서 순서를 바꿀 수 있어요.',
+                                  style: TextStyle(
+                                    fontSize: 12.5,
+                                    fontWeight: FontWeight.w600,
+                                    color: AppColors.ink400,
+                                  ),
+                                ),
+                              ),
+                              for (final day in days) ...[
+                                _DayEditSection(
+                                  dayNumber: day,
+                                  places: _byDay[day]!,
+                                  busyIds: _busyIds,
+                                  onDelete: _delete,
+                                  onEditMemo: _editMemo,
+                                  onReorder: (oldIndex, newIndex) =>
+                                      _reorderWithinDay(day, oldIndex, newIndex),
+                                  onAddPlace: () => _addPlace(day),
+                                ),
+                                const SizedBox(height: 18),
+                              ],
+                            ],
                           ),
+                    // 챗봇 진입 FAB — 채팅창이 닫혀 있을 때만 보인다.
+                    if (!_chatOpen)
+                      Positioned(
+                        right: 18,
+                        bottom: 18,
+                        child: FloatingActionButton(
+                          heroTag: 'schedule-chat-fab',
+                          backgroundColor: AppColors.ink900,
+                          onPressed: () => setState(() => _chatOpen = true),
+                          child: const Icon(Icons.chat_bubble_outline, color: Colors.white),
                         ),
-                        for (final day in days) ...[
-                          _DayEditSection(
-                            dayNumber: day,
-                            places: _byDay[day]!,
-                            busyIds: _busyIds,
-                            onDelete: _delete,
-                            onEditMemo: _editMemo,
-                            onReorder: (oldIndex, newIndex) =>
-                                _reorderWithinDay(day, oldIndex, newIndex),
-                            onAddPlace: () => _addPlace(day),
-                          ),
-                          const SizedBox(height: 18),
-                        ],
-                      ],
-                    ),
-              // 챗봇 진입 FAB — place_selection_screen의 PlaceSheet처럼 화면 위에
-              // 겹쳐서 여닫는 절반 높이 패널을 연다.
-              if (!_chatOpen)
-                Positioned(
-                  right: 18,
-                  bottom: 18,
-                  child: FloatingActionButton(
-                    heroTag: 'schedule-chat-fab',
-                    backgroundColor: AppColors.ink900,
-                    onPressed: () => setState(() => _chatOpen = true),
-                    child: const Icon(Icons.chat_bubble_outline, color: Colors.white),
-                  ),
+                      ),
+                  ],
                 ),
+              ),
               if (_chatOpen)
-                Positioned(
-                  left: 0,
-                  right: 0,
-                  bottom: 0,
+                SizedBox(
                   height: MediaQuery.of(context).size.height * 0.5,
                   child: ScheduleChatPanel(
                     tripId: widget.tripId,

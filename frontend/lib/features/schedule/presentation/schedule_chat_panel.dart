@@ -225,27 +225,62 @@ class _ScheduleChatPanelState extends ConsumerState<ScheduleChatPanel> {
     );
   }
 
+  /// 헤더를 아래로 끄는 제스처로도 패널을 닫을 수 있게 한다("채팅을 내리면 화면이
+  /// 돌아온다"). 누적 드래그 거리가 임계치를 넘거나 빠르게 아래로 튕기면 닫는다 —
+  /// 살짝 스친 정도로는 안 닫혀야 실수로 닫히지 않는다.
+  double _dragDy = 0;
+
+  void _onHeaderDragUpdate(DragUpdateDetails details) {
+    _dragDy = (_dragDy + details.delta.dy).clamp(0, double.infinity);
+  }
+
+  void _onHeaderDragEnd(DragEndDetails details) {
+    final flungDown = (details.primaryVelocity ?? 0) > 300;
+    if (flungDown || _dragDy > 40) {
+      widget.onClose();
+    }
+    _dragDy = 0;
+  }
+
   Widget _buildHeader() {
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(18, 10, 10, 10),
-      child: Row(
+    return GestureDetector(
+      behavior: HitTestBehavior.opaque,
+      onVerticalDragUpdate: _onHeaderDragUpdate,
+      onVerticalDragEnd: _onHeaderDragEnd,
+      child: Column(
         children: [
+          const SizedBox(height: 8),
           Container(
-            width: 34,
-            height: 34,
-            alignment: Alignment.center,
-            decoration: const BoxDecoration(color: AppColors.lime, shape: BoxShape.circle),
-            child: const Icon(Icons.auto_awesome, size: 16, color: AppColors.green800),
+            width: 36,
+            height: 4,
+            decoration: BoxDecoration(
+              color: AppColors.ink200,
+              borderRadius: BorderRadius.circular(2),
+            ),
           ),
-          const SizedBox(width: 10),
-          const Text(
-            'AI와 대화',
-            style: TextStyle(fontSize: 15.5, fontWeight: FontWeight.w800, color: AppColors.ink900),
-          ),
-          const Spacer(),
-          IconButton(
-            icon: const Icon(Icons.keyboard_arrow_down, color: AppColors.ink400),
-            onPressed: widget.onClose,
+          Padding(
+            padding: const EdgeInsets.fromLTRB(18, 8, 10, 8),
+            child: Row(
+              children: [
+                Container(
+                  width: 34,
+                  height: 34,
+                  alignment: Alignment.center,
+                  decoration: const BoxDecoration(color: AppColors.lime, shape: BoxShape.circle),
+                  child: const Icon(Icons.auto_awesome, size: 16, color: AppColors.green800),
+                ),
+                const SizedBox(width: 10),
+                const Text(
+                  'AI와 대화',
+                  style: TextStyle(fontSize: 15.5, fontWeight: FontWeight.w800, color: AppColors.ink900),
+                ),
+                const Spacer(),
+                IconButton(
+                  icon: const Icon(Icons.keyboard_arrow_down, color: AppColors.ink400),
+                  onPressed: widget.onClose,
+                ),
+              ],
+            ),
           ),
         ],
       ),
