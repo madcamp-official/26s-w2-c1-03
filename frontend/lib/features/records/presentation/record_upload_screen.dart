@@ -93,6 +93,7 @@ class _RecordUploadScreenState extends ConsumerState<RecordUploadScreen> {
       });
 
       var uploadedCount = 0;
+      final uploadedRefIds = <String>{};
       for (var i = 0; i < refIds.length; i += _uploadBatchSize) {
         final batch = refIds.sublist(i, min(i + _uploadBatchSize, refIds.length));
         final files = <String, List<int>>{};
@@ -101,7 +102,8 @@ class _RecordUploadScreenState extends ConsumerState<RecordUploadScreen> {
           if (bytes != null) files[refId] = bytes;
         }
         if (files.isNotEmpty) {
-          await api.uploadPhotos(widget.trip.id, recordId, files);
+          final uploaded = await api.uploadPhotos(widget.trip.id, recordId, files);
+          uploadedRefIds.addAll(uploaded);
         }
         if (!mounted) return;
         uploadedCount += batch.length;
@@ -117,7 +119,17 @@ class _RecordUploadScreenState extends ConsumerState<RecordUploadScreen> {
         if (!mounted) return;
       }
 
-      await _goToNext(recordId, candidateByRefId);
+      // 실제로 서버가 업로드를 확인해준(uploaded로 돌아온) 것만 다음 화면에
+      // 넘긴다 — 직접 선택 모드는 서버에 다시 물어보지 않고 이 목록을 그대로
+      // finalize에 보내므로, prepareBytes 실패 등으로 실제로는 안 올라간 사진이
+      // 하나라도 섞여 있으면 그 photoRefId가 서버엔 없어(여전히 PENDING) finalize
+      // 전체가 거부된다.
+      final uploadedCandidateByRefId = {
+        for (final entry in candidateByRefId.entries)
+          if (uploadedRefIds.contains(entry.key)) entry.key: entry.value,
+      };
+
+      await _goToNext(recordId, uploadedCandidateByRefId);
     } catch (_) {
       if (!mounted) return;
       setState(() => _errorText = '진행 중 문제가 발생했어요. 다시 시도해주세요.');

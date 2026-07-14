@@ -64,6 +64,7 @@ class RecordDetail {
     required this.title,
     required this.content,
     required this.status,
+    required this.tripCityName,
     required this.createdAt,
     required this.updatedAt,
     required this.photos,
@@ -75,6 +76,7 @@ class RecordDetail {
   final String? title;
   final String? content;
   final String status;
+  final String tripCityName;
   final DateTime createdAt;
   final DateTime updatedAt;
   final List<RecordPhoto> photos;
@@ -86,6 +88,7 @@ class RecordDetail {
     title: json['title'] as String?,
     content: json['content'] as String?,
     status: json['status'] as String,
+    tripCityName: json['tripCityName'] as String,
     createdAt: DateTime.parse(json['createdAt'] as String),
     updatedAt: DateTime.parse(json['updatedAt'] as String),
     photos: (json['photos'] as List<dynamic>)

@@ -33,7 +33,10 @@ function createRepositoryMock<T extends object>(): RepoMock<T> {
   };
 }
 
-/** listMyRecords()의 QueryBuilder 체인을 흉내낸다 — getMany()만 통제하면 된다. */
+/**
+ * listMyRecords()/getRecordDetail()의 QueryBuilder 체인을 흉내낸다 —
+ * getMany()/getOne()만 통제하면 된다(getOne은 rows[0] ?? null).
+ */
 function createQueryBuilderMock(rows: TravelRecord[]) {
   return {
     innerJoinAndSelect: jest.fn().mockReturnThis(),
@@ -43,6 +46,7 @@ function createQueryBuilderMock(rows: TravelRecord[]) {
     addOrderBy: jest.fn().mockReturnThis(),
     take: jest.fn().mockReturnThis(),
     getMany: jest.fn().mockResolvedValue(rows),
+    getOne: jest.fn().mockResolvedValue(rows[0] ?? null),
   };
 }
 
@@ -833,7 +837,7 @@ describe('RecordsService', () => {
 
   describe('getRecordDetail', () => {
     it('레코드가 없으면 RECORD_NOT_FOUND를 던진다', async () => {
-      travelRecordRepository.findOneBy!.mockResolvedValue(null);
+      travelRecordRepository.createQueryBuilder = jest.fn().mockReturnValue(createQueryBuilderMock([]));
 
       await expect(service.getRecordDetail('record-1', 'user-1')).rejects.toMatchObject({
         code: 'RECORD_NOT_FOUND',
@@ -841,21 +845,28 @@ describe('RecordsService', () => {
     });
 
     it('본인 기록이 아니면 RECORD_FORBIDDEN을 던진다', async () => {
-      travelRecordRepository.findOneBy!.mockResolvedValue(buildRecord({ userId: 'other-user' }));
+      const record = buildRecord({ userId: 'other-user', trip: { cityName: '오사카' } as never });
+      travelRecordRepository.createQueryBuilder = jest
+        .fn()
+        .mockReturnValue(createQueryBuilderMock([record]));
 
       await expect(service.getRecordDetail('record-1', 'user-1')).rejects.toMatchObject({
         code: 'RECORD_FORBIDDEN',
       });
     });
 
-    it('사진을 orderIndex 순으로 포함해 반환한다', async () => {
-      travelRecordRepository.findOneBy!.mockResolvedValue(buildRecord());
+    it('사진을 orderIndex 순으로, 여행 도시명과 함께 반환한다', async () => {
+      const record = buildRecord({ trip: { cityName: '오사카' } as never });
+      travelRecordRepository.createQueryBuilder = jest
+        .fn()
+        .mockReturnValue(createQueryBuilderMock([record]));
       const photos = [buildRecordPhoto({ id: 'photo-1', orderIndex: 0 })];
       recordPhotoRepository.find!.mockResolvedValue(photos);
 
       const result = await service.getRecordDetail('record-1', 'user-1');
 
       expect(result.photos).toHaveLength(1);
+      expect(result.tripCityName).toBe('오사카');
       expect(recordPhotoRepository.find).toHaveBeenCalledWith({
         where: { recordId: 'record-1' },
         order: { orderIndex: 'ASC' },
