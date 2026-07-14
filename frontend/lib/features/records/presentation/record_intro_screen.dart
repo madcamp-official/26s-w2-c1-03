@@ -23,6 +23,12 @@ class _RecordIntroScreenState extends State<RecordIntroScreen> {
   bool _running = false;
   String? _errorText;
 
+  @override
+  void dispose() {
+    _pipeline.dispose();
+    super.dispose();
+  }
+
   Future<void> _start({required bool useFallback}) async {
     setState(() {
       _running = true;
