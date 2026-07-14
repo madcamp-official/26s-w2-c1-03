@@ -4,6 +4,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../core/network/api_exception.dart';
 import '../../../core/theme/app_colors.dart';
 import '../../../core/theme/app_gradients.dart';
+import '../../../core/utils/date_format.dart';
 import '../../../core/widgets/app_back_button.dart';
 import '../../trips/data/trip_models.dart';
 import '../../trips/presentation/trip_list_controller.dart' show tripsApiProvider;
@@ -170,7 +171,7 @@ class _TripPickCard extends StatelessWidget {
                   ),
                   const SizedBox(height: 2),
                   Text(
-                    '${trip.cityName} · ${trip.startDate} ~ ${trip.endDate}',
+                    '${trip.cityName} · ${formatTripDateRange(trip.startDate, trip.endDate)}',
                     style: const TextStyle(fontSize: 12.5, fontWeight: FontWeight.w600, color: AppColors.ink400),
                   ),
                 ],

@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import '../../../core/theme/app_colors.dart';
+import '../../../core/utils/date_format.dart';
 import '../../../core/widgets/app_button.dart';
 import '../../trips/data/trip_models.dart';
 import '../data/photo_filter_pipeline.dart';
@@ -50,7 +51,9 @@ class _RecordFilterRunScreenState extends State<RecordFilterRunScreen> {
       return;
     }
 
-    setState(() => _statusLabel = '${widget.trip.startDate} ~ ${widget.trip.endDate} 사진을 찾는 중...');
+    setState(
+      () => _statusLabel = '${formatTripDateRange(widget.trip.startDate, widget.trip.endDate)} 사진을 찾는 중...',
+    );
     try {
       final result = widget.useFallback
           ? await _pipeline.fallbackRecent(widget.trip)

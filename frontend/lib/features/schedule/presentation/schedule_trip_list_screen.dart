@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../core/theme/app_colors.dart';
 import '../../../core/theme/app_gradients.dart';
+import '../../../core/utils/date_format.dart';
 import '../../../core/widgets/app_button.dart';
 import '../../trips/data/trip_models.dart';
 import '../../trips/presentation/create_trip_screen.dart';
@@ -178,7 +179,7 @@ class _PlanningTripCard extends StatelessWidget {
             ),
             const SizedBox(height: 5),
             Text(
-              '${trip.cityName} · ${trip.startDate} – ${trip.endDate}',
+              '${trip.cityName} · ${formatTripDateRange(trip.startDate, trip.endDate)}',
               maxLines: 1,
               overflow: TextOverflow.ellipsis,
               style: const TextStyle(

@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../core/theme/app_colors.dart';
 import '../../../core/theme/app_gradients.dart';
+import '../../../core/utils/date_format.dart';
 import '../data/record_summary_models.dart';
 import 'record_detail_screen.dart';
 import 'record_trip_picker_screen.dart';
@@ -180,7 +181,7 @@ class _RecordCard extends StatelessWidget {
                         ),
                         const SizedBox(height: 2),
                         Text(
-                          '${record.tripCityName} · ${record.tripStartDate} ~ ${record.tripEndDate}',
+                          '${record.tripCityName} · ${formatTripDateRange(record.tripStartDate, record.tripEndDate)}',
                           style: const TextStyle(
                             fontSize: 12,
                             fontWeight: FontWeight.w600,

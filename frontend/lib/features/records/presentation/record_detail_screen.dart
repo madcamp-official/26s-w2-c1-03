@@ -274,27 +274,16 @@ class _RecordDetailBody extends StatelessWidget {
               );
             },
           ),
-        ] else
-          Container(
-            padding: const EdgeInsets.all(20),
-            decoration: BoxDecoration(
-              color: AppColors.surfaceSubtle,
-              borderRadius: BorderRadius.circular(14),
-            ),
-            alignment: Alignment.center,
-            child: const Text(
-              '아직 이 기록에 담긴 사진이 없어요',
-              style: TextStyle(color: AppColors.ink400, fontWeight: FontWeight.w600),
-            ),
+          const SizedBox(height: 12),
+          AppButton(
+            label: '사진 추가하기',
+            variant: AppButtonVariant.outline,
+            height: 40,
+            loading: addingPhotos,
+            onPressed: addingPhotos ? null : onAddPhotos,
           ),
-        const SizedBox(height: 12),
-        AppButton(
-          label: '사진 추가하기',
-          variant: AppButtonVariant.outline,
-          height: 40,
-          loading: addingPhotos,
-          onPressed: addingPhotos ? null : onAddPhotos,
-        ),
+        ] else
+          _EmptyPhotosState(loading: addingPhotos, onAddPhotos: onAddPhotos),
         const SizedBox(height: 20),
         Text(
           record.content?.isNotEmpty == true ? record.content! : '아직 작성된 글이 없어요. 오른쪽 위 연필 아이콘으로 글을 써보세요.',
@@ -357,6 +346,48 @@ class _CoverablePhotoTile extends StatelessWidget {
           ],
         ),
       ),
+    );
+  }
+}
+
+class _EmptyPhotosState extends StatelessWidget {
+  const _EmptyPhotosState({required this.loading, required this.onAddPhotos});
+
+  final bool loading;
+  final VoidCallback onAddPhotos;
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      children: [
+        const SizedBox(height: 32),
+        Container(
+          width: 96,
+          height: 96,
+          alignment: Alignment.center,
+          decoration: const BoxDecoration(color: AppColors.surfaceSubtle, shape: BoxShape.circle),
+          child: const Icon(Icons.image_outlined, size: 40, color: AppColors.ink300),
+        ),
+        const SizedBox(height: 20),
+        const Text(
+          '아직 기록이 없어요',
+          style: TextStyle(fontSize: 17, fontWeight: FontWeight.w800, color: AppColors.ink900),
+        ),
+        const SizedBox(height: 6),
+        const Text(
+          '첫 사진을 올리고\n여행의 첫 페이지를 시작해보세요',
+          textAlign: TextAlign.center,
+          style: TextStyle(fontSize: 13, height: 1.5, fontWeight: FontWeight.w600, color: AppColors.ink400),
+        ),
+        const SizedBox(height: 24),
+        AppButton(
+          label: '+  사진 추가하기',
+          variant: AppButtonVariant.lime,
+          loading: loading,
+          onPressed: loading ? null : onAddPhotos,
+        ),
+        const SizedBox(height: 32),
+      ],
     );
   }
 }
