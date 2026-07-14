@@ -554,6 +554,25 @@ describe('RecordsService', () => {
       );
       await expect(fs.access(path2)).rejects.toThrow();
     });
+
+    it('사용자 직접 선택 모드(curate 안 거친 UPLOADED 상태)도 finalize할 수 있다', async () => {
+      const path1 = await writeTempFile('ref-1');
+      travelRecordRepository.findOneBy!.mockResolvedValue(buildRecord());
+      recordPhotoRefRepository.findBy!.mockResolvedValue([
+        buildPhotoRef({ id: 'ref-1', tempFilePath: path1, status: RecordPhotoRefStatus.UPLOADED }),
+      ]);
+
+      const result = await service.finalize('trip-1', 'record-1', 'user-1', {
+        selections: [{ photoRefId: 'ref-1' }],
+      });
+
+      expect(result.recordPhotos).toHaveLength(1);
+      expect(storageService.uploadPermanent).toHaveBeenCalledWith(
+        Buffer.from('jpeg-bytes'),
+        'record-photos/record-1/ref-1.jpg',
+        'image/jpeg',
+      );
+    });
   });
 
   describe('updatePhoto', () => {

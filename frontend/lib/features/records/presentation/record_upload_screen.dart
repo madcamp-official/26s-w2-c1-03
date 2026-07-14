@@ -6,24 +6,38 @@ import '../../../core/theme/app_colors.dart';
 import '../../../core/widgets/app_button.dart';
 import '../../auth/presentation/login_controller.dart' show apiClientProvider;
 import '../../trips/data/trip_models.dart';
+import '../data/photo_candidate.dart';
 import '../data/photo_filter_pipeline.dart';
 import '../data/photo_upload_service.dart';
 import '../data/records_api.dart';
+import 'record_manual_caption_screen.dart';
 import 'record_selection_screen.dart';
 
 final recordsApiProvider = Provider<RecordsApi>((ref) => RecordsApi(ref.watch(apiClientProvider)));
 
 const _uploadBatchSize = 10;
 
-/// 세션 시작 → 메타데이터 등록 → 실물 업로드(EXIF 스트립 후 배치 전송) → curate
-/// 순서로 BE 파이프라인을 그대로 밟는다(API 명세서 §4). 이 화면 진입 자체가
-/// 파이프라인 실행 트리거다 — RecordIntroScreen에서 이미 사용자 동의를 받은
-/// 뒤라 여기서 추가 확인 없이 바로 시작한다.
+/// 세션 시작 → 메타데이터 등록 → 실물 업로드(EXIF 스트립 후 배치 전송) →
+/// (AI 모드일 때만) curate 순서로 BE 파이프라인을 그대로 밟는다(API 명세서 §4).
+/// 이 화면 진입 자체가 파이프라인 실행 트리거다 — RecordIntroScreen/
+/// RecordManualPickScreen에서 이미 사용자 동의(또는 직접 선택)를 받은 뒤라
+/// 여기서 추가 확인 없이 바로 시작한다.
+///
+/// [useAiCurate]가 true면 기존 AI 추천 경로(curate → RecordSelectionScreen),
+/// false면 사용자가 이미 직접 고른 사진 그대로 캡션 화면(RecordManualCaptionScreen)
+/// 으로 넘어간다 — curate를 호출하지 않으므로 BE에도 UPLOADED 상태 그대로 finalize
+/// 가능해야 한다(RecordsService.finalize가 RECOMMENDED/UPLOADED 둘 다 받는 이유).
 class RecordUploadScreen extends ConsumerStatefulWidget {
-  const RecordUploadScreen({super.key, required this.trip, required this.result});
+  const RecordUploadScreen({
+    super.key,
+    required this.trip,
+    required this.result,
+    required this.useAiCurate,
+  });
 
   final Trip trip;
   final PhotoFilterResult result;
+  final bool useAiCurate;
 
   @override
   ConsumerState<RecordUploadScreen> createState() => _RecordUploadScreenState();
@@ -55,8 +69,8 @@ class _RecordUploadScreenState extends ConsumerState<RecordUploadScreen> {
       if (!mounted) return;
 
       if (widget.result.candidates.isEmpty) {
-        // 후보가 아예 없으면 업로드/curate를 건너뛰고 바로 선택 화면(빈 상태)으로.
-        _goToSelection(recordId);
+        // 후보가 아예 없으면 업로드/curate를 건너뛰고 바로 다음 화면(빈 상태)으로.
+        _goToNext(recordId, const {});
         return;
       }
 
@@ -94,26 +108,31 @@ class _RecordUploadScreenState extends ConsumerState<RecordUploadScreen> {
         setState(() => _progress = uploadedCount / refIds.length);
       }
 
-      setState(() {
-        _statusLabel = 'AI가 베스트 컷을 고르는 중...';
-        _progress = null;
-      });
-      await api.curate(widget.trip.id, recordId);
-      if (!mounted) return;
+      if (widget.useAiCurate) {
+        setState(() {
+          _statusLabel = 'AI가 베스트 컷을 고르는 중...';
+          _progress = null;
+        });
+        await api.curate(widget.trip.id, recordId);
+        if (!mounted) return;
+      }
 
-      _goToSelection(recordId);
+      _goToNext(recordId, candidateByRefId);
     } catch (_) {
       if (!mounted) return;
       setState(() => _errorText = '진행 중 문제가 발생했어요. 다시 시도해주세요.');
     }
   }
 
-  void _goToSelection(String recordId) {
-    Navigator.of(context).pushReplacement(
-      MaterialPageRoute(
-        builder: (_) => RecordSelectionScreen(tripId: widget.trip.id, recordId: recordId),
-      ),
-    );
+  void _goToNext(String recordId, Map<String, PhotoCandidate> candidateByRefId) {
+    final next = widget.useAiCurate
+        ? RecordSelectionScreen(tripId: widget.trip.id, recordId: recordId)
+        : RecordManualCaptionScreen(
+            tripId: widget.trip.id,
+            recordId: recordId,
+            candidatesByRefId: candidateByRefId,
+          );
+    Navigator.of(context).pushReplacement(MaterialPageRoute(builder: (_) => next));
   }
 
   @override

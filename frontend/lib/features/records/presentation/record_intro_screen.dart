@@ -4,6 +4,7 @@ import '../../../core/widgets/app_button.dart';
 import '../../trips/data/trip_models.dart';
 import '../data/photo_filter_pipeline.dart';
 import '../data/photo_library_service.dart';
+import 'record_manual_pick_screen.dart';
 import 'record_upload_screen.dart';
 
 /// "기록 시작" 진입점(기능명세서 §3.1 수용기준 2: 알림 클릭 또는 이 화면 진입
@@ -52,7 +53,9 @@ class _RecordIntroScreenState extends State<RecordIntroScreen> {
       if (!mounted) return;
       setState(() => _running = false);
       Navigator.of(context).push(
-        MaterialPageRoute(builder: (_) => RecordUploadScreen(trip: widget.trip, result: result)),
+        MaterialPageRoute(
+          builder: (_) => RecordUploadScreen(trip: widget.trip, result: result, useAiCurate: true),
+        ),
       );
     } catch (_) {
       if (!mounted) return;
@@ -61,6 +64,12 @@ class _RecordIntroScreenState extends State<RecordIntroScreen> {
         _errorText = '사진을 불러오지 못했어요. 다시 시도해주세요.';
       });
     }
+  }
+
+  void _openManualPick() {
+    Navigator.of(
+      context,
+    ).push(MaterialPageRoute(builder: (_) => RecordManualPickScreen(trip: widget.trip)));
   }
 
   @override
@@ -95,7 +104,7 @@ class _RecordIntroScreenState extends State<RecordIntroScreen> {
               ],
               const Spacer(),
               AppButton(
-                label: '기록 시작',
+                label: 'AI가 사진 골라줄게',
                 variant: AppButtonVariant.lime,
                 aiSparkle: true,
                 loading: _running,
@@ -103,10 +112,20 @@ class _RecordIntroScreenState extends State<RecordIntroScreen> {
               ),
               const SizedBox(height: 10),
               AppButton(
-                label: '필터 없이 최근 사진으로 진행',
+                label: '내가 직접 고를래',
                 variant: AppButtonVariant.outline,
                 loading: false,
-                onPressed: _running ? null : () => _start(useFallback: true),
+                onPressed: _running ? null : _openManualPick,
+              ),
+              const SizedBox(height: 12),
+              Center(
+                child: TextButton(
+                  onPressed: _running ? null : () => _start(useFallback: true),
+                  child: const Text(
+                    '필터 없이 최근 사진으로 진행',
+                    style: TextStyle(fontSize: 12.5, color: AppColors.ink400, fontWeight: FontWeight.w600),
+                  ),
+                ),
               ),
             ],
           ),
