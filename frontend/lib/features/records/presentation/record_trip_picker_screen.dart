@@ -6,7 +6,7 @@ import '../../../core/theme/app_colors.dart';
 import '../../../core/theme/app_gradients.dart';
 import '../../trips/data/trip_models.dart';
 import '../../trips/presentation/trip_list_controller.dart' show tripsApiProvider;
-import 'record_intro_screen.dart';
+import 'record_mode_sheet.dart';
 
 sealed class _PickerState {
   const _PickerState();
@@ -29,7 +29,7 @@ class _PickerFailed extends _PickerState {
 /// "기록" 탭 → "+" → 기록할 여행 고르기. 기록 파이프라인(온디바이스 필터→업로드→
 /// curate→선택)은 여행 종료 후(트립 상태 completed)에만 의미가 있어(§8.1) 완료된
 /// 여행만 골라 보여준다. 고른 뒤에는 트립 상세의 "기록 시작"과 완전히 같은
-/// RecordIntroScreen으로 들어간다 — 진입 경로만 다르고 파이프라인은 동일하다.
+/// 바텀시트(showRecordModeSheet)로 들어간다 — 진입 경로만 다르고 그 다음은 동일하다.
 class RecordTripPickerScreen extends ConsumerStatefulWidget {
   const RecordTripPickerScreen({super.key});
 
@@ -64,7 +64,7 @@ class _RecordTripPickerScreenState extends ConsumerState<RecordTripPickerScreen>
   }
 
   void _openIntro(Trip trip) {
-    Navigator.of(context).push(MaterialPageRoute(builder: (_) => RecordIntroScreen(trip: trip)));
+    showRecordModeSheet(context, trip);
   }
 
   @override

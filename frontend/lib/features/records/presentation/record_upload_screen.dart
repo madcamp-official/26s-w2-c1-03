@@ -19,7 +19,7 @@ const _uploadBatchSize = 10;
 
 /// 세션 시작 → 메타데이터 등록 → 실물 업로드(EXIF 스트립 후 배치 전송) →
 /// (AI 모드일 때만) curate 순서로 BE 파이프라인을 그대로 밟는다(API 명세서 §4).
-/// 이 화면 진입 자체가 파이프라인 실행 트리거다 — RecordIntroScreen/
+/// 이 화면 진입 자체가 파이프라인 실행 트리거다 — RecordFilterRunScreen/
 /// RecordManualPickScreen에서 이미 사용자 동의(또는 직접 선택)를 받은 뒤라
 /// 여기서 추가 확인 없이 바로 시작한다.
 ///
