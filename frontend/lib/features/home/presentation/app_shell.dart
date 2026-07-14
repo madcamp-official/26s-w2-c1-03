@@ -3,12 +3,13 @@ import 'dart:ui';
 import 'package:flutter/material.dart';
 import '../../../core/theme/app_colors.dart';
 import '../../profile/presentation/profile_screen.dart';
+import '../../records/presentation/records_list_screen.dart';
 import '../../schedule/presentation/schedule_trip_list_screen.dart';
 import '../../trips/presentation/create_trip_screen.dart';
 import '../../trips/presentation/trip_list_screen.dart';
 
 /// 하단 탭바 셸(design.md §5.1/§6): 좌측 홈/스케줄, 중앙 raised FAB(여행 추가),
-/// 우측 기록/마이. 기록은 아직 기능이 없어(Phase 11~12) 자리표시자만 넣는다.
+/// 우측 기록/마이.
 class AppShell extends StatefulWidget {
   const AppShell({super.key});
 
@@ -22,7 +23,7 @@ class _AppShellState extends State<AppShell> {
   static const _tabs = [
     TripListScreen(),
     ScheduleTripListScreen(),
-    _ComingSoonTab(label: '기록'),
+    RecordsListScreen(),
     ProfileScreen(),
   ];
 
@@ -138,28 +139,6 @@ class _TabButton extends StatelessWidget {
               ),
             ),
           ],
-        ),
-      ),
-    );
-  }
-}
-
-class _ComingSoonTab extends StatelessWidget {
-  const _ComingSoonTab({required this.label});
-  final String label;
-
-  @override
-  Widget build(BuildContext context) {
-    return Scaffold(
-      backgroundColor: Colors.white,
-      body: Center(
-        child: Text(
-          '$label은(는) 곧 만나요 👋',
-          style: const TextStyle(
-            fontSize: 15,
-            color: AppColors.ink400,
-            fontWeight: FontWeight.w600,
-          ),
         ),
       ),
     );

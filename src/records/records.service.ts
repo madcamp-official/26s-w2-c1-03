@@ -4,7 +4,7 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { promises as fs } from 'fs';
 import * as path from 'path';
 import sharp from 'sharp';
-import { Repository } from 'typeorm';
+import { In, IsNull, Repository } from 'typeorm';
 import { BusinessException } from '../common/exceptions/business-exception';
 import { CommonErrorCode } from '../common/exceptions/error-code';
 import { loadPhotoBufferConfig } from '../config/photo-buffer.config';
@@ -12,6 +12,7 @@ import { StorageService } from '../storage/storage.service';
 import { TripsService } from '../trips/trips.service';
 import { PHOTO_CURATE_AI_CLIENT, PhotoCurateAiClient } from './client/photo-curate-ai.client';
 import { FinalizePhotosDto } from './dto/finalize-photos.dto';
+import { ListRecordsQueryDto } from './dto/list-records-query.dto';
 import { RegisterPhotoMetadataDto } from './dto/register-photo-metadata.dto';
 import { UpdateRecordDto } from './dto/update-record.dto';
 import { UpdateRecordPhotoDto } from './dto/update-record-photo.dto';
@@ -59,6 +60,35 @@ export interface RecordPhotoSummary {
   isCover: boolean;
   createdAt: Date;
 }
+
+/** API 명세서 §5 GET /records 목록 항목 — 여행 기간/cityName/이 기록의 대표사진. */
+export interface RecordListItemSummary {
+  id: string;
+  tripId: string;
+  title: string | null;
+  status: TravelRecordStatus;
+  tripCityName: string;
+  tripStartDate: string;
+  tripEndDate: string;
+  coverPhotoUrl: string | null;
+  createdAt: Date;
+}
+
+export interface PaginatedRecords {
+  items: RecordListItemSummary[];
+  nextCursor: string | null;
+}
+
+export interface RecordDetail extends RecordSummary {
+  photos: RecordPhotoSummary[];
+}
+
+interface DecodedRecordCursor {
+  createdAt: string;
+  id: string;
+}
+
+const RECORDS_DEFAULT_LIMIT = 20;
 
 @Injectable()
 export class RecordsService {
@@ -425,6 +455,112 @@ export class RecordsService {
     return this.toSummary(saved);
   }
 
+  /**
+   * 내 모든 여행 기록 목록(API 명세서 §5 GET /records) — 본인이 작성한 기록만,
+   * soft delete된 것은 제외. TripsService.list와 동일한 cursor 페이지네이션 패턴.
+   */
+  async listMyRecords(userId: string, query: ListRecordsQueryDto): Promise<PaginatedRecords> {
+    const limit = query.limit ?? RECORDS_DEFAULT_LIMIT;
+    const cursor = this.decodeRecordCursor(query.cursor);
+
+    const qb = this.travelRecordRepository
+      .createQueryBuilder('record')
+      .innerJoinAndSelect('record.trip', 'trip')
+      .where('record.userId = :userId', { userId })
+      .andWhere('record.deletedAt IS NULL')
+      .orderBy('record.createdAt', 'DESC')
+      .addOrderBy('record.id', 'DESC')
+      .take(limit + 1);
+
+    if (cursor) {
+      qb.andWhere('(record.createdAt, record.id) < (:cursorCreatedAt, :cursorId)', {
+        cursorCreatedAt: cursor.createdAt,
+        cursorId: cursor.id,
+      });
+    }
+
+    const rows = await qb.getMany();
+    const hasMore = rows.length > limit;
+    const page = hasMore ? rows.slice(0, limit) : rows;
+
+    const coverByRecordId = await this.loadRepresentativePhotoUrls(page.map((r) => r.id));
+
+    return {
+      items: page.map((record) =>
+        this.toListItemSummary(record, coverByRecordId.get(record.id) ?? null),
+      ),
+      nextCursor: hasMore ? this.encodeRecordCursor(page[page.length - 1]) : null,
+    };
+  }
+
+  /** 기록 상세(API 명세서 §5 GET /records/{recordId}) — 사진 목록 포함, 작성자 본인만. */
+  async getRecordDetail(recordId: string, userId: string): Promise<RecordDetail> {
+    const record = await this.findOwnedRecordById(recordId, userId);
+    const photos = await this.recordPhotoRepository.find({
+      where: { recordId: record.id },
+      order: { orderIndex: 'ASC' },
+    });
+    return { ...this.toSummary(record), photos: photos.map((photo) => this.toPhotoSummary(photo)) };
+  }
+
+  /**
+   * 기록 삭제(API 명세서 §5 DELETE /records/{recordId}) — travel_records는
+   * soft delete, 연결된 record_photos는 스토리지 파일까지 hard delete. 삭제된
+   * 사진 중 트립 대표사진이 있었으면 자동 해제(§2.6).
+   */
+  async deleteRecord(recordId: string, userId: string): Promise<void> {
+    const record = await this.findOwnedRecordById(recordId, userId);
+    const photos = await this.recordPhotoRepository.findBy({ recordId: record.id });
+
+    await Promise.all(
+      photos.map(async (photo) => {
+        const objectPath = StorageService.extractObjectPath(photo.storageUrl);
+        if (objectPath) {
+          await this.storageService.deletePermanent(objectPath);
+        }
+      }),
+    );
+    if (photos.length > 0) {
+      await this.recordPhotoRepository.delete({ recordId: record.id });
+    }
+
+    await this.travelRecordRepository.update({ id: record.id }, { deletedAt: new Date() });
+
+    if (photos.some((photo) => photo.isCover)) {
+      await this.tripsService.setCoverImage(record.tripId, null);
+    }
+  }
+
+  /**
+   * 여행 대표사진 지정(API 명세서 §2.6 PUT /trips/{tripId}/cover). recordPhotoId는
+   * 요청자 본인이 작성한 기록의 사진이어야 한다(타 멤버 사진이면 403). record_photos
+   * 쪽 isCover 플래그도 함께 갱신해 PATCH .../photos/{id}가 설정한 것과 상태가
+   * 어긋나지 않게 한다.
+   */
+  async setTripCover(tripId: string, userId: string, recordPhotoId: string): Promise<void> {
+    await this.tripsService.assertMember(tripId, userId);
+
+    const photo = await this.recordPhotoRepository.findOneBy({ id: recordPhotoId });
+    if (!photo) {
+      throw new BusinessException(RecordsErrorCode.RECORD_PHOTO_NOT_FOUND);
+    }
+    const record = await this.travelRecordRepository.findOneBy({ id: photo.recordId, tripId });
+    if (!record || record.userId !== userId) {
+      throw new BusinessException(RecordsErrorCode.RECORD_FORBIDDEN);
+    }
+
+    await this.clearOtherCoverPhotos(tripId, photo.id);
+    await this.recordPhotoRepository.update({ id: photo.id }, { isCover: true });
+    await this.tripsService.setCoverImage(tripId, photo.storageUrl);
+  }
+
+  /** 여행 대표사진 해제(API 명세서 §2.6 DELETE /trips/{tripId}/cover). */
+  async clearTripCover(tripId: string, userId: string): Promise<void> {
+    await this.tripsService.assertMember(tripId, userId);
+    await this.clearOtherCoverPhotos(tripId, null);
+    await this.tripsService.setCoverImage(tripId, null);
+  }
+
   private async findOwnedPhoto(recordId: string, recordPhotoId: string): Promise<RecordPhoto> {
     const photo = await this.recordPhotoRepository.findOneBy({ id: recordPhotoId, recordId });
     if (!photo) {
@@ -433,16 +569,101 @@ export class RecordsService {
     return photo;
   }
 
-  /** 같은 트립 안의 다른 record_photos 중 isCover=true였던 것들을 전부 해제한다. */
-  private async clearOtherCoverPhotos(tripId: string, excludePhotoId: string): Promise<void> {
-    await this.recordPhotoRepository
+  /** record.user_id == 요청자 검증(API 명세서 §5 비공개 원칙), tripId 없이 recordId만으로 조회. */
+  private async findOwnedRecordById(recordId: string, userId: string): Promise<TravelRecord> {
+    const record = await this.travelRecordRepository.findOneBy({
+      id: recordId,
+      deletedAt: IsNull(),
+    });
+    if (!record) {
+      throw new BusinessException(RecordsErrorCode.RECORD_NOT_FOUND);
+    }
+    if (record.userId !== userId) {
+      throw new BusinessException(RecordsErrorCode.RECORD_FORBIDDEN);
+    }
+    return record;
+  }
+
+  /**
+   * 기록 목록의 "대표사진"(개별 기록 단위 — 트립 대표사진과는 다른 개념) — 이
+   * 기록의 사진 중 isCover가 있으면 그것, 없으면 orderIndex가 가장 앞선 사진.
+   */
+  private async loadRepresentativePhotoUrls(recordIds: string[]): Promise<Map<string, string>> {
+    if (recordIds.length === 0) {
+      return new Map();
+    }
+    const photos = await this.recordPhotoRepository.find({
+      where: { recordId: In(recordIds) },
+      order: { orderIndex: 'ASC' },
+    });
+
+    const map = new Map<string, string>();
+    for (const photo of photos) {
+      if (photo.isCover || !map.has(photo.recordId)) {
+        map.set(photo.recordId, photo.storageUrl);
+      }
+    }
+    return map;
+  }
+
+  private toListItemSummary(
+    record: TravelRecord,
+    coverPhotoUrl: string | null,
+  ): RecordListItemSummary {
+    return {
+      id: record.id,
+      tripId: record.tripId,
+      title: record.title,
+      status: record.status,
+      tripCityName: record.trip.cityName,
+      tripStartDate: record.trip.startDate,
+      tripEndDate: record.trip.endDate,
+      coverPhotoUrl,
+      createdAt: record.createdAt,
+    };
+  }
+
+  private encodeRecordCursor(record: TravelRecord): string {
+    const payload: DecodedRecordCursor = {
+      createdAt: record.createdAt.toISOString(),
+      id: record.id,
+    };
+    return Buffer.from(JSON.stringify(payload)).toString('base64');
+  }
+
+  private decodeRecordCursor(cursor?: string): DecodedRecordCursor | null {
+    if (!cursor) {
+      return null;
+    }
+    try {
+      const parsed = JSON.parse(Buffer.from(cursor, 'base64').toString('utf8'));
+      if (typeof parsed.createdAt !== 'string' || typeof parsed.id !== 'string') {
+        throw new Error('invalid cursor shape');
+      }
+      return parsed as DecodedRecordCursor;
+    } catch {
+      throw new BusinessException(CommonErrorCode.VALIDATION_ERROR, '유효하지 않은 cursor입니다.');
+    }
+  }
+
+  /** 같은 트립 안의 record_photos 중 isCover=true였던 것들을 전부 해제한다.
+   *  [excludePhotoId]를 주면 그 사진만 제외하고 해제(재지정 시), null이면 전부 해제(해제 시). */
+  private async clearOtherCoverPhotos(
+    tripId: string,
+    excludePhotoId: string | null,
+  ): Promise<void> {
+    const qb = this.recordPhotoRepository
       .createQueryBuilder()
       .update(RecordPhoto)
       .set({ isCover: false })
       .where('is_cover = true')
-      .andWhere('id != :excludePhotoId', { excludePhotoId })
-      .andWhere('record_id IN (SELECT id FROM travel_records WHERE trip_id = :tripId)', { tripId })
-      .execute();
+      .andWhere('record_id IN (SELECT id FROM travel_records WHERE trip_id = :tripId)', { tripId });
+
+    if (excludePhotoId) {
+      qb.andWhere('id != :excludePhotoId', { excludePhotoId });
+    }
+
+    await qb.execute();
   }
 
   private buildPreviewUrl(photoRefId: string): string {
@@ -515,7 +736,11 @@ export class RecordsService {
     recordId: string,
     userId: string,
   ): Promise<TravelRecord> {
-    const record = await this.travelRecordRepository.findOneBy({ id: recordId, tripId });
+    const record = await this.travelRecordRepository.findOneBy({
+      id: recordId,
+      tripId,
+      deletedAt: IsNull(),
+    });
     if (!record) {
       throw new BusinessException(RecordsErrorCode.RECORD_NOT_FOUND);
     }

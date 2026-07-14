@@ -9,7 +9,9 @@ import { RecordPhoto } from './entities/record-photo.entity';
 import { PhotoBufferCleanupService } from './photo-buffer-cleanup.service';
 import { PhotoPreviewController } from './photo-preview.controller';
 import { RecordsController } from './records.controller';
+import { RecordsSummaryController } from './records-summary.controller';
 import { RecordsService } from './records.service';
+import { TripCoverController } from './trip-cover.controller';
 
 /**
  * Phase 11: 기록 세션 시작 → 메타데이터 등록 → 업로드(로컬 임시 버퍼) + TTL 삭제
@@ -24,7 +26,12 @@ import { RecordsService } from './records.service';
     TripsModule,
     StorageModule,
   ],
-  controllers: [RecordsController, PhotoPreviewController],
+  controllers: [
+    RecordsController,
+    PhotoPreviewController,
+    RecordsSummaryController,
+    TripCoverController,
+  ],
   providers: [
     RecordsService,
     PhotoBufferCleanupService,
