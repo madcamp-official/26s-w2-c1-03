@@ -6,6 +6,7 @@ import '../../../core/theme/app_colors.dart';
 import '../data/schedule_api.dart';
 import '../data/schedule_models.dart';
 import 'add_place_sheet.dart';
+import 'schedule_revise_screen.dart';
 
 /// 스케줄 편집 탭 — 장소 삭제 / 메모 수정. 순서 변경(드래그앤드롭)과 장소 추가,
 /// AI 재수정은 후속 커밋에서 이 화면에 얹는다. 편집 결과가 반영됐으면 pop(true)로
@@ -122,6 +123,27 @@ class _ScheduleEditScreenState extends ConsumerState<ScheduleEditScreen> {
     }
   }
 
+  /// AI 재수정 화면으로 진입. 유저가 제안을 수용(apply)하면 true로 돌아오므로,
+  /// 이 편집 화면도 최신 스케줄로 다시 불러온다.
+  Future<void> _openRevise() async {
+    final applied = await Navigator.of(context).push<bool>(
+      MaterialPageRoute(
+        builder: (_) => ScheduleReviseScreen(tripId: widget.tripId),
+      ),
+    );
+    if (applied != true || !mounted) return;
+    try {
+      final schedule = await ref.read(scheduleApiProvider).getSchedule(widget.tripId);
+      if (!mounted) return;
+      setState(() {
+        _places = [for (final day in schedule.days) ...day.places]..sort(_byDayThenOrder);
+        _changed = true;
+      });
+    } on DioException catch (e) {
+      _showError(e.error, '수정된 일정을 불러오지 못했어요.');
+    }
+  }
+
   Future<void> _addPlace(int dayNumber) async {
     final result = await showModalBottomSheet<AddPlaceResult>(
       context: context,
@@ -204,6 +226,17 @@ class _ScheduleEditScreenState extends ConsumerState<ScheduleEditScreen> {
             '일정 편집',
             style: TextStyle(color: AppColors.ink900, fontWeight: FontWeight.w800),
           ),
+          actions: [
+            TextButton.icon(
+              onPressed: _openRevise,
+              style: TextButton.styleFrom(foregroundColor: AppColors.green800),
+              icon: const Icon(Icons.auto_awesome, size: 16),
+              label: const Text(
+                'AI로 수정',
+                style: TextStyle(fontSize: 13.5, fontWeight: FontWeight.w800),
+              ),
+            ),
+          ],
         ),
         body: SafeArea(
           child: days.isEmpty
