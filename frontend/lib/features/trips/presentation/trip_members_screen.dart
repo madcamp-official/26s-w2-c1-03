@@ -4,8 +4,10 @@ import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../core/network/api_exception.dart';
+import '../../../core/network/trip_socket.dart';
 import '../../../core/theme/app_colors.dart';
 import '../../../core/widgets/app_back_button.dart';
+import '../../auth/presentation/login_controller.dart' show tokenStorageProvider;
 import '../../profile/presentation/profile_controller.dart' show usersApiProvider;
 import '../data/trip_member_models.dart';
 import '../data/trip_members_api.dart';
@@ -49,18 +51,28 @@ class _TripMembersScreenState extends ConsumerState<TripMembersScreen> {
   _MembersState _state = const _MembersLoading();
   bool _busy = false;
   Timer? _pollTimer;
+  TripSocket? _socket;
 
   @override
   void initState() {
     super.initState();
     _load();
-    // WS 실시간 동기화 전 폴백(plan.md Phase 10): 다른 멤버의 참여/역할 변경이
+    // 참여/퇴장 실시간 반영(member:joined/left). 역할 변경은 WS 이벤트가 없어
+    // 아래 폴링이 커버한다.
+    _socket = TripSocket(
+      tripId: widget.tripId,
+      tokenStorage: ref.read(tokenStorageProvider),
+      onMembersChanged: _refreshSilently,
+    );
+    unawaited(_socket!.connect());
+    // WS 미연결/누락 대비 폴백(plan.md Phase 10): 다른 멤버의 참여/역할 변경이
     // 늦어도 15초 안에 보이도록 조용히 재조회한다. 실패는 무시(다음 주기에 재시도).
     _pollTimer = Timer.periodic(const Duration(seconds: 15), (_) => _refreshSilently());
   }
 
   @override
   void dispose() {
+    _socket?.dispose();
     _pollTimer?.cancel();
     super.dispose();
   }

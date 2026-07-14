@@ -4,7 +4,9 @@ import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../core/network/api_exception.dart';
+import '../../../core/network/trip_socket.dart';
 import '../../../core/theme/app_colors.dart';
+import '../../auth/presentation/login_controller.dart' show tokenStorageProvider;
 import '../../../core/utils/date_format.dart';
 import '../../../core/widgets/app_back_button.dart';
 import '../../../core/widgets/app_button.dart';
@@ -57,17 +59,41 @@ class _TripDetailScreenState extends ConsumerState<TripDetailScreen> {
   bool _editing = false;
   bool _saving = false;
   bool _deleting = false;
+  TripSocket? _socket;
 
   @override
   void initState() {
     super.initState();
     _load();
+    // 공동 편집 실시간 반영(plan.md Phase 10): 다른 멤버의 일정 변경/AI 재생성을
+    // 즉시 반영한다. 연결 실패·거부 시에도 기존 새로고침/복귀 시 반영으로 동작한다.
+    _socket = TripSocket(
+      tripId: widget.tripId,
+      tokenStorage: ref.read(tokenStorageProvider),
+      onScheduleChanged: _reloadSilently,
+    );
+    unawaited(_socket!.connect());
   }
 
   @override
   void dispose() {
+    _socket?.dispose();
     _titleController.dispose();
     super.dispose();
+  }
+
+  /// WS 이벤트 수신 시 스피너 없이 데이터만 교체한다. 인라인 수정 중에는 입력을
+  /// 덮어쓰지 않도록 건너뛴다(저장/취소 후 다음 이벤트나 새로고침에서 반영).
+  Future<void> _reloadSilently() async {
+    if (!mounted || _editing || _saving || _deleting || _state is! _DetailLoaded) return;
+    try {
+      final trip = await ref.read(tripsApiProvider).getDetail(widget.tripId);
+      final schedule = await ref.read(scheduleApiProvider).getSchedule(widget.tripId);
+      if (!mounted || _editing) return;
+      setState(() => _state = _DetailLoaded(trip, schedule));
+    } on DioException {
+      // 조용한 갱신 실패는 무시 — 다음 이벤트나 수동 새로고침에서 회복된다.
+    }
   }
 
   Future<void> _load() async {

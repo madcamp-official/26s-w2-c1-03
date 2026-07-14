@@ -467,19 +467,19 @@ erDiagram
   - [x] `PATCH /trips/{tripId}/members/{userId}` — 역할 변경, `owner`만 가능, 마지막 owner 강등 차단
   - [x] `DELETE /trips/{tripId}/members/{userId}` — 멤버 내보내기, `owner`만 가능, 마지막 owner 추방 차단
   - [x] `DELETE /trips/{tripId}/members/me` — 자진 탈퇴(`:userId` 라우트보다 먼저 선언해 `me` 매칭 보장), 마지막 owner는 탈퇴 불가
-- **BE 체크리스트 (WebSocket, 선택)**:
-  - [ ] `collaboration/collaboration.gateway.ts` — 연결 시 JWT 검증 + `trip_members` 소속 확인, 미소속/토큰 만료 시 **4403**으로 close(§10, API 명세서 §0)
-  - [ ] `schedule:op` 수신(`opId`, `type: add|remove|move|editMemo`) → 다른 멤버에게 브로드캐스트(+ `authorUserId`)
-  - [ ] `presence:ping` 수신 → 접속 유지
-  - [ ] `schedule:generated` 브로드캐스트(Phase 8 완료 시 연동)
-  - [ ] `schedule:conflict` 브로드캐스트 — `trip_places.updated_at` 기반 낙관적 잠금, stale 변경 거부 후 서버 최신 상태 강제 전달(§10.1)
-  - [ ] `member:joined`/`member:left` 브로드캐스트
-  - [ ] Service 단위 테스트로 낙관적 잠금 충돌 처리 케이스 반드시 검증(§13 — 손으로 검증하기 어려운 로직)
+- **BE 체크리스트 (WebSocket, 선택)** — ✅ 완료(2026-07-14). Socket.IO(`@nestjs/platform-socket.io@10`, 네임스페이스 `ws/trips`, handshake `auth.token`+query `tripId`)로 구현. 도메인 서비스(Trips/Schedule)→Gateway는 순환 의존을 피하려고 `CollaborationEventBus`(의존 없는 최소 모듈)를 사이에 둠:
+  - [x] `collaboration/collaboration.gateway.ts` — 연결 시 JWT 검증 + `trip_members` 소속 확인, 미소속/토큰 만료 시 **4403** close(§10, API 명세서 §0). *Socket.IO는 원시 WS close 코드를 지정할 수 없어 `connection:rejected { code: 4403 }` 이벤트 통지 후 disconnect로 대체*
+  - [x] `schedule:op` 수신(`opId`, `type: add|remove|move|editMemo`) → ScheduleService REST용 메서드로 적용 후 다른 멤버에게 브로드캐스트(+ `authorUserId`). REST 편집도 `schedule:changed { authorUserId }`로 동일 채널에 브로드캐스트(§3.2)
+  - [x] `presence:ping` 수신 → 접속 유지(ack 응답)
+  - [x] `schedule:generated` 브로드캐스트(Phase 8 이월분 해소 — generate 성공 시 이벤트 버스로 발행)
+  - [x] `schedule:conflict` 브로드캐스트 — `trip_places.updated_at` 기반 낙관적 잠금(`conflict-resolution.service.ts`), op의 `baseUpdatedAt`(확장 필드)보다 서버가 새로우면 stale 거부 후 서버 최신 상태 강제 전달, 이미 삭제된 항목은 `serverState: null`(§10.1)
+  - [x] `member:joined`/`member:left` 브로드캐스트(joinByToken 신규 참여/추방/자진 탈퇴 시, 닉네임 포함)
+  - [x] Service 단위 테스트로 낙관적 잠금 충돌 처리 케이스 검증 — `conflict-resolution.service.spec.ts` 12건(§13)
 - **FE 체크리스트** — REST 연동 완료(2026-07-14). 신규 패키지 `share_plus`/`app_links`, 참여자 화면(`trip_members_screen.dart`)·초대 시트(`invite_link_sheet.dart`)·가입 화면(`join_trip_screen.dart`)·딥링크 수신기(`core/deeplink/invite_deep_link_handler.dart`) 추가:
   - [x] 공유 링크 생성/공유 시트 UI — 만료 기간 칩(24h/7일/무기한), OS 공유 시트 + 클립보드 복사. 참여자 화면 앱바에서 owner/editor에게만 노출
   - [x] 참여자 목록/역할 변경/내보내기/자진 탈퇴 화면 — owner에게만 관리 메뉴, 자진 탈퇴 시 상세 화면까지 닫힘
   - [x] 딥링크로 초대 링크 참여 처리 — `tripandend://join?token=` 스킴(Android intent-filter + iOS CFBundleURLTypes), 콜드 스타트/실행 중 수신 모두 지원, **로그인 전 수신 시 토큰을 보관했다가 로그인 완료 후 이어서 처리**
-  - [ ] (WS 구현되면) 실시간 반영 — `schedule:op`/`member:joined`/`member:left` 구독
+  - [x] (WS 구현되면) 실시간 반영 — `core/network/trip_socket.dart`(socket_io_client)가 `schedule:changed/generated/op/conflict`·`member:joined/left`를 구독, 여행 상세는 일정 조용히 재조회(인라인 수정 중엔 입력 보호), 참여자 화면은 목록 재조회. 연결 거부(4403) 시 재연결 없이 폴링 폴백으로 동작
   - [x] (WS 미구현/지연 시) 폴링 또는 "새로고침 시 반영"으로 폴백(§15) — 참여자 화면 15초 조용한 폴링, 일정은 기존 새로고침/복귀 시 반영(편집 중 폴링은 낙관적 업데이트와 충돌 위험이 있어 의도적으로 제외)
 - **완료 조건**: 초대 링크로 참여 및 역할 변경/추방이 정상 동작(REST 필수). WebSocket은 되면 실시간 반영, 안 되면 "새로고침 시 반영"까지만 허용(§15)
 - **선행 Phase**: Phase 9

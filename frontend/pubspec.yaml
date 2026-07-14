@@ -56,9 +56,11 @@ dependencies:
   # local.properties의 mapsApiKey → AndroidManifest ${mapsApiKey}로 주입한다.
   google_maps_flutter: ^2.9.0
 
-  # 공동 여행 계획(plan.md Phase 10) — 초대 링크 OS 공유 시트 + 딥링크 수신
+  # 공동 여행 계획(plan.md Phase 10) — 초대 링크 OS 공유 시트 + 딥링크 수신 +
+  # 실시간 동기화(백엔드 CollaborationGateway가 Socket.IO라 socket_io_client 사용)
   share_plus: ^10.1.4
   app_links: ^6.3.3
+  socket_io_client: ^2.0.3+1
 
   # 온디바이스 사진 필터링 파이프라인(plan.md Phase 11, 기능명세서 §3.1/§8.1~8.2)
   photo_manager: ^3.10.0
