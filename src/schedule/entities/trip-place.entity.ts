@@ -56,6 +56,10 @@ export class TripPlace {
   @Column({ type: 'text', nullable: true })
   memo: string | null;
 
+  /** 이 장소에서 쓴/쓸 비용(원 단위). 미입력 시 null. */
+  @Column({ type: 'int', nullable: true })
+  cost: number | null;
+
   @Column('uuid')
   addedBy: string;
 

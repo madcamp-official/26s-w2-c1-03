@@ -31,12 +31,12 @@ describe('GooglePlacesClient', () => {
     jest.restoreAllMocks();
   });
 
-  it('매칭되면 rating/reviewCount를 반환한다', async () => {
+  it('매칭되면 rating/reviewCount/externalId를 반환한다', async () => {
     global.fetch = jest.fn().mockResolvedValue(
       mockFetchResponse({
         ok: true,
         status: 200,
-        body: { places: [{ rating: 4.5, userRatingCount: 1234 }] },
+        body: { places: [{ id: 'ChIJgadeok', rating: 4.5, userRatingCount: 1234 }] },
       }),
     );
 
@@ -46,7 +46,7 @@ describe('GooglePlacesClient', () => {
       longitude: 128.8,
     });
 
-    expect(result).toEqual({ rating: 4.5, reviewCount: 1234 });
+    expect(result).toEqual({ rating: 4.5, reviewCount: 1234, externalId: 'ChIJgadeok' });
     expect(global.fetch).toHaveBeenCalledWith(
       'https://places.googleapis.com/v1/places:searchText',
       expect.objectContaining({
@@ -141,6 +141,64 @@ describe('GooglePlacesClient', () => {
       await expect(client.getPlaceDetails('ChIJ123')).rejects.toMatchObject({
         code: 'GOOGLE_PLACES_REQUEST_FAILED',
       });
+    });
+  });
+
+  describe('getPlaceReviews', () => {
+    it('리뷰 목록을 매핑해 반환한다', async () => {
+      global.fetch = jest.fn().mockResolvedValue(
+        mockFetchResponse({
+          ok: true,
+          status: 200,
+          body: {
+            reviews: [
+              {
+                authorAttribution: { displayName: '홍길동', photoUri: 'https://x/y.jpg' },
+                rating: 5,
+                text: { text: '최고예요' },
+                relativePublishTimeDescription: '1주 전',
+              },
+              { rating: 3 },
+            ],
+          },
+        }),
+      );
+
+      const result = await client.getPlaceReviews('ChIJ123');
+
+      expect(result).toEqual([
+        {
+          authorName: '홍길동',
+          rating: 5,
+          text: '최고예요',
+          relativeTime: '1주 전',
+          profilePhotoUrl: 'https://x/y.jpg',
+        },
+        { authorName: '익명', rating: 3, text: null, relativeTime: null, profilePhotoUrl: null },
+      ]);
+      const [calledUrl, init] = (global.fetch as jest.Mock).mock.calls[0];
+      expect(calledUrl).toBe('https://places.googleapis.com/v1/places/ChIJ123');
+      expect(init).toMatchObject({ headers: expect.objectContaining({ 'X-Goog-FieldMask': 'reviews' }) });
+    });
+
+    it('reviews 필드가 없으면 빈 배열을 반환한다', async () => {
+      global.fetch = jest
+        .fn()
+        .mockResolvedValue(mockFetchResponse({ ok: true, status: 200, body: {} }));
+
+      expect(await client.getPlaceReviews('ChIJ123')).toEqual([]);
+    });
+
+    it('HTTP 오류여도 예외를 던지지 않고 빈 배열을 반환한다', async () => {
+      global.fetch = jest.fn().mockResolvedValue(mockFetchResponse({ ok: false, status: 500 }));
+
+      expect(await client.getPlaceReviews('ChIJ123')).toEqual([]);
+    });
+
+    it('네트워크 오류여도 예외를 던지지 않고 빈 배열을 반환한다', async () => {
+      global.fetch = jest.fn().mockRejectedValue(new Error('network down'));
+
+      expect(await client.getPlaceReviews('ChIJ123')).toEqual([]);
     });
   });
 });

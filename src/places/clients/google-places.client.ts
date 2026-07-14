@@ -13,6 +13,17 @@ export interface MatchPlaceParams {
 export interface PlacePopularity {
   rating: number;
   reviewCount: number;
+  /** 매칭된 Google place_id. 리뷰 상세 조회(getPlaceReviews)에 쓴다. 응답에 id가 없으면 null. */
+  externalId: string | null;
+}
+
+/** 리뷰 하나(작성자·별점·본문·상대 시각). 본문 없이 별점만 남긴 리뷰는 text가 null. */
+export interface GoogleReview {
+  authorName: string;
+  rating: number;
+  text: string | null;
+  relativeTime: string | null;
+  profilePhotoUrl: string | null;
 }
 
 /** 키워드 검색(searchText) 결과 한 건. externalId = Google place id. */
@@ -27,7 +38,7 @@ export interface GooglePlaceResult {
 }
 
 interface SearchTextResponseBody {
-  places?: Array<{ rating?: number; userRatingCount?: number }>;
+  places?: Array<{ id?: string; rating?: number; userRatingCount?: number }>;
 }
 
 interface PlaceDetailsResponseBody {
@@ -37,6 +48,15 @@ interface PlaceDetailsResponseBody {
   location?: { latitude?: number; longitude?: number };
   rating?: number;
   userRatingCount?: number;
+}
+
+interface PlaceReviewsResponseBody {
+  reviews?: Array<{
+    authorAttribution?: { displayName?: string; photoUri?: string };
+    rating?: number;
+    text?: { text?: string };
+    relativePublishTimeDescription?: string;
+  }>;
 }
 
 interface SearchTextPlacesResponseBody {
@@ -67,7 +87,10 @@ export class GooglePlacesClient {
     this.apiKey = configService.getOrThrow<string>('GOOGLE_PLACES_API_KEY');
   }
 
-  /** 이름+좌표로 가장 근접한 장소를 찾아 평점/리뷰수를 반환한다. 매칭 결과가 없으면 null. */
+  /**
+   * 이름+좌표로 가장 근접한 장소를 찾아 평점/리뷰수(+매칭된 place_id)를 반환한다.
+   * 매칭 결과가 없으면 null. place_id는 TourAPI 장소의 리뷰 상세 조회(getPlaceReviews)에 쓴다.
+   */
   async matchPlace(params: MatchPlaceParams): Promise<PlacePopularity | null> {
     let response: globalThis.Response;
     try {
@@ -76,7 +99,7 @@ export class GooglePlacesClient {
         headers: {
           'Content-Type': 'application/json',
           'X-Goog-Api-Key': this.apiKey,
-          'X-Goog-FieldMask': 'places.rating,places.userRatingCount',
+          'X-Goog-FieldMask': 'places.id,places.rating,places.userRatingCount',
         },
         body: JSON.stringify({
           textQuery: params.name,
@@ -109,7 +132,11 @@ export class GooglePlacesClient {
     if (!best || best.rating === undefined || best.userRatingCount === undefined) {
       return null;
     }
-    return { rating: best.rating, reviewCount: best.userRatingCount };
+    return {
+      rating: best.rating,
+      reviewCount: best.userRatingCount,
+      externalId: best.id ?? null,
+    };
   }
 
   /**
@@ -209,5 +236,47 @@ export class GooglePlacesClient {
       rating: p.rating ?? null,
       reviewCount: p.userRatingCount ?? null,
     };
+  }
+
+  /**
+   * place_id로 리뷰(최대 5개, Google API 제한)를 실시간 조회한다. 상세 탭을 열 때만
+   * 호출되는 무거운 필드(Enterprise+Atmosphere SKU)라 후보/검색 목록 조회에는 쓰지 않는다.
+   * 실패해도 상세 화면 전체를 막지 않도록 빈 배열로 폴백한다(예외를 던지지 않음).
+   */
+  async getPlaceReviews(placeId: string): Promise<GoogleReview[]> {
+    let response: globalThis.Response;
+    try {
+      response = await fetch(`${PLACE_DETAILS_BASE_URL}/${encodeURIComponent(placeId)}`, {
+        method: 'GET',
+        headers: {
+          'X-Goog-Api-Key': this.apiKey,
+          'X-Goog-FieldMask': 'reviews',
+          'Accept-Language': 'ko',
+        },
+      });
+    } catch (error) {
+      this.logger.warn(
+        `Google Places 리뷰 조회 실패(placeId=${placeId}): ${
+          error instanceof Error ? error.message : error
+        }`,
+      );
+      return [];
+    }
+
+    if (!response.ok) {
+      this.logger.warn(`Google Places 리뷰 조회 실패: status=${response.status}`);
+      return [];
+    }
+
+    const body = (await response.json()) as PlaceReviewsResponseBody;
+    return (body.reviews ?? [])
+      .filter((r) => r.rating !== undefined)
+      .map((r) => ({
+        authorName: r.authorAttribution?.displayName ?? '익명',
+        rating: r.rating!,
+        text: r.text?.text ?? null,
+        relativeTime: r.relativePublishTimeDescription ?? null,
+        profilePhotoUrl: r.authorAttribution?.photoUri ?? null,
+      }));
   }
 }

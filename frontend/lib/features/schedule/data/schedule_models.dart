@@ -45,6 +45,7 @@ class ScheduledTripPlace {
     required this.lng,
     required this.imageUrl,
     required this.memo,
+    required this.cost,
     required this.category,
   });
 
@@ -61,6 +62,8 @@ class ScheduledTripPlace {
   final double? lng;
   final String? imageUrl;
   final String? memo;
+  /// 이 장소에서 쓴/쓸 비용(원 단위). 미입력 시 null.
+  final int? cost;
 
   /// 'attraction' | 'restaurant' | 'cafe'. custom(직접 입력) 장소는 null — 지도
   /// 마커·목록 배지 색 구분에 쓴다.
@@ -79,6 +82,7 @@ class ScheduledTripPlace {
         lng: (json['lng'] as num?)?.toDouble(),
         imageUrl: json['imageUrl'] as String?,
         memo: json['memo'] as String?,
+        cost: json['cost'] as int?,
         category: json['category'] as String?,
       );
 
@@ -95,6 +99,7 @@ class ScheduledTripPlace {
         lng: lng,
         imageUrl: imageUrl,
         memo: memo,
+        cost: cost,
         category: category,
       );
 }

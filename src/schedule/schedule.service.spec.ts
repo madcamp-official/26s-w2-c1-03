@@ -556,6 +556,25 @@ describe('ScheduleService', () => {
     expect(rows[0]).toMatchObject({ dayNumber: 1, orderInDay: 1 });
   });
 
+  it('updatePlace: startTime/cost를 함께 수정하면 둘 다 반영되고, null이면 지워진다', async () => {
+    const rows = [buildRow('t1', 1, 1)];
+    setupEditRepo(rows);
+
+    const { tripPlace } = await service.updatePlace('trip-1', 'user-1', 't1', {
+      startTime: '09:30',
+      cost: 15000,
+    });
+    expect(tripPlace.startTime).toBe('09:30');
+    expect(tripPlace.cost).toBe(15000);
+
+    const { tripPlace: cleared } = await service.updatePlace('trip-1', 'user-1', 't1', {
+      startTime: null,
+      cost: null,
+    });
+    expect(cleared.startTime).toBeNull();
+    expect(cleared.cost).toBeNull();
+  });
+
   it('updatePlace: 다른 날로 이동하면 원래 날과 대상 날 모두 1..n으로 재부여된다', async () => {
     const rows = [
       buildRow('t1', 1, 1),

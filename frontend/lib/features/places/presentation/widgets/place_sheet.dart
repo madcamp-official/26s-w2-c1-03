@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 import '../../../../core/theme/app_colors.dart';
 import '../../data/places_models.dart';
+import 'place_detail_panel.dart';
+import 'place_visuals.dart';
 
 /// 지도 위에 겹쳐 여닫는 관광지 목록.
 ///
@@ -19,6 +21,11 @@ class PlaceSheet extends StatefulWidget {
     required this.selectedDayNumbers,
     required this.onRowTap,
     required this.onToggle,
+    this.detailPlace,
+    this.detailData,
+    this.detailLoading = false,
+    this.detailError,
+    this.onCloseDetail,
   });
 
   final List<PlaceCandidate> candidates;
@@ -31,6 +38,14 @@ class PlaceSheet extends StatefulWidget {
   final Map<String, int> selectedDayNumbers;
   final ValueChanged<PlaceCandidate> onRowTap;
   final ValueChanged<PlaceCandidate> onToggle;
+
+  /// null이 아니면 목록 대신 이 장소의 상세 탭(리뷰 포함)을 보여준다.
+  final PlaceCandidate? detailPlace;
+  /// [detailPlace] 상세 조회 결과(리뷰 포함) — 로딩 중이면 null.
+  final PlaceCandidate? detailData;
+  final bool detailLoading;
+  final String? detailError;
+  final VoidCallback? onCloseDetail;
 
   @override
   State<PlaceSheet> createState() => _PlaceSheetState();
@@ -123,16 +138,30 @@ class _PlaceSheetState extends State<PlaceSheet> {
                   child: Column(
                     children: [
                       const _SheetHandle(),
-                      _SheetHeader(
-                        label: widget.listLabel,
-                        total: widget.candidates.length,
-                        selectedCount: widget.selectedIds.length,
-                      ),
+                      // 상세 탭이 열려 있으면 자체 헤더(뒤로가기+이름)를 쓰므로 목록 헤더는 숨긴다.
+                      if (widget.detailPlace == null)
+                        _SheetHeader(
+                          label: widget.listLabel,
+                          total: widget.candidates.length,
+                          selectedCount: widget.selectedIds.length,
+                        ),
                     ],
                   ),
                 ),
-                // 목록 — 자체 스크롤 컨트롤러라 시트 크기와 독립적으로 스크롤된다.
-                Expanded(child: _buildList()),
+                // 목록/상세 — 자체 스크롤 컨트롤러라 시트 크기와 독립적으로 스크롤된다.
+                Expanded(
+                  child: widget.detailPlace != null
+                      ? PlaceDetailPanel(
+                          place: widget.detailPlace!,
+                          detail: widget.detailData,
+                          loading: widget.detailLoading,
+                          error: widget.detailError,
+                          selected: widget.selectedIds.contains(widget.detailPlace!.id),
+                          onToggle: () => widget.onToggle(widget.detailPlace!),
+                          onClose: widget.onCloseDetail ?? () {},
+                        )
+                      : _buildList(),
+                ),
               ],
             ),
           ),
@@ -257,7 +286,7 @@ class _PlaceListRow extends StatelessWidget {
   /// 선택된 경우에만 값이 있다(선택 안 됐으면 null) — 상단 일차 탭에서 정해진 날짜.
   final int? dayNumber;
   final bool showDivider;
-  final VoidCallback onTap; // 행 탭 = 지도 확대 이동
+  final VoidCallback onTap; // 행 탭 = 상세 탭 열기(지도 확대 이동도 함께)
   final VoidCallback onToggle; // 오른쪽 원 = 선택 토글
 
   @override
@@ -275,7 +304,7 @@ class _PlaceListRow extends StatelessWidget {
         ),
         child: Row(
           children: [
-            _PlaceThumbnail(candidate: candidate, size: 48),
+            PlaceThumbnail(candidate: candidate, size: 48),
             const SizedBox(width: 12),
             Expanded(
               child: Column(
@@ -319,7 +348,7 @@ class _PlaceListRow extends StatelessWidget {
               behavior: HitTestBehavior.opaque,
               child: Padding(
                 padding: const EdgeInsets.all(8),
-                child: _SelectionCircleValue(selected: selected),
+                child: SelectionCircleValue(selected: selected),
               ),
             ),
           ],
@@ -366,65 +395,3 @@ class _DayBadge extends StatelessWidget {
   }
 }
 
-/// design.md §5.7 체크서클. 선택됨 = ink900 배경 + 라임 체크, 미선택 = outline만.
-class _SelectionCircleValue extends StatelessWidget {
-  const _SelectionCircleValue({required this.selected});
-
-  final bool selected;
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      width: 28,
-      height: 28,
-      decoration: BoxDecoration(
-        shape: BoxShape.circle,
-        color: selected ? AppColors.ink900 : Colors.transparent,
-        border: selected
-            ? null
-            : Border.all(color: AppColors.ink200, width: 1.8),
-      ),
-      child: selected
-          ? const Icon(Icons.check, size: 16, color: AppColors.lime)
-          : null,
-    );
-  }
-}
-
-class _PlaceThumbnail extends StatelessWidget {
-  const _PlaceThumbnail({required this.candidate, this.size = 44});
-
-  final PlaceCandidate candidate;
-  final double size;
-
-  @override
-  Widget build(BuildContext context) {
-    final imageUrl = candidate.imageUrl;
-    return ClipRRect(
-      borderRadius: BorderRadius.circular(12),
-      child: Container(
-        width: size,
-        height: size,
-        color: AppColors.surfaceSubtle,
-        alignment: Alignment.center,
-        child: imageUrl == null
-            ? Icon(
-                Icons.place_outlined,
-                color: AppColors.ink400,
-                size: size * 0.45,
-              )
-            : Image.network(
-                imageUrl,
-                fit: BoxFit.cover,
-                width: size,
-                height: size,
-                errorBuilder: (_, _, _) => Icon(
-                  Icons.place_outlined,
-                  color: AppColors.ink400,
-                  size: size * 0.45,
-                ),
-              ),
-      ),
-    );
-  }
-}

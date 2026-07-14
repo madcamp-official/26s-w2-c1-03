@@ -65,6 +65,13 @@ class _PlaceSelectionScreenState extends ConsumerState<PlaceSelectionScreen> {
   GoogleMapController? _mapController;
   bool _generating = false;
 
+  /// 하단 시트 상세 탭 — null이면 목록 모드. 상세 조회는 매번 새로 받아온다(리뷰는
+  /// 상세를 열 때만 조회하는 무거운 필드라 목록 응답엔 없다).
+  PlaceCandidate? _detailPlace;
+  PlaceCandidate? _detailData;
+  bool _detailLoading = false;
+  String? _detailError;
+
   /// 상단 일차 탭에서 현재 골라 둔 날짜 — 지금부터 선택하는 장소는 이 날짜로 배정된다.
   int _currentDay = 1;
 
@@ -276,6 +283,34 @@ class _PlaceSelectionScreenState extends ConsumerState<PlaceSelectionScreen> {
     setState(() => _currentDay = day);
   }
 
+  /// 목록 행 탭 — 지도를 확대 이동하고, 하단 시트를 상세 탭(리뷰 포함)으로 전환한다.
+  Future<void> _openDetail(PlaceCandidate candidate) async {
+    _focusPlace(candidate);
+    setState(() {
+      _detailPlace = candidate;
+      _detailData = null;
+      _detailLoading = true;
+      _detailError = null;
+    });
+    try {
+      final detail = await ref.read(placesApiProvider).getDetail(candidate.id);
+      if (!mounted || _detailPlace?.id != candidate.id) return;
+      setState(() {
+        _detailData = detail;
+        _detailLoading = false;
+      });
+    } on DioException catch (e) {
+      if (!mounted || _detailPlace?.id != candidate.id) return;
+      final error = e.error;
+      setState(() {
+        _detailLoading = false;
+        _detailError = error is ApiException ? error.message : '상세 정보를 불러오지 못했어요.';
+      });
+    }
+  }
+
+  void _closeDetail() => setState(() => _detailPlace = null);
+
   /// 지도를 해당 장소로 확대 이동한다(선택 상태는 건드리지 않음).
   void _focusPlace(PlaceCandidate candidate) {
     if (candidate.lat == null || candidate.lng == null) return;
@@ -473,8 +508,13 @@ class _PlaceSelectionScreenState extends ConsumerState<PlaceSelectionScreen> {
                           ? '이 카테고리엔 장소가 없어'
                           : '이 지역에서 찾은 장소가 없어'),
                 selectedDayNumbers: _selectedDayNumbers,
-                onRowTap: _focusPlace,
+                onRowTap: _openDetail,
                 onToggle: _toggleSelected,
+                detailPlace: _detailPlace,
+                detailData: _detailData,
+                detailLoading: _detailLoading,
+                detailError: _detailError,
+                onCloseDetail: _closeDetail,
               ),
             ),
           ],

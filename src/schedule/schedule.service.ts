@@ -42,6 +42,8 @@ export interface ScheduledTripPlaceDto {
   lng: number | null;
   imageUrl: string | null;
   memo: string | null;
+  /** 이 장소에서 쓴/쓸 비용(원 단위). 미입력 시 null. */
+  cost: number | null;
   /** attraction/restaurant/cafe — 지도 마커·목록 배지 색 구분용. custom 장소(placeId 없음)는 null. */
   category: SchedulePlaceCategory | null;
 }
@@ -420,6 +422,12 @@ export class ScheduleService {
       const toSave = new Set<TripPlace>([target]);
       if (dto.memo !== undefined) {
         target.memo = dto.memo;
+      }
+      if (dto.startTime !== undefined) {
+        target.startTime = dto.startTime;
+      }
+      if (dto.cost !== undefined) {
+        target.cost = dto.cost;
       }
       if (dto.dayNumber !== undefined || dto.orderInDay !== undefined) {
         target.dayNumber = dto.dayNumber ?? target.dayNumber;
@@ -1246,6 +1254,7 @@ export class ScheduleService {
       lng: info?.lng ?? null,
       imageUrl: info?.imageUrl ?? null,
       memo: row.memo ?? null,
+      cost: row.cost ?? null,
       category: info?.category ?? null,
     };
   }

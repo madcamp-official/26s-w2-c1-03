@@ -14,6 +14,7 @@ class PlaceCandidate {
     required this.tel,
     required this.rating,
     required this.reviewCount,
+    this.reviews = const [],
   });
 
   final String id;
@@ -36,6 +37,9 @@ class PlaceCandidate {
   final double? rating;
   final int? reviewCount;
 
+  /// Google 리뷰(최대 5개). 목록/검색 응답은 항상 빈 배열 — 상세 조회(getDetail)에서만 채워진다.
+  final List<PlaceReview> reviews;
+
   factory PlaceCandidate.fromJson(Map<String, dynamic> json) => PlaceCandidate(
     id: json['id'] as String,
     source: json['source'] as String,
@@ -50,5 +54,33 @@ class PlaceCandidate {
     tel: json['tel'] as String?,
     rating: (json['rating'] as num?)?.toDouble(),
     reviewCount: json['reviewCount'] as int?,
+    reviews: (json['reviews'] as List<dynamic>? ?? const [])
+        .map((e) => PlaceReview.fromJson(e as Map<String, dynamic>))
+        .toList(),
+  );
+}
+
+/// Google 리뷰 한 건 — 장소 상세 탭에서 보여준다.
+class PlaceReview {
+  const PlaceReview({
+    required this.authorName,
+    required this.rating,
+    required this.text,
+    required this.relativeTime,
+    required this.profilePhotoUrl,
+  });
+
+  final String authorName;
+  final double rating;
+  final String? text;
+  final String? relativeTime;
+  final String? profilePhotoUrl;
+
+  factory PlaceReview.fromJson(Map<String, dynamic> json) => PlaceReview(
+    authorName: json['authorName'] as String,
+    rating: (json['rating'] as num).toDouble(),
+    text: json['text'] as String?,
+    relativeTime: json['relativeTime'] as String?,
+    profilePhotoUrl: json['profilePhotoUrl'] as String?,
   );
 }

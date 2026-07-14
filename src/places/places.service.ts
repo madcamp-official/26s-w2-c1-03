@@ -5,6 +5,7 @@ import { TripsService } from '../trips/trips.service';
 import {
   GooglePlaceResult,
   GooglePlacesClient,
+  GoogleReview,
   PlacePopularity,
 } from './clients/google-places.client';
 import {
@@ -38,6 +39,19 @@ export interface PlaceCandidateDto {
    * 근거값 — 관광지(12)만 매칭되고 음식점/쇼핑·미매칭은 null(TourAPI 기본순 폴백).
    */
   concentrationRate: number | null;
+  /**
+   * Google 리뷰(최대 5개). 상세 조회(getPlaceDetail) 응답에만 채워지고, 목록/검색
+   * 응답은 항상 빈 배열 — 리뷰 조회는 비용이 큰 필드라 사용자가 상세를 열 때만 부른다.
+   */
+  reviews: PlaceReviewDto[];
+}
+
+export interface PlaceReviewDto {
+  authorName: string;
+  rating: number;
+  text: string | null;
+  relativeTime: string | null;
+  profilePhotoUrl: string | null;
 }
 
 /** 스케줄 관점의 장소 분류 — 식사 시간 배치(restaurant/cafe)와 관광 배치(attraction)를 가른다. */
@@ -543,6 +557,10 @@ export class PlacesService {
     return categoryCode === CAT3_CAFE ? 'cafe' : 'restaurant';
   }
 
+  /**
+   * 장소 상세 탭 전용 조회 — 목록/검색과 달리 매칭된 Google place_id로 리뷰(최대 5개)까지
+   * 함께 받아온다. 사용자가 실제로 상세를 열 때만 호출되므로 여기서만 리뷰 비용을 쓴다.
+   */
   async getPlaceDetail(placeId: string): Promise<PlaceCandidateDto> {
     const place = await this.placeRepository.findOneBy({ id: placeId });
     if (!place) {
@@ -558,11 +576,36 @@ export class PlacesService {
       if (!details) {
         throw new BusinessException(PlacesErrorCode.PLACE_NOT_FOUND);
       }
-      return this.toGoogleCandidateDto(place.id, details);
+      const reviews = await this.safeFetchReviews(details.externalId);
+      return { ...this.toGoogleCandidateDto(place.id, details), reviews };
     }
 
     const popularity = await this.safeMatchGooglePlace(place);
-    return this.toCandidateDto(place, popularity);
+    const reviews = popularity?.externalId
+      ? await this.safeFetchReviews(popularity.externalId)
+      : [];
+    return { ...this.toCandidateDto(place, popularity), reviews };
+  }
+
+  /** 리뷰 조회 실패가 상세 화면 전체를 막지 않도록 빈 배열로 폴백한다. */
+  private async safeFetchReviews(googlePlaceId: string): Promise<PlaceReviewDto[]> {
+    try {
+      const reviews = await this.googlePlacesClient.getPlaceReviews(googlePlaceId);
+      return reviews.map((r) => this.toReviewDto(r));
+    } catch (error) {
+      this.logger.warn(`Google 리뷰 조회 실패(placeId=${googlePlaceId}): ${(error as Error).message}`);
+      return [];
+    }
+  }
+
+  private toReviewDto(review: GoogleReview): PlaceReviewDto {
+    return {
+      authorName: review.authorName,
+      rating: review.rating,
+      text: review.text,
+      relativeTime: review.relativeTime,
+      profilePhotoUrl: review.profilePhotoUrl,
+    };
   }
 
   /**
@@ -662,6 +705,7 @@ export class PlacesService {
       rating: popularity?.rating ?? null,
       reviewCount: popularity?.reviewCount ?? null,
       concentrationRate,
+      reviews: [],
     };
   }
 
@@ -685,6 +729,7 @@ export class PlacesService {
       rating: result.rating,
       reviewCount: result.reviewCount,
       concentrationRate: null,
+      reviews: [],
     };
   }
 }

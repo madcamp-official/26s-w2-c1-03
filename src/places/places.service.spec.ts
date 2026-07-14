@@ -63,7 +63,12 @@ describe('PlacesService', () => {
   let placeRepository: RepoMock<Place>;
   let tripsService: { getDetail: jest.Mock };
   let tourApiClient: { fetchAreaBasedList: jest.Mock };
-  let googlePlacesClient: { matchPlace: jest.Mock; searchText: jest.Mock; getPlaceDetails: jest.Mock };
+  let googlePlacesClient: {
+    matchPlace: jest.Mock;
+    searchText: jest.Mock;
+    getPlaceDetails: jest.Mock;
+    getPlaceReviews: jest.Mock;
+  };
   let tatsCnctrRateClient: { fetchConcentrationMap: jest.Mock };
   let service: PlacesService;
 
@@ -71,7 +76,12 @@ describe('PlacesService', () => {
     placeRepository = createRepositoryMock<Place>();
     tripsService = { getDetail: jest.fn() };
     tourApiClient = { fetchAreaBasedList: jest.fn() };
-    googlePlacesClient = { matchPlace: jest.fn(), searchText: jest.fn(), getPlaceDetails: jest.fn() };
+    googlePlacesClient = {
+      matchPlace: jest.fn(),
+      searchText: jest.fn(),
+      getPlaceDetails: jest.fn(),
+      getPlaceReviews: jest.fn().mockResolvedValue([]),
+    };
     tatsCnctrRateClient = { fetchConcentrationMap: jest.fn(async () => new Map<string, number>()) };
 
     service = new PlacesService(
@@ -383,16 +393,54 @@ describe('PlacesService', () => {
         updatedAt: new Date(),
       };
       (placeRepository.findOneBy as jest.Mock).mockResolvedValue(place);
-      googlePlacesClient.matchPlace.mockResolvedValue({ rating: 4.7, reviewCount: 58000 });
+      googlePlacesClient.matchPlace.mockResolvedValue({
+        rating: 4.7,
+        reviewCount: 58000,
+        externalId: 'ChIJ-gyeongbok',
+      });
+      googlePlacesClient.getPlaceReviews.mockResolvedValue([
+        { authorName: '홍길동', rating: 5, text: '좋아요', relativeTime: '1주 전', profilePhotoUrl: null },
+      ]);
 
       const result = await service.getPlaceDetail('place-1');
 
+      expect(googlePlacesClient.getPlaceReviews).toHaveBeenCalledWith('ChIJ-gyeongbok');
       expect(result).toMatchObject({
         id: 'place-1',
         name: '경복궁',
         rating: 4.7,
         reviewCount: 58000,
+        reviews: [{ authorName: '홍길동', rating: 5, text: '좋아요' }],
       });
+    });
+
+    it('TourAPI 장소가 Google에 매칭되지 않으면(externalId 없음) 리뷰를 조회하지 않고 빈 배열을 반환한다', async () => {
+      const place: Place = {
+        id: 'place-2',
+        source: PlaceSource.TOURAPI,
+        externalId: '2',
+        contentTypeId: '12',
+        name: '이름 없는 장소',
+        address: null,
+        latitude: '37.0',
+        longitude: '126.0',
+        areaCode: '1',
+        sigunguCode: null,
+        categoryCode: null,
+        tel: null,
+        imageUrl: null,
+        overview: null,
+        syncedAt: null,
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      };
+      (placeRepository.findOneBy as jest.Mock).mockResolvedValue(place);
+      googlePlacesClient.matchPlace.mockResolvedValue(null);
+
+      const result = await service.getPlaceDetail('place-2');
+
+      expect(googlePlacesClient.getPlaceReviews).not.toHaveBeenCalled();
+      expect(result.reviews).toEqual([]);
     });
 
     it('Google 장소(place_id만 저장)는 place_id로 상세를 실시간 재조회해 반환한다', async () => {
@@ -425,16 +473,21 @@ describe('PlacesService', () => {
         rating: 4.3,
         reviewCount: 500,
       });
+      googlePlacesClient.getPlaceReviews.mockResolvedValue([
+        { authorName: '김철수', rating: 4, text: '괜찮아요', relativeTime: '2일 전', profilePhotoUrl: null },
+      ]);
 
       const result = await service.getPlaceDetail('place-g');
 
       expect(googlePlacesClient.getPlaceDetails).toHaveBeenCalledWith('ChIJ1');
+      expect(googlePlacesClient.getPlaceReviews).toHaveBeenCalledWith('ChIJ1');
       expect(googlePlacesClient.matchPlace).not.toHaveBeenCalled();
       expect(result).toMatchObject({
         id: 'place-g',
         source: PlaceSource.GOOGLE,
         name: '스타벅스 강남',
         rating: 4.3,
+        reviews: [{ authorName: '김철수', rating: 4 }],
       });
     });
   });
