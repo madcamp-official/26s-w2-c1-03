@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../core/theme/app_colors.dart';
 import '../../../core/theme/app_gradients.dart';
+import '../../../core/utils/date_format.dart';
 import '../../../core/widgets/ai_badge.dart';
 import '../../../core/widgets/app_button.dart';
 import '../../notifications/notification_inbox_controller.dart';
@@ -293,7 +294,7 @@ class _DdayHeroCard extends StatelessWidget {
                 ),
               ),
               Text(
-                '${trip.startDate} – ${trip.endDate}',
+                formatTripDateRange(trip.startDate, trip.endDate),
                 style: const TextStyle(
                   fontSize: 13,
                   fontWeight: FontWeight.w700,

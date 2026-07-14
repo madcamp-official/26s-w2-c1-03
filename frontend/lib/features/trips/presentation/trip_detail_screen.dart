@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../core/network/api_exception.dart';
 import '../../../core/theme/app_colors.dart';
+import '../../../core/utils/date_format.dart';
 import '../../../core/widgets/app_back_button.dart';
 import '../../../core/widgets/app_button.dart';
 import '../../records/presentation/record_mode_sheet.dart';
@@ -306,7 +307,7 @@ class _TripDetailScreenState extends ConsumerState<TripDetailScreen> {
             ),
           ),
           Text(
-            '${state.trip.startDate} - ${state.trip.endDate}',
+            formatTripDateRange(state.trip.startDate, state.trip.endDate),
             style: const TextStyle(
               fontSize: 12,
               fontWeight: FontWeight.w600,
