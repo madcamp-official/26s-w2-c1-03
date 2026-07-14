@@ -15,6 +15,7 @@ function buildConfigService(): ConfigService {
       if (key === 'OPENAI_API_KEY') return 'test-openai-key';
       if (key === 'OPENAI_BASE_URL') return 'https://api.openai.com/v1';
       if (key === 'OPENAI_SCHEDULE_MODEL') return 'gpt-4o-mini';
+      if (key === 'OPENAI_PHOTOS_MODEL') return 'gpt-4o-mini';
       throw new Error(`missing env ${key}`);
     }),
   } as unknown as ConfigService;

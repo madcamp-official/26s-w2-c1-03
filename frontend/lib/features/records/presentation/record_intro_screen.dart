@@ -4,7 +4,7 @@ import '../../../core/widgets/app_button.dart';
 import '../../trips/data/trip_models.dart';
 import '../data/photo_filter_pipeline.dart';
 import '../data/photo_library_service.dart';
-import 'record_candidates_screen.dart';
+import 'record_upload_screen.dart';
 
 /// "기록 시작" 진입점(기능명세서 §3.1 수용기준 2: 알림 클릭 또는 이 화면 진입
 /// 시점에만 사진첩 조회가 발생해야 한다). 사진첩 접근 권한 요청과 필터링 실행이
@@ -46,7 +46,7 @@ class _RecordIntroScreenState extends State<RecordIntroScreen> {
       if (!mounted) return;
       setState(() => _running = false);
       Navigator.of(context).push(
-        MaterialPageRoute(builder: (_) => RecordCandidatesScreen(result: result)),
+        MaterialPageRoute(builder: (_) => RecordUploadScreen(trip: widget.trip, result: result)),
       );
     } catch (_) {
       if (!mounted) return;
