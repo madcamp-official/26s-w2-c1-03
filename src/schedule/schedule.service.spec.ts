@@ -44,8 +44,16 @@ function createManagerMock() {
 
 describe('ScheduleService', () => {
   let tripsService: { getDetail: jest.Mock; assertMember: jest.Mock };
-  let placesService: { resolveForSchedule: jest.Mock; getScheduleCandidatePools: jest.Mock };
-  let scheduleAiClient: { requestSchedule: jest.Mock; requestRevision: jest.Mock };
+  let placesService: {
+    resolveForSchedule: jest.Mock;
+    getScheduleCandidatePools: jest.Mock;
+    searchCandidates: jest.Mock;
+  };
+  let scheduleAiClient: {
+    requestSchedule: jest.Mock;
+    requestRevision: jest.Mock;
+    requestChatTurn: jest.Mock;
+  };
   let manager: ReturnType<typeof createManagerMock>;
   let dataSource: { transaction: jest.Mock };
   let service: ScheduleService;
@@ -59,8 +67,13 @@ describe('ScheduleService', () => {
     placesService = {
       resolveForSchedule: jest.fn(),
       getScheduleCandidatePools: jest.fn(async () => emptyPools),
+      searchCandidates: jest.fn(),
     };
-    scheduleAiClient = { requestSchedule: jest.fn(), requestRevision: jest.fn() };
+    scheduleAiClient = {
+      requestSchedule: jest.fn(),
+      requestRevision: jest.fn(),
+      requestChatTurn: jest.fn(),
+    };
     manager = createManagerMock();
     dataSource = { transaction: jest.fn(async (cb: (m: unknown) => unknown) => cb(manager)) };
 
@@ -627,5 +640,231 @@ describe('ScheduleService', () => {
         createdAt: createdAt.toISOString(),
       },
     ]);
+  });
+
+  // ── Phase 9 챗봇 스케줄 편집(chat) ───────────────────────────────────────
+
+  function setupChatRepos(rows: RowLike[]) {
+    let seq = 0;
+    const tripPlaceRepo = {
+      find: jest.fn(async () => [...rows]),
+      create: jest.fn((data: Record<string, unknown>) => {
+        const created = { id: `tp-new-${++seq}`, startTime: null, ...data } as unknown as RowLike;
+        rows.push(created);
+        return created;
+      }),
+      save: jest.fn(async (toSave: unknown) => toSave),
+      remove: jest.fn(async (row: RowLike) => {
+        rows.splice(rows.indexOf(row), 1);
+        return row;
+      }),
+    };
+    const aiRequestRepo = {
+      create: jest.fn((data: Record<string, unknown>) => ({ ...data })),
+      save: jest.fn(async (req: Record<string, unknown>) => ({ id: 'req-1', ...req })),
+    };
+    (manager as unknown as { getRepository: jest.Mock }).getRepository = jest.fn(
+      () => tripPlaceRepo,
+    );
+    (dataSource as unknown as { getRepository: jest.Mock }).getRepository = jest.fn(
+      (entity: unknown) =>
+        (entity as { name?: string }).name === 'AiPlanRequest' ? aiRequestRepo : tripPlaceRepo,
+    );
+    placesService.resolveForSchedule.mockResolvedValue([]);
+    return { tripPlaceRepo, aiRequestRepo };
+  }
+
+  function toolCall(id: string, name: string, args: Record<string, unknown>) {
+    return { id, name, argumentsJson: JSON.stringify(args) };
+  }
+
+  it('chat: AI가 도구 없이 바로 답장하면 그대로 반환하고 이력을 기록한다', async () => {
+    setupChatRepos([buildRow('t1', 1, 1)]);
+    scheduleAiClient.requestChatTurn.mockResolvedValue({
+      type: 'message',
+      content: '네, 알겠어요!',
+    });
+
+    const { reply, changed } = await service.chat('trip-1', 'user-1', {
+      messages: [{ role: 'user', content: '오늘 일정 어때?' }],
+    });
+
+    expect(reply).toBe('네, 알겠어요!');
+    expect(changed).toBe(false);
+    expect(scheduleAiClient.requestChatTurn).toHaveBeenCalledTimes(1);
+  });
+
+  it('chat: search_places → add_place 순서로 도구를 호출하면 실제로 장소가 추가된다', async () => {
+    setupChatRepos([]);
+    placesService.searchCandidates.mockResolvedValue({
+      candidates: [{ id: 'p1', name: '한라산 카페', address: '제주특별자치도 제주시 애월읍' }],
+    });
+    // addPlace가 placeId='p1'을 조회할 때만 실제 정보를 돌려주고(setupChatRepos의
+    // 기본 []는 getSchedule 등 다른 호출에 쓰인다), 나머지는 빈 배열로 유지한다.
+    placesService.resolveForSchedule.mockImplementation(async (ids: string[]) =>
+      ids.includes('p1') ? [buildInfo('p1', { name: '한라산 카페' })] : [],
+    );
+    scheduleAiClient.requestChatTurn
+      .mockResolvedValueOnce({
+        type: 'tool_calls',
+        calls: [toolCall('call-1', 'search_places', { keyword: '한라산 카페' })],
+      })
+      .mockResolvedValueOnce({
+        type: 'tool_calls',
+        calls: [toolCall('call-2', 'add_place', { placeId: 'p1', dayNumber: 1 })],
+      })
+      .mockResolvedValueOnce({ type: 'message', content: '한라산 카페를 1일차에 넣었어요!' });
+
+    const { reply, changed, schedule } = await service.chat('trip-1', 'user-1', {
+      messages: [{ role: 'user', content: '한라산 카페 넣어줘' }],
+    });
+
+    expect(placesService.searchCandidates).toHaveBeenCalledWith('trip-1', 'user-1', '한라산 카페');
+    expect(changed).toBe(true);
+    expect(reply).toBe('한라산 카페를 1일차에 넣었어요!');
+    expect(schedule.days[0].places.map((p) => p.dayNumber)).toEqual([1]);
+
+    // add_place 실행 결과가 role='tool' 메시지로 다음 턴에 전달됐는지 확인.
+    const thirdCallMessages = scheduleAiClient.requestChatTurn.mock.calls[2][0];
+    const toolMessage = thirdCallMessages[thirdCallMessages.length - 1];
+    expect(toolMessage.role).toBe('tool');
+    expect(JSON.parse(toolMessage.content).added).toMatchObject({ dayNumber: 1 });
+  });
+
+  it('chat: 같은 지역+비슷한 이름 후보가 여럿이면 needsClarification을 true로 돌려준다', async () => {
+    setupChatRepos([]);
+    placesService.searchCandidates.mockResolvedValue({
+      candidates: [
+        { id: 'p1', name: '제주 맛집', address: '제주특별자치도 제주시 노형동' },
+        { id: 'p2', name: '제주 맛집2', address: '제주특별자치도 제주시 노형동' },
+      ],
+    });
+    scheduleAiClient.requestChatTurn
+      .mockResolvedValueOnce({
+        type: 'tool_calls',
+        calls: [toolCall('call-1', 'search_places', { keyword: '제주 맛집' })],
+      })
+      .mockResolvedValueOnce({ type: 'message', content: '어느 곳을 넣을까요?' });
+
+    await service.chat('trip-1', 'user-1', {
+      messages: [{ role: 'user', content: '제주 맛집 넣어줘' }],
+    });
+
+    const secondCallMessages = scheduleAiClient.requestChatTurn.mock.calls[1][0];
+    const toolMessage = secondCallMessages[secondCallMessages.length - 1];
+    expect(JSON.parse(toolMessage.content).needsClarification).toBe(true);
+  });
+
+  it('chat: 지역이 다르거나 이름이 다르면 needsClarification은 false다', async () => {
+    setupChatRepos([]);
+    placesService.searchCandidates.mockResolvedValue({
+      candidates: [
+        { id: 'p1', name: '스타벅스 제주점', address: '제주특별자치도 제주시 노형동' },
+        { id: 'p2', name: '올레국수', address: '제주특별자치도 서귀포시 중문동' },
+      ],
+    });
+    scheduleAiClient.requestChatTurn
+      .mockResolvedValueOnce({
+        type: 'tool_calls',
+        calls: [toolCall('call-1', 'search_places', { keyword: '카페' })],
+      })
+      .mockResolvedValueOnce({ type: 'message', content: '스타벅스 제주점을 추천할게요.' });
+
+    await service.chat('trip-1', 'user-1', { messages: [{ role: 'user', content: '카페 찾아줘' }] });
+
+    const secondCallMessages = scheduleAiClient.requestChatTurn.mock.calls[1][0];
+    const toolMessage = secondCallMessages[secondCallMessages.length - 1];
+    expect(JSON.parse(toolMessage.content).needsClarification).toBe(false);
+  });
+
+  it('chat: remove_place 도구 호출로 실제 장소를 제거한다', async () => {
+    const rows = [buildRow('t1', 1, 1), buildRow('t2', 1, 2)];
+    setupChatRepos(rows);
+    scheduleAiClient.requestChatTurn
+      .mockResolvedValueOnce({
+        type: 'tool_calls',
+        calls: [toolCall('call-1', 'remove_place', { tripPlaceId: 't1' })],
+      })
+      .mockResolvedValueOnce({ type: 'message', content: '지웠어요.' });
+
+    const { changed, schedule } = await service.chat('trip-1', 'user-1', {
+      messages: [{ role: 'user', content: 't1 빼줘' }],
+    });
+
+    expect(changed).toBe(true);
+    expect(schedule.days[0].places.map((p) => p.id)).toEqual(['t2']);
+  });
+
+  it('chat: move_place 도구 호출로 날짜/순서를 옮긴다', async () => {
+    const rows = [buildRow('t1', 1, 1), buildRow('t2', 2, 1)];
+    setupChatRepos(rows);
+    scheduleAiClient.requestChatTurn
+      .mockResolvedValueOnce({
+        type: 'tool_calls',
+        calls: [toolCall('call-1', 'move_place', { tripPlaceId: 't1', dayNumber: 2, orderInDay: 1 })],
+      })
+      .mockResolvedValueOnce({ type: 'message', content: '옮겼어요.' });
+
+    const { changed, schedule } = await service.chat('trip-1', 'user-1', {
+      messages: [{ role: 'user', content: 't1을 2일차로 옮겨줘' }],
+    });
+
+    expect(changed).toBe(true);
+    // t1을 2일차 1번 위치로 끼워 넣으면 기존 t2(1번)는 2번으로 밀린다.
+    const day2 = schedule.days.find((d) => d.dayNumber === 2)!;
+    expect(day2.places.map((p) => p.id)).toEqual(['t1', 't2']);
+  });
+
+  it('chat: 도구 실행이 실패해도 예외를 던지지 않고 error를 담아 대화를 이어간다', async () => {
+    setupChatRepos([buildRow('t1', 1, 1)]);
+    scheduleAiClient.requestChatTurn
+      .mockResolvedValueOnce({
+        type: 'tool_calls',
+        // 2일 여행인데 dayNumber=9 — 범위 밖.
+        calls: [toolCall('call-1', 'add_place', { customName: '없는날', dayNumber: 9 })],
+      })
+      .mockResolvedValueOnce({ type: 'message', content: '그 날짜엔 추가할 수 없어요.' });
+
+    const { reply, changed } = await service.chat('trip-1', 'user-1', {
+      messages: [{ role: 'user', content: '9일차에 추가해줘' }],
+    });
+
+    expect(reply).toBe('그 날짜엔 추가할 수 없어요.');
+    expect(changed).toBe(false);
+    const secondCallMessages = scheduleAiClient.requestChatTurn.mock.calls[1][0];
+    const toolMessage = secondCallMessages[secondCallMessages.length - 1];
+    expect(JSON.parse(toolMessage.content).error).toBeDefined();
+  });
+
+  it('chat: 도구 호출만 반복해 왕복 한도에 닿으면 안내 문구로 마무리한다', async () => {
+    setupChatRepos([buildRow('t1', 1, 1)]);
+    scheduleAiClient.requestChatTurn.mockResolvedValue({
+      type: 'tool_calls',
+      calls: [toolCall('call-x', 'remove_place', { tripPlaceId: 'ghost' })],
+    });
+
+    const { reply } = await service.chat('trip-1', 'user-1', {
+      messages: [{ role: 'user', content: '계속 지워줘' }],
+    });
+
+    expect(reply).toBe('요청하신 작업을 처리했어요. 최신 일정을 확인해주세요.');
+    expect(scheduleAiClient.requestChatTurn).toHaveBeenCalledTimes(5);
+  });
+
+  it('chat: 마지막 유저 메시지와 답장 요약을 ai_plan_requests에 기록한다', async () => {
+    const { aiRequestRepo } = setupChatRepos([buildRow('t1', 1, 1)]);
+    scheduleAiClient.requestChatTurn.mockResolvedValue({ type: 'message', content: '완료했어요.' });
+
+    await service.chat('trip-1', 'user-1', {
+      messages: [
+        { role: 'user', content: '첫 요청' },
+        { role: 'assistant', content: '응답' },
+        { role: 'user', content: '두번째 요청' },
+      ],
+    });
+
+    expect(aiRequestRepo.save).toHaveBeenCalledWith(
+      expect.objectContaining({ promptText: '두번째 요청', responseSummary: '완료했어요.' }),
+    );
   });
 });
