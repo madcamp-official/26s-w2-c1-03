@@ -9,6 +9,8 @@ export interface PhotoCurateCandidate {
   photoRefId: string;
   /** EXIF 제거된 JPEG 바이트(§9.3 이중 스트립 — 여기 넘어오기 전에 이미 재인코딩됨). */
   imageBuffer: Buffer;
+  /** 프롬프트에 촬영일을 힌트로 넣어 날짜 다양성을 유도한다(강제 배분은 아님). */
+  takenAt?: Date | null;
 }
 
 export interface PhotoCurateRequest {
@@ -21,7 +23,7 @@ export interface PhotoCurateResult {
 }
 
 /**
- * 하루치 사진 중 베스트 N장을 고르는 AI의 추상 인터페이스 — ScheduleAiClient와
+ * 여행 전체 기간 사진 중 베스트 N장을 고르는 AI의 추상 인터페이스 — ScheduleAiClient와
  * 같은 이유로 인터페이스 분리(plan.md §9.1, 테스트에서 Mock 대체 가능하게).
  */
 export interface PhotoCurateAiClient {
@@ -35,11 +37,12 @@ interface ChatCompletionResponse {
 }
 
 /**
- * OpenAI Vision으로 하루 동안 찍힌 사진 중 베스트 N장을 고른다(§3.3). 사진마다
- * 실제 UUID 대신 candidateIndex(0부터 시작)로 참조하게 해 응답 파싱을 단순하고
- * 견고하게 만든다. OpenAiScheduleClient와 동일하게 fetch+ConfigService 패턴을
- * 따르며, 모든 실패를 PHOTO_AI_REQUEST_FAILED(502)로 변환한다 — 호출부
- * (RecordsService.curate)가 이 실패를 잡아 그날은 최신순 폴백으로 대체한다.
+ * OpenAI Vision으로 여행 전체 기간의 사진 중 베스트 N장을 한 번에 고른다(날짜별
+ * 강제 배분 없이 전체 사진을 함께 놓고 비교 — API 명세서 §4). 사진마다 실제 UUID
+ * 대신 candidateIndex(0부터 시작)로 참조하게 해 응답 파싱을 단순하고 견고하게
+ * 만든다. OpenAiScheduleClient와 동일하게 fetch+ConfigService 패턴을 따르며,
+ * 모든 실패를 PHOTO_AI_REQUEST_FAILED(502)로 변환한다 — 호출부
+ * (RecordsService.curate)가 이 실패를 잡아 최신순 폴백으로 대체한다.
  */
 @Injectable()
 export class OpenAiPhotoCurateClient implements PhotoCurateAiClient {
@@ -78,7 +81,7 @@ export class OpenAiPhotoCurateClient implements PhotoCurateAiClient {
             {
               role: 'user',
               content: [
-                { type: 'text', text: this.buildUserPrompt(request.candidates.length) },
+                { type: 'text', text: this.buildUserPrompt(request.candidates) },
                 ...imageContents,
               ],
             },
@@ -110,23 +113,30 @@ export class OpenAiPhotoCurateClient implements PhotoCurateAiClient {
 
   private buildSystemPrompt(selectCount: number): string {
     return [
-      `당신은 여행 사진 큐레이터다. 하루 동안 찍힌 여러 사진 중 여행 기록에 남길 가치가 있는 베스트 ${selectCount}장을 고른다(사진이 그보다 적으면 있는 만큼만).`,
+      `당신은 여행 사진 큐레이터다. 여행 전체 기간 동안 찍힌 사진들 중 기록에 남길 가치가 있는 베스트 ${selectCount}장을 고른다(사진이 그보다 적으면 있는 만큼만). 특정 날짜에 몰아주지 말고 여행 전체를 놓고 비교해서 고른다.`,
       '',
       '고르는 기준:',
       'A) 흔들리거나 초점이 안 맞은 사진, 노출이 심하게 과·부족한 사진은 제외한다.',
       'B) 비슷한 구도로 연속 촬영된 사진은 그중 가장 잘 나온 한 장만 남긴다.',
       'C) 스크린샷, 문서(영수증/티켓/안내판 텍스트 위주) 사진은 제외한다.',
       'D) 사람보다 풍경·장소·순간이 잘 드러나는 사진을 우선한다. 특정 인물이 화면 대부분을 차지하는 사진은 우선순위를 낮춘다(신원 식별 목적 아님, 단순 구도 판단).',
-      'E) 같은 장면의 반복을 피하고 그날의 다양한 순간을 대표하도록 고른다.',
+      'E) 같은 장면의 반복을 피하고, 특정 하루에 쏠리지 않게 여행 전체 기간의 다양한 순간을 대표하도록 고른다.',
       '',
-      '사진마다 candidateIndex(0부터 시작하는 순번)가 이미지 순서와 대응한다.',
+      '사진마다 candidateIndex(0부터 시작하는 순번)가 이미지 순서와 대응하고, 촬영일이 있으면 함께 표기된다.',
       '반드시 아래 JSON 스키마로만 답한다. 설명 문장은 넣지 않는다.',
       '{ "selected": [<candidateIndex 정수, ...>] }',
     ].join('\n');
   }
 
-  private buildUserPrompt(candidateCount: number): string {
-    return `아래 ${candidateCount}장의 사진(candidateIndex 0~${candidateCount - 1}, 이미지 순서대로) 중에서 골라줘.`;
+  private buildUserPrompt(candidates: PhotoCurateCandidate[]): string {
+    const lines = candidates.map((c, i) => {
+      const dateLabel = c.takenAt ? ` (${c.takenAt.toISOString().slice(0, 10)})` : '';
+      return `candidateIndex=${i}${dateLabel}`;
+    });
+    return [
+      `아래 ${candidates.length}장의 사진(이미지 순서대로 candidateIndex 대응) 중에서 골라줘.`,
+      ...lines,
+    ].join('\n');
   }
 
   private parseResult(content: string, candidates: PhotoCurateCandidate[]): PhotoCurateResult {

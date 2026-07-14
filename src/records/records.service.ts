@@ -14,7 +14,6 @@ import { RegisterPhotoMetadataDto } from './dto/register-photo-metadata.dto';
 import { RecordPhotoRef, RecordPhotoRefStatus } from './entities/record-photo-ref.entity';
 import { TravelRecord, TravelRecordStatus } from './entities/travel-record.entity';
 import { RecordsErrorCode } from './exceptions/records-error-code';
-import { allocatePhotoQuota } from './utils/photo-quota.util';
 
 const MAX_UPLOAD_BATCH = 100;
 const CURATE_TARGET_COUNT = 15;
@@ -166,10 +165,10 @@ export class RecordsService {
   }
 
   /**
-   * `taken_at` 기준 일자별 그룹핑 → OpenAI 배치 전송 → 여행 일수 기준 동적 배분으로
-   * 최종 최대 15장 추천(API 명세서 §4, §3.3). 추천분은 RECOMMENDED로, 비추천분은
-   * 즉시 임시 버퍼에서 폐기(DISCARDED + 파일 삭제)한다. UPLOADED 상태만 대상이라
-   * 이미 처리된 photoRef는 다시 curate되지 않는다.
+   * UPLOADED 상태 사진 전체(여행 전체 기간)를 한 번에 OpenAI에 보내 베스트
+   * 최대 15장을 추천한다(API 명세서 §4 — 날짜별이 아니라 여행 전체 기준 선별로
+   * 변경). 추천분은 RECOMMENDED로, 비추천분은 즉시 임시 버퍼에서 폐기(DISCARDED
+   * + 파일 삭제)한다. 이미 처리된 photoRef는 다시 curate되지 않는다.
    */
   async curate(
     tripId: string,
@@ -186,20 +185,8 @@ export class RecordsService {
       return { recommended: [] };
     }
 
-    const groupsByDate = this.groupByTakenDate(uploadedRefs);
-    const quota = allocatePhotoQuota(
-      groupsByDate.map(([date, refs]) => ({ date, count: refs.length })),
-      CURATE_TARGET_COUNT,
-    );
-
-    const recommended: string[] = [];
-    for (const [date, refs] of groupsByDate) {
-      const dayQuota = quota.get(date) ?? 0;
-      if (dayQuota === 0) {
-        continue;
-      }
-      recommended.push(...(await this.selectBestForDay(refs, dayQuota)));
-    }
+    const quota = Math.min(CURATE_TARGET_COUNT, uploadedRefs.length);
+    const recommended = await this.selectBestOverall(uploadedRefs, quota);
 
     const recommendedSet = new Set(recommended);
     const discarded = uploadedRefs.filter((ref) => !recommendedSet.has(ref.id));
@@ -214,29 +201,18 @@ export class RecordsService {
     return { recommended };
   }
 
-  /** 촬영일시(없으면 등록일시) 기준 UTC 캘린더 날짜로 그룹핑. */
-  private groupByTakenDate(refs: RecordPhotoRef[]): Array<[string, RecordPhotoRef[]]> {
-    const map = new Map<string, RecordPhotoRef[]>();
-    for (const ref of refs) {
-      const date = (ref.takenAt ?? ref.createdAt).toISOString().slice(0, 10);
-      const list = map.get(date) ?? [];
-      list.push(ref);
-      map.set(date, list);
-    }
-    return [...map.entries()];
-  }
-
   /**
-   * OpenAI가 실패하면 그날 전체를 실패시키지 않고 최신순으로 quota만큼 폴백
-   * 선택한다(§16 리스크 대응 기조 — 필터링 실패가 전체 파이프라인을 막지 않게).
+   * OpenAI가 실패하면 전체를 실패시키지 않고 최신순으로 quota만큼 폴백 선택한다
+   * (§16 리스크 대응 기조 — 필터링 실패가 전체 파이프라인을 막지 않게).
    */
-  private async selectBestForDay(refs: RecordPhotoRef[], quota: number): Promise<string[]> {
+  private async selectBestOverall(refs: RecordPhotoRef[], quota: number): Promise<string[]> {
     try {
       const candidates = await Promise.all(
         refs
           .filter((ref) => ref.tempFilePath)
           .map(async (ref) => ({
             photoRefId: ref.id,
+            takenAt: ref.takenAt,
             imageBuffer: await this.stripExif(await fs.readFile(ref.tempFilePath!)),
           })),
       );

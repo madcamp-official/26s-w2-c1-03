@@ -327,7 +327,7 @@ describe('RecordsService', () => {
       await expect(fs.access(path1)).rejects.toThrow();
     });
 
-    it('AI 호출이 실패하면 그날은 최신순으로 quota만큼 폴백 선택한다', async () => {
+    it('AI 호출이 실패하면 최신순으로 quota만큼 폴백 선택한다', async () => {
       const path1 = await writeTempFile('ref-1');
       const path2 = await writeTempFile('ref-2');
 
@@ -348,11 +348,11 @@ describe('RecordsService', () => {
 
       const result = await service.curate('trip-1', 'record-1', 'user-1');
 
-      // 2장뿐이라 그날 quota=2(전체 통과) — 최신순 폴백이면 둘 다 선택된다.
+      // 2장뿐이라 quota=2(전체 통과) — 최신순 폴백이면 둘 다 선택된다.
       expect([...result.recommended].sort()).toEqual(['ref-1', 'ref-2']);
     });
 
-    it('날짜가 다른 그룹은 각각 별도로 AI를 호출한다', async () => {
+    it('촬영일이 서로 다른 사진도 날짜별로 나누지 않고 한 번에 AI를 호출한다', async () => {
       const path1 = await writeTempFile('ref-1');
       const path2 = await writeTempFile('ref-2');
 
@@ -373,7 +373,16 @@ describe('RecordsService', () => {
 
       await service.curate('trip-1', 'record-1', 'user-1');
 
-      expect(photoCurateAiClient.selectBestPhotos).toHaveBeenCalledTimes(2);
+      expect(photoCurateAiClient.selectBestPhotos).toHaveBeenCalledTimes(1);
+      expect(photoCurateAiClient.selectBestPhotos).toHaveBeenCalledWith(
+        expect.objectContaining({
+          selectCount: 2,
+          candidates: expect.arrayContaining([
+            expect.objectContaining({ photoRefId: 'ref-1' }),
+            expect.objectContaining({ photoRefId: 'ref-2' }),
+          ]),
+        }),
+      );
     });
   });
 });
