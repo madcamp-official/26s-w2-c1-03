@@ -3,8 +3,11 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../core/network/api_exception.dart';
 import '../../../core/theme/app_colors.dart';
+import '../../../core/widgets/app_button.dart';
+import '../../trips/presentation/trip_list_controller.dart' show tripsApiProvider;
 import '../data/record_photo_models.dart';
 import '../data/record_summary_models.dart';
+import 'record_mode_sheet.dart';
 import 'record_upload_screen.dart' show recordsApiProvider;
 import 'record_write_screen.dart';
 import 'records_list_controller.dart';
@@ -42,6 +45,7 @@ class RecordDetailScreen extends ConsumerStatefulWidget {
 class _RecordDetailScreenState extends ConsumerState<RecordDetailScreen> {
   _DetailState _state = const _DetailLoading();
   bool _deleting = false;
+  bool _openingPicker = false;
   String? _togglingCoverPhotoId;
 
   @override
@@ -106,6 +110,33 @@ class _RecordDetailScreenState extends ConsumerState<RecordDetailScreen> {
       ScaffoldMessenger.of(
         context,
       ).showSnackBar(SnackBar(content: Text(error is ApiException ? error.message : '삭제하지 못했어요.')));
+    }
+  }
+
+  /// 이 기록에 사진을 더 추가한다 — 같은 트립에 대해 "기록 시작"을 다시 밟는
+  /// 것과 동일하다(startSession이 (trip_id,user_id) unique라 기존 기록을 그대로
+  /// 재사용하므로 새 기록이 아니라 이 기록에 사진이 이어서 쌓인다). 모드 시트가
+  /// Trip 전체(기간/도시 등)를 필요로 해서 tripId로 상세를 한 번 더 조회한다.
+  Future<void> _addPhotos(RecordDetail record) async {
+    setState(() => _openingPicker = true);
+    try {
+      final trip = await ref.read(tripsApiProvider).getDetail(record.tripId);
+      if (!mounted) return;
+      setState(() => _openingPicker = false);
+
+      final added = await showRecordModeSheet(context, trip);
+      if (!mounted) return;
+      if (added) {
+        await _load();
+        ref.read(recordsListControllerProvider.notifier).load();
+      }
+    } on DioException catch (e) {
+      if (!mounted) return;
+      final error = e.error;
+      setState(() => _openingPicker = false);
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text(error is ApiException ? error.message : '여행 정보를 불러오지 못했어요.')));
     }
   }
 
@@ -187,6 +218,8 @@ class _RecordDetailScreenState extends ConsumerState<RecordDetailScreen> {
         record: record,
         togglingCoverPhotoId: _togglingCoverPhotoId,
         onToggleCover: (photo) => _toggleCover(record, photo),
+        addingPhotos: _openingPicker,
+        onAddPhotos: () => _addPhotos(record),
       ),
     };
   }
@@ -197,11 +230,15 @@ class _RecordDetailBody extends StatelessWidget {
     required this.record,
     required this.togglingCoverPhotoId,
     required this.onToggleCover,
+    required this.addingPhotos,
+    required this.onAddPhotos,
   });
 
   final RecordDetail record;
   final String? togglingCoverPhotoId;
   final ValueChanged<RecordPhoto> onToggleCover;
+  final bool addingPhotos;
+  final VoidCallback onAddPhotos;
 
   @override
   Widget build(BuildContext context) {
@@ -245,6 +282,14 @@ class _RecordDetailBody extends StatelessWidget {
               style: TextStyle(color: AppColors.ink400, fontWeight: FontWeight.w600),
             ),
           ),
+        const SizedBox(height: 12),
+        AppButton(
+          label: '사진 추가하기',
+          variant: AppButtonVariant.outline,
+          height: 40,
+          loading: addingPhotos,
+          onPressed: addingPhotos ? null : onAddPhotos,
+        ),
         const SizedBox(height: 20),
         Text(
           record.title?.isNotEmpty == true ? record.title! : '제목 없음',

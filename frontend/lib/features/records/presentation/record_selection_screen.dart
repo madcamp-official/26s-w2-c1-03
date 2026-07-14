@@ -109,9 +109,9 @@ class _RecordSelectionScreenState extends ConsumerState<RecordSelectionScreen> {
       await ref.read(recordsApiProvider).finalizeSelection(widget.tripId, widget.recordId, selections);
       if (!mounted) return;
 
-      final navigator = Navigator.of(context);
-      navigator.pop(); // 이 화면(선택) 닫기
-      navigator.pop(); // 업로드 진행 화면 닫기 → 트립 상세로 복귀
+      // 이 화면만 닫는다 — 위(업로드 진행 화면 등)는 각자 push+pop 체인으로
+      // 이 결과(true)를 이어받아 스스로 정리하고 원래 호출한 화면으로 돌아간다.
+      Navigator.of(context).pop(true);
     } catch (_) {
       if (!mounted) return;
       setState(() => _finalizing = false);

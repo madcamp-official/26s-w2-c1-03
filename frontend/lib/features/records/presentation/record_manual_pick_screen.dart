@@ -104,7 +104,10 @@ class _RecordManualPickScreenState extends State<RecordManualPickScreen> {
     final candidates = await Future.wait(selected.map(_exifLocationService.buildCandidate));
     if (!mounted) return;
 
-    Navigator.of(context).pushReplacement(
+    // push(+ 결과 전달 후 스스로 pop)로 체인을 만든다 — pushReplacement를 쓰면
+    // 이 화면이 스택에서 사라져서, 맨 끝(finalize)에서 원래 호출한 화면까지
+    // 같이 닫혀버린다.
+    final success = await Navigator.of(context).push<bool>(
       MaterialPageRoute(
         builder: (_) => RecordUploadScreen(
           trip: widget.trip,
@@ -113,6 +116,8 @@ class _RecordManualPickScreenState extends State<RecordManualPickScreen> {
         ),
       ),
     );
+    if (!mounted) return;
+    Navigator.of(context).pop(success);
   }
 
   @override

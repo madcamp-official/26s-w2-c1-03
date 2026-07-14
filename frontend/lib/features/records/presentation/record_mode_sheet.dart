@@ -7,26 +7,28 @@ import 'record_manual_pick_screen.dart';
 
 enum _RecordMode { ai, manual, fallback }
 
-/// "기록 시작" 진입점(트립 상세의 버튼, 기록 탭의 "+" → 트립 선택 둘 다 여기로
-/// 모인다) — 화면 전환 없이 바텀시트로 AI 추천/직접 선택/폴백 중 고르게 한다.
-/// 고른 뒤에만 실제 화면(RecordFilterRunScreen 또는 RecordManualPickScreen)으로
-/// 넘어간다 — 사진첩 조회 트리거 시점 제한(수용기준 2)은 그 다음 화면들이
-/// 각자 책임진다.
-Future<void> showRecordModeSheet(BuildContext context, Trip trip) async {
+/// "기록 시작" 진입점(트립 상세의 버튼, 기록 탭의 "+" → 트립 선택, 기록 상세의
+/// "사진 추가" 버튼 셋 다 여기로 모인다) — 화면 전환 없이 바텀시트로 AI 추천/
+/// 직접 선택/폴백 중 고르게 한다. 고른 뒤 실제 화면(RecordFilterRunScreen 또는
+/// RecordManualPickScreen)으로 들어가 끝까지(finalize) 마치면 그 결과(성공
+/// 여부)를 push+pop 체인으로 이어받아 반환한다 — 호출부가 사진이 실제로
+/// 추가됐는지 알고 필요하면 자기 화면을 새로고침할 수 있게 하기 위함이다.
+Future<bool> showRecordModeSheet(BuildContext context, Trip trip) async {
   final mode = await showModalBottomSheet<_RecordMode>(
     context: context,
     backgroundColor: Colors.white,
     shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(24))),
     builder: (_) => _RecordModeSheetContent(trip: trip),
   );
-  if (mode == null || !context.mounted) return;
+  if (mode == null || !context.mounted) return false;
 
   final next = switch (mode) {
     _RecordMode.ai => RecordFilterRunScreen(trip: trip, useFallback: false),
     _RecordMode.manual => RecordManualPickScreen(trip: trip),
     _RecordMode.fallback => RecordFilterRunScreen(trip: trip, useFallback: true),
   };
-  Navigator.of(context).push(MaterialPageRoute(builder: (_) => next));
+  final success = await Navigator.of(context).push<bool>(MaterialPageRoute(builder: (_) => next));
+  return success ?? false;
 }
 
 class _RecordModeSheetContent extends StatelessWidget {

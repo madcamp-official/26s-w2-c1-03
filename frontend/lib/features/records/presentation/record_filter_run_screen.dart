@@ -56,11 +56,17 @@ class _RecordFilterRunScreenState extends State<RecordFilterRunScreen> {
           ? await _pipeline.fallbackRecent(widget.trip)
           : await _pipeline.run(widget.trip);
       if (!mounted) return;
-      Navigator.of(context).pushReplacement(
+      // push(+ 결과 전달 후 스스로 pop)로 체인을 만든다 — pushReplacement를 쓰면
+      // 이 화면이 스택에서 사라져서, 맨 끝(finalize)에서 원래 호출한 화면까지
+      // 같이 닫혀버리는 문제가 생긴다(호출부가 몇 단계 위인지와 무관하게 항상
+      // "한 화면만 정리하고 원위치로" 돌아가려면 push+pop 체인이 맞다).
+      final success = await Navigator.of(context).push<bool>(
         MaterialPageRoute(
           builder: (_) => RecordUploadScreen(trip: widget.trip, result: result, useAiCurate: true),
         ),
       );
+      if (!mounted) return;
+      Navigator.of(context).pop(success);
     } catch (_) {
       if (!mounted) return;
       setState(() => _errorText = '사진을 불러오지 못했어요. 다시 시도해주세요.');

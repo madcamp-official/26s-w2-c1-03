@@ -70,7 +70,7 @@ class _RecordUploadScreenState extends ConsumerState<RecordUploadScreen> {
 
       if (widget.result.candidates.isEmpty) {
         // 후보가 아예 없으면 업로드/curate를 건너뛰고 바로 다음 화면(빈 상태)으로.
-        _goToNext(recordId, const {});
+        await _goToNext(recordId, const {});
         return;
       }
 
@@ -117,14 +117,17 @@ class _RecordUploadScreenState extends ConsumerState<RecordUploadScreen> {
         if (!mounted) return;
       }
 
-      _goToNext(recordId, candidateByRefId);
+      await _goToNext(recordId, candidateByRefId);
     } catch (_) {
       if (!mounted) return;
       setState(() => _errorText = '진행 중 문제가 발생했어요. 다시 시도해주세요.');
     }
   }
 
-  void _goToNext(String recordId, Map<String, PhotoCandidate> candidateByRefId) {
+  /// push(+ 결과 전달 후 스스로 pop)로 체인을 만든다 — pushReplacement를 쓰면
+  /// 이 화면이 스택에서 사라져서, 맨 끝(finalize)에서 원래 호출한 화면까지
+  /// 같이 닫혀버린다.
+  Future<void> _goToNext(String recordId, Map<String, PhotoCandidate> candidateByRefId) async {
     final next = widget.useAiCurate
         ? RecordSelectionScreen(tripId: widget.trip.id, recordId: recordId)
         : RecordManualCaptionScreen(
@@ -132,7 +135,9 @@ class _RecordUploadScreenState extends ConsumerState<RecordUploadScreen> {
             recordId: recordId,
             candidatesByRefId: candidateByRefId,
           );
-    Navigator.of(context).pushReplacement(MaterialPageRoute(builder: (_) => next));
+    final success = await Navigator.of(context).push<bool>(MaterialPageRoute(builder: (_) => next));
+    if (!mounted) return;
+    Navigator.of(context).pop(success);
   }
 
   @override
