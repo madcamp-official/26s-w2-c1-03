@@ -210,4 +210,21 @@ describe('TripsService', () => {
       expect(result).toBe(member);
     });
   });
+
+  describe('setCoverImage', () => {
+    it('coverImageUrl을 갱신한다', async () => {
+      await service.setCoverImage('trip-1', 'https://storage.example/photo.jpg');
+
+      expect(tripRepository.update).toHaveBeenCalledWith(
+        { id: 'trip-1' },
+        { coverImageUrl: 'https://storage.example/photo.jpg' },
+      );
+    });
+
+    it('null을 넘기면 대표사진을 해제한다', async () => {
+      await service.setCoverImage('trip-1', null);
+
+      expect(tripRepository.update).toHaveBeenCalledWith({ id: 'trip-1' }, { coverImageUrl: null });
+    });
+  });
 });

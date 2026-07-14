@@ -158,6 +158,15 @@ export class TripsService {
     return member;
   }
 
+  /**
+   * 다른 도메인(Records — Phase 11 PATCH photos isCover, Phase 12 PUT/DELETE
+   * cover)이 재사용할 대표사진 갱신 진입점(§2.6). 소속/권한 검증은 호출부 책임 —
+   * 이 메서드는 값을 쓰기만 한다.
+   */
+  async setCoverImage(tripId: string, coverImageUrl: string | null): Promise<void> {
+    await this.tripRepository.update({ id: tripId }, { coverImageUrl });
+  }
+
   private async findActiveTrip(tripId: string): Promise<Trip> {
     const trip = await this.tripRepository.findOneBy({ id: tripId, deletedAt: IsNull() });
     if (!trip) {
