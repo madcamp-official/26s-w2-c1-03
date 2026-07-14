@@ -9,7 +9,13 @@ import 'package:photo_manager/photo_manager.dart';
 class PhotoUploadService {
   Future<Uint8List?> prepareBytes(AssetEntity asset) async {
     final original = await asset.originBytes;
-    if (original == null) return null;
+    if (original == null) {
+      // iCloud 등 원격 저장소에 있는 원본이 기기로 다운로드되지 않은 경우 등에
+      // null이 돌아온다 — 조용히 스킵되면 업로드 실패 원인 추적이 불가능해지므로
+      // 최소한 디버그 로그로 남긴다(§record_upload_screen.dart의 전량 실패 처리와 짝).
+      debugPrint('PhotoUploadService: originBytes null for asset ${asset.id}');
+      return null;
+    }
     return compute(_stripExif, original);
   }
 

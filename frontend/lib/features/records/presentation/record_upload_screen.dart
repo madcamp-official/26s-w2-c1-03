@@ -129,6 +129,16 @@ class _RecordUploadScreenState extends ConsumerState<RecordUploadScreen> {
           if (uploadedRefIds.contains(entry.key)) entry.key: entry.value,
       };
 
+      // refIds가 있었는데(=후보가 있었는데) 하나도 업로드에 성공하지 못했다면
+      // "사진이 원래 없었다"는 정상 상태가 아니라 업로드 실패다 — prepareBytes가
+      // 모든 사진에서 null을 반환(iCloud 원본 다운로드 실패 등)하면 API 호출 자체가
+      // 스킵되어 예외 없이 여기까지 도달할 수 있으므로, 이 경우를 조용히 다음
+      // 화면(빈 상태 UI)으로 넘기지 않고 명시적인 에러로 표시한다.
+      if (refIds.isNotEmpty && uploadedCandidateByRefId.isEmpty) {
+        setState(() => _errorText = '사진을 업로드하지 못했어요. 다시 시도해주세요.');
+        return;
+      }
+
       await _goToNext(recordId, uploadedCandidateByRefId);
     } catch (_) {
       if (!mounted) return;
