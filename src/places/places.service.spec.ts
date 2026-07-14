@@ -134,6 +134,45 @@ describe('PlacesService', () => {
       });
     });
 
+    it('category 미지정("전체")이면 관광지/음식점/쇼핑 3개를 각각 조회해 합친다(숙박·여행코스 등 배제)', async () => {
+      const attraction = buildTourApiItem({ contentId: 'a1', contentTypeId: '12', title: '관광지' });
+      const restaurant = buildTourApiItem({ contentId: 'r1', contentTypeId: '39', title: '식당' });
+      const shopping = buildTourApiItem({ contentId: 's1', contentTypeId: '38', title: '쇼핑몰' });
+      tripsService.getDetail.mockResolvedValue({
+        areaCode: '38',
+        sigunguCode: '13',
+        startDate: '2026-07-13',
+      });
+      tourApiClient.fetchAreaBasedList.mockImplementation(
+        async ({ contentTypeId }: { contentTypeId: string }) => {
+          if (contentTypeId === '12') return [attraction];
+          if (contentTypeId === '39') return [restaurant];
+          if (contentTypeId === '38') return [shopping];
+          return [];
+        },
+      );
+      (placeRepository.find as jest.Mock).mockResolvedValue([
+        buildPlace(attraction, 'a1'),
+        buildPlace(restaurant, 'r1'),
+        buildPlace(shopping, 's1'),
+      ]);
+
+      const result = await service.getCandidates('trip-1', 'user-1', {});
+
+      expect(tourApiClient.fetchAreaBasedList).toHaveBeenCalledTimes(3);
+      expect(tourApiClient.fetchAreaBasedList).toHaveBeenCalledWith(
+        expect.objectContaining({ contentTypeId: '12' }),
+      );
+      expect(tourApiClient.fetchAreaBasedList).toHaveBeenCalledWith(
+        expect.objectContaining({ contentTypeId: '39' }),
+      );
+      expect(tourApiClient.fetchAreaBasedList).toHaveBeenCalledWith(
+        expect.objectContaining({ contentTypeId: '38' }),
+      );
+      // 숙박(32)·여행코스(25) 등은 애초에 요청하지 않으므로 결과에 섞일 수 없다.
+      expect(result.candidates.map((c) => c.name)).toEqual(['관광지', '식당', '쇼핑몰']);
+    });
+
     it('category가 주어지면 contentTypeId로 변환해 TourAPI에 전달한다', async () => {
       tripsService.getDetail.mockResolvedValue({
         areaCode: '6',

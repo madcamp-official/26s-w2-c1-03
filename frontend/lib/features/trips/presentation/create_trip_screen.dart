@@ -8,7 +8,7 @@ import '../../../core/network/api_exception.dart';
 import '../../../core/theme/app_colors.dart';
 import '../../../core/widgets/app_button.dart';
 import 'city_search_sheet.dart';
-import '../../places/presentation/place_selection_screen.dart';
+import 'trip_detail_screen.dart';
 import 'trip_list_controller.dart';
 
 /// 여행 생성 화면(design.md 시안 `3b` 레이아웃 차용). 도시는 자유 텍스트가 아니라
@@ -89,14 +89,10 @@ class _CreateTripScreenState extends ConsumerState<CreateTripScreen> {
       unawaited(ref.read(tripListControllerProvider.notifier).load());
 
       if (!mounted) return;
+      // 여행 상세 화면으로 보낸다 — 그 화면이 스케줄이 비어 있으면 자동으로 장소
+      // 선택 화면을 띄우고, 선택을 마치면 (홈이 아니라) 다시 여기로 돌아온다.
       Navigator.of(context).pushReplacement(
-        MaterialPageRoute(
-          builder: (_) => PlaceSelectionScreen(
-            tripId: trip.id,
-            startDate: trip.startDate,
-            endDate: trip.endDate,
-          ),
-        ),
+        MaterialPageRoute(builder: (_) => TripDetailScreen(tripId: trip.id)),
       );
     } on DioException catch (e) {
       final error = e.error;

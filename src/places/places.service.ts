@@ -11,12 +11,12 @@ import {
   normalizePlaceName,
   TatsCnctrRateClient,
 } from './clients/tats-cnctr-rate.client';
+import { TourApiClient, TourApiPlaceItem } from './clients/tour-api.client';
 import {
-  FetchAreaBasedListParams,
-  TourApiClient,
-  TourApiPlaceItem,
-} from './clients/tour-api.client';
-import { ListCandidatesQueryDto, PlaceCategory } from './dto/list-candidates-query.dto';
+  ListCandidatesQueryDto,
+  PLACE_CATEGORIES,
+  PlaceCategory,
+} from './dto/list-candidates-query.dto';
 import { Place, PlaceSource } from './entities/place.entity';
 import { BusinessException } from '../common/exceptions/business-exception';
 import { haversineKm } from '../common/utils/geo.util';
@@ -90,6 +90,14 @@ const CAT3_CAFE = 'A05020900';
 /** 매칭 안 된 장소(rating=null)는 항상 매칭된 장소보다 뒤로 보낸다(API 명세서 §2.2). */
 const UNMATCHED_SCORE = -1;
 
+/**
+ * 카테고리 미지정("전체") 조회 시 카테고리당 요청 개수 — candidatePageSize(30)를
+ * 앱이 다루는 3개 카테고리로 균등 배분한다. contentTypeId 없이 조회하면 TourAPI가
+ * 숙박(32)·여행코스(25, 좌표 없음)·행사(15) 등 관광지 후보로 부적절한 항목까지
+ * 섞어 내려주므로, 카테고리별로 나눠 받아 합친다.
+ */
+const UNCATEGORIZED_ROWS_PER_CATEGORY = 10;
+
 @Injectable()
 export class PlacesService {
   private readonly logger = new Logger(PlacesService.name);
@@ -139,12 +147,13 @@ export class PlacesService {
       throw new BusinessException(PlacesErrorCode.AREA_CODE_REQUIRED);
     }
 
-    const fetchParams: FetchAreaBasedListParams = {
-      areaCode: trip.areaCode,
-      sigunguCode: trip.sigunguCode ?? undefined,
-      contentTypeId: query.category ? CATEGORY_TO_CONTENT_TYPE_ID[query.category] : undefined,
-    };
-    const rawItems = await this.tourApiClient.fetchAreaBasedList(fetchParams);
+    const baseParams = { areaCode: trip.areaCode, sigunguCode: trip.sigunguCode ?? undefined };
+    const rawItems = query.category
+      ? await this.tourApiClient.fetchAreaBasedList({
+          ...baseParams,
+          contentTypeId: CATEGORY_TO_CONTENT_TYPE_ID[query.category],
+        })
+      : await this.fetchUncategorizedItems(baseParams);
 
     // 방문 집중도 순 정렬용 데이터 — 시군구 단위 1회 조회로 후보 전체를 커버한다
     // (장소별 Google 매칭을 대체). 시군구 코드가 없으면 조회 불가라 TourAPI 기본순 폴백.
@@ -154,6 +163,35 @@ export class PlacesService {
       trip.startDate,
     );
     return { candidates: await this.buildCandidates(rawItems, concentrationMap) };
+  }
+
+  /**
+   * "전체"(카테고리 미지정) 조회 — 관광지/음식점/쇼핑 세 카테고리를 각각 조회해 합친다.
+   * contentTypeId 없이 한 번에 조회하면 TourAPI가 숙박·여행코스·행사 등도 함께 내려줘
+   * 부적절한 항목이 섞인다(§UNCATEGORIZED_ROWS_PER_CATEGORY 주석 참고).
+   */
+  private async fetchUncategorizedItems(baseParams: {
+    areaCode: string;
+    sigunguCode?: string;
+  }): Promise<TourApiPlaceItem[]> {
+    const results = await Promise.all(
+      PLACE_CATEGORIES.map((category) =>
+        this.tourApiClient.fetchAreaBasedList({
+          ...baseParams,
+          contentTypeId: CATEGORY_TO_CONTENT_TYPE_ID[category],
+          numOfRows: UNCATEGORIZED_ROWS_PER_CATEGORY,
+        }),
+      ),
+    );
+
+    // 같은 contentId가 여러 카테고리에 걸쳐 중복 내려올 가능성에 대비해 먼저 나온 것을 유지한다.
+    const byContentId = new Map<string, TourApiPlaceItem>();
+    for (const item of results.flat()) {
+      if (!byContentId.has(item.contentId)) {
+        byContentId.set(item.contentId, item);
+      }
+    }
+    return [...byContentId.values()];
   }
 
   /**
