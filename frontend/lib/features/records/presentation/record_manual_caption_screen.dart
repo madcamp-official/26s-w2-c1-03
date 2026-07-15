@@ -119,21 +119,17 @@ class _RecordManualCaptionScreenState extends ConsumerState<RecordManualCaptionS
                     ),
                   ),
                   Expanded(
-                    child: GridView.builder(
+                    child: ListView.separated(
                       padding: const EdgeInsets.all(16),
-                      gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-                        crossAxisCount: 3,
-                        crossAxisSpacing: 8,
-                        mainAxisSpacing: 8,
-                      ),
                       itemCount: _refIds.length,
+                      separatorBuilder: (context, index) => const SizedBox(height: 24),
                       itemBuilder: (context, index) {
                         final refId = _refIds[index];
                         final candidate = widget.candidatesByRefId[refId]!;
                         return _ManualTile(
                           candidate: candidate,
                           selected: _selectedRefIds.contains(refId),
-                          hasCaption: _captions[refId]?.isNotEmpty ?? false,
+                          caption: _captions[refId],
                           onTap: () => setState(() {
                             if (!_selectedRefIds.remove(refId)) {
                               _selectedRefIds.add(refId);
@@ -160,60 +156,86 @@ class _RecordManualCaptionScreenState extends ConsumerState<RecordManualCaptionS
   }
 }
 
+/// 인스타그램 피드처럼 사진 한 장을 크게 보여주고 그 아래 캡션을 바로
+/// 노출한다 — 사진 탭은 선택/해제, 캡션 영역 탭은 그 사진만의 캡션 입력/수정
+/// 으로 서로 다른 액션이라 영역을 분리했다(record_detail_screen의
+/// _PhotoWithCaptionTile과 같은 패턴).
 class _ManualTile extends StatelessWidget {
   const _ManualTile({
     required this.candidate,
     required this.selected,
-    required this.hasCaption,
+    required this.caption,
     required this.onTap,
     required this.onCaptionTap,
   });
 
   final PhotoCandidate candidate;
   final bool selected;
-  final bool hasCaption;
+  final String? caption;
   final VoidCallback onTap;
   final VoidCallback onCaptionTap;
 
   @override
   Widget build(BuildContext context) {
-    return GestureDetector(
-      onTap: onTap,
-      child: ClipRRect(
-        borderRadius: BorderRadius.circular(10),
-        child: Stack(
-          fit: StackFit.expand,
-          children: [
-            LocalAssetThumbnail(asset: candidate.asset),
-            if (!selected) Container(color: const Color(0x99FFFFFF)),
-            Positioned(
-              top: 4,
-              right: 4,
-              child: Icon(
-                selected ? Icons.check_circle : Icons.radio_button_unchecked,
-                color: selected ? AppColors.lime : Colors.white,
-                size: 20,
+    final hasCaption = caption != null && caption!.isNotEmpty;
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        GestureDetector(
+          onTap: onTap,
+          child: AspectRatio(
+            aspectRatio: 4 / 3,
+            child: ClipRRect(
+              borderRadius: BorderRadius.circular(14),
+              child: Stack(
+                fit: StackFit.expand,
+                children: [
+                  LocalAssetThumbnail(asset: candidate.asset),
+                  if (!selected) Container(color: const Color(0x99FFFFFF)),
+                  Positioned(
+                    top: 8,
+                    right: 8,
+                    child: Icon(
+                      selected ? Icons.check_circle : Icons.radio_button_unchecked,
+                      color: selected ? AppColors.lime : Colors.white,
+                      size: 24,
+                    ),
+                  ),
+                ],
               ),
             ),
-            Positioned(
-              bottom: 4,
-              left: 4,
-              child: GestureDetector(
-                onTap: onCaptionTap,
-                child: Container(
-                  padding: const EdgeInsets.all(4),
-                  decoration: const BoxDecoration(color: Color(0x99000000), shape: BoxShape.circle),
-                  child: Icon(
-                    hasCaption ? Icons.edit_note : Icons.add_comment_outlined,
-                    color: Colors.white,
-                    size: 14,
+          ),
+        ),
+        const SizedBox(height: 8),
+        GestureDetector(
+          onTap: onCaptionTap,
+          behavior: HitTestBehavior.opaque,
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Icon(
+                hasCaption ? Icons.edit_note : Icons.add_comment_outlined,
+                size: 16,
+                color: AppColors.ink400,
+              ),
+              const SizedBox(width: 6),
+              Expanded(
+                child: Text(
+                  hasCaption ? caption! : '캡션을 남겨보세요',
+                  style: TextStyle(
+                    fontSize: 13.5,
+                    height: 1.4,
+                    fontWeight: FontWeight.w500,
+                    color: hasCaption ? AppColors.ink600 : AppColors.ink400,
+                    fontStyle: hasCaption ? FontStyle.normal : FontStyle.italic,
                   ),
                 ),
               ),
-            ),
-          ],
+            ],
+          ),
         ),
-      ),
+      ],
     );
   }
 }
