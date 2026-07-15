@@ -233,6 +233,31 @@ export class TripsService {
     return members.map((member) => member.userId);
   }
 
+  // ── destinations 도메인("다음엔 여기 어때?" 추천)이 재사용하는 진입점 ──────
+  // destinations는 파생 도메인이라 자체 Repository로 trips를 건드리지 않고
+  // 이 메서드로만 방문 이력을 조회한다(§3.1).
+
+  /**
+   * 이 유저가 멤버로 속한(soft delete 제외) 여행들의 지역 키("areaCode:sigunguCode")
+   * 집합. status(planning/ongoing/completed) 무관 — 이미 계획했거나 다녀온 지역은
+   * "다음엔 여기 어때?" 추천에서 굳이 다시 보여줄 필요가 없어 제외 대상으로 쓴다.
+   */
+  async findVisitedAreaKeys(userId: string): Promise<Set<string>> {
+    const rows = await this.tripRepository
+      .createQueryBuilder('trip')
+      .innerJoin(TripMember, 'member', 'member.tripId = trip.id AND member.userId = :userId', {
+        userId,
+      })
+      .where('trip.deletedAt IS NULL')
+      .andWhere('trip.areaCode IS NOT NULL')
+      .select('trip.areaCode', 'areaCode')
+      .addSelect('trip.sigunguCode', 'sigunguCode')
+      .distinct(true)
+      .getRawMany<{ areaCode: string; sigunguCode: string | null }>();
+
+    return new Set(rows.map((row) => `${row.areaCode}:${row.sigunguCode ?? ''}`));
+  }
+
   // ── Phase 10: 초대 링크 ─────────────────────────────────────────────
 
   /** API 명세서 §3.1: 생성 권한은 owner/editor. expiresInHours 생략 시 무기한. */

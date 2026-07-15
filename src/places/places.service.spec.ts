@@ -428,6 +428,77 @@ describe('PlacesService', () => {
     });
   });
 
+  describe('getAreaHighlight', () => {
+    it('관광지가 없으면 score=0, imageUrl=null을 반환한다', async () => {
+      freshCache(placeRepository);
+      placeRepository.find = findByContentType({ '12': [] });
+
+      const result = await service.getAreaHighlight('32', '1');
+
+      expect(result).toEqual({ score: 0, imageUrl: null });
+    });
+
+    it('매칭된 관광지들의 집중률 평균을 score로, 집중률 높은 곳의 이미지를 대표 이미지로 반환한다', async () => {
+      const low = buildTourApiItem({ contentId: '1', title: '낮음', firstImage: 'low.jpg' });
+      const high = buildTourApiItem({ contentId: '2', title: '높음', firstImage: 'high.jpg' });
+      freshCache(placeRepository);
+      placeRepository.find = findByContentType({
+        '12': [buildPlace(low, '1'), buildPlace(high, '2')],
+      });
+      tatsCnctrRateClient.fetchConcentrationMap.mockResolvedValue(
+        new Map([
+          ['낮음', 20],
+          ['높음', 80],
+        ]),
+      );
+
+      const result = await service.getAreaHighlight('32', '1');
+
+      expect(result.score).toBe(50); // (20+80)/2
+      expect(result.imageUrl).toBe('high.jpg');
+    });
+
+    it('동기화 실패 시(콜드) 예외를 던지지 않고 score=0으로 폴백한다', async () => {
+      (placeRepository.findOne as jest.Mock).mockResolvedValue(null); // 콜드
+      tourApiClient.fetchAreaBasedList.mockRejectedValue(new Error('down'));
+
+      const result = await service.getAreaHighlight('32', '1');
+
+      expect(result).toEqual({ score: 0, imageUrl: null });
+    });
+  });
+
+  describe('getAreaAttractions', () => {
+    it('집중률 높은 순으로 정렬해 최대 limit개까지 반환한다', async () => {
+      const low = buildTourApiItem({ contentId: '1', title: '낮음', firstImage: 'low.jpg' });
+      const high = buildTourApiItem({ contentId: '2', title: '높음', firstImage: 'high.jpg' });
+      freshCache(placeRepository);
+      placeRepository.find = findByContentType({
+        '12': [buildPlace(low, '1'), buildPlace(high, '2')],
+      });
+      tatsCnctrRateClient.fetchConcentrationMap.mockResolvedValue(
+        new Map([
+          ['낮음', 20],
+          ['높음', 80],
+        ]),
+      );
+
+      const result = await service.getAreaAttractions('32', '1', 6);
+
+      expect(result.map((a) => a.name)).toEqual(['높음', '낮음']);
+      expect(result[0]).toMatchObject({ name: '높음', imageUrl: 'high.jpg' });
+    });
+
+    it('관광지가 없으면 빈 배열을 반환한다', async () => {
+      freshCache(placeRepository);
+      placeRepository.find = findByContentType({ '12': [] });
+
+      const result = await service.getAreaAttractions('32', '1');
+
+      expect(result).toEqual([]);
+    });
+  });
+
   describe('getPlaceDetail', () => {
     it('존재하지 않으면 PLACE_NOT_FOUND를 던진다', async () => {
       (placeRepository.findOneBy as jest.Mock).mockResolvedValue(null);

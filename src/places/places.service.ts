@@ -95,6 +95,13 @@ export interface AreaHighlight {
   imageUrl: string | null;
 }
 
+/** 지역 상세 화면용 대표 관광지 항목 — destinations 도메인이 소비한다. */
+export interface AreaAttraction {
+  name: string;
+  imageUrl: string | null;
+  overview: string | null;
+}
+
 /** TourAPI contentTypeId — 맛집/카페는 TourAPI에 별도 contentTypeId가 없어 둘 다 39다. */
 const CATEGORY_TO_CONTENT_TYPE_ID: Record<PlaceCategory, string> = {
   tourist_spot: '12',
@@ -405,25 +412,27 @@ export class PlacesService {
   }
 
   /**
-   * 지역 대표 "하이라이트"(오늘 기준 관광지 집중률 평균 + 대표 이미지) — destinations
-   * 도메인(홈 화면 "다음엔 여기 어때?" 추천)이 재사용하는 진입점. Repository를 직접
-   * 건드리지 않고 이 메서드로만 places 데이터에 접근한다(§3.1). getCandidates와 같은
-   * 지역 캐시(ensureAreaSynced/TTL 7일)를 재사용하므로 반복 호출 시 대부분 DB만 읽는다.
+   * 지역의 관광지(최대 [limit]개)를 오늘 기준 관광지 집중률과 함께 조회한다.
+   * getAreaHighlight/getAreaAttractions가 공유하는 내부 헬퍼 — 동기화 실패는 빈
+   * 배열로 폴백해(로그만 남김) 호출부가 개별로 에러 처리를 하지 않아도 되게 한다.
    */
-  async getAreaHighlight(areaCode: string, sigunguCode: string): Promise<AreaHighlight> {
-    const empty: AreaHighlight = { score: 0, imageUrl: null };
+  private async scoreAreaSpots(
+    areaCode: string,
+    sigunguCode: string,
+    limit: number,
+  ): Promise<Array<{ place: Place; rate: number | null }>> {
     try {
       await this.ensureAreaSynced(areaCode, sigunguCode);
     } catch (error) {
       this.logger.warn(
-        `지역 하이라이트 조회 실패(area=${areaCode}, sigungu=${sigunguCode}): ${(error as Error).message}`,
+        `지역 관광지 조회 실패(area=${areaCode}, sigungu=${sigunguCode}): ${(error as Error).message}`,
       );
-      return empty;
+      return [];
     }
 
-    const spots = await this.queryByContentType(areaCode, sigunguCode, CONTENT_TYPE_TOURIST_SPOT, 10);
+    const spots = await this.queryByContentType(areaCode, sigunguCode, CONTENT_TYPE_TOURIST_SPOT, limit);
     if (spots.length === 0) {
-      return empty;
+      return [];
     }
 
     const concentrationMap = await this.safeFetchConcentration(
@@ -431,10 +440,23 @@ export class PlacesService {
       sigunguCode,
       PlacesService.todayDateString(),
     );
-    const scored = spots.map((place) => ({
+    return spots.map((place) => ({
       place,
       rate: place.name ? concentrationMap.get(normalizePlaceName(place.name)) ?? null : null,
     }));
+  }
+
+  /**
+   * 지역 대표 "하이라이트"(오늘 기준 관광지 집중률 평균 + 대표 이미지) — destinations
+   * 도메인(홈 화면 "다음엔 여기 어때?" 추천 목록)이 재사용하는 진입점. Repository를
+   * 직접 건드리지 않고 이 메서드로만 places 데이터에 접근한다(§3.1). getCandidates와
+   * 같은 지역 캐시(ensureAreaSynced/TTL 7일)를 재사용하므로 반복 호출 시 대부분 DB만 읽는다.
+   */
+  async getAreaHighlight(areaCode: string, sigunguCode: string): Promise<AreaHighlight> {
+    const scored = await this.scoreAreaSpots(areaCode, sigunguCode, 10);
+    if (scored.length === 0) {
+      return { score: 0, imageUrl: null };
+    }
 
     const matched = scored.filter((s): s is { place: Place; rate: number } => s.rate !== null);
     const score =
@@ -446,6 +468,27 @@ export class PlacesService {
       .find((s) => s.place.imageUrl);
 
     return { score, imageUrl: withImage?.place.imageUrl ?? null };
+  }
+
+  /**
+   * 지역 대표 관광지 목록(집중률 높은 순, 최대 [limit]개) — destinations 상세 화면이
+   * "여기서 뭘 볼 수 있는지" 보여주기 위해 재사용하는 진입점. getAreaHighlight와 같은
+   * 캐시를 공유한다(scoreAreaSpots).
+   */
+  async getAreaAttractions(
+    areaCode: string,
+    sigunguCode: string,
+    limit = 6,
+  ): Promise<AreaAttraction[]> {
+    const scored = await this.scoreAreaSpots(areaCode, sigunguCode, limit);
+    return [...scored]
+      .sort((a, b) => (b.rate ?? -1) - (a.rate ?? -1))
+      .slice(0, limit)
+      .map((s) => ({
+        name: s.place.name ?? '',
+        imageUrl: s.place.imageUrl,
+        overview: s.place.overview,
+      }));
   }
 
   private static todayDateString(): string {

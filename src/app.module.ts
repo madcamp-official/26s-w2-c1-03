@@ -14,6 +14,7 @@ import { PlacesModule } from './places/places.module';
 import { ScheduleModule } from './schedule/schedule.module';
 import { RecordsModule } from './records/records.module';
 import { NotificationsModule } from './notifications/notifications.module';
+import { DestinationsModule } from './destinations/destinations.module';
 
 @Module({
   imports: [
@@ -38,6 +39,7 @@ import { NotificationsModule } from './notifications/notifications.module';
     ScheduleModule,
     RecordsModule,
     NotificationsModule,
+    DestinationsModule,
   ],
   controllers: [AppController],
   providers: [AppService],
