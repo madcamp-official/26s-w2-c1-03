@@ -262,7 +262,7 @@ class _SheetHeader extends StatelessWidget {
               style: const TextStyle(
                 fontSize: 13,
                 fontWeight: FontWeight.w700,
-                color: AppColors.green800,
+                color: AppColors.lime,
               ),
             ),
         ],
@@ -380,7 +380,7 @@ class _DayBadge extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
       decoration: BoxDecoration(
-        color: AppColors.green800.withValues(alpha: 0.1),
+        color: AppColors.limeBg,
         borderRadius: BorderRadius.circular(999),
       ),
       child: Text(
@@ -388,7 +388,7 @@ class _DayBadge extends StatelessWidget {
         style: const TextStyle(
           fontSize: 11.5,
           fontWeight: FontWeight.w800,
-          color: AppColors.green800,
+          color: AppColors.lime,
         ),
       ),
     );

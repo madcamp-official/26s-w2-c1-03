@@ -135,7 +135,7 @@ class _ScheduleGeneratingScreenState
             height: 54,
             child: CircularProgressIndicator(
               strokeWidth: 4,
-              color: AppColors.green800,
+              color: AppColors.lime,
             ),
           ),
         ),

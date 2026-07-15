@@ -272,13 +272,13 @@ class _ScheduleChatPanelState extends ConsumerState<ScheduleChatPanel> {
                   height: 34,
                   alignment: Alignment.center,
                   decoration: const BoxDecoration(
-                    color: AppColors.lime,
+                    color: AppColors.limeBg,
                     shape: BoxShape.circle,
                   ),
                   child: const Icon(
                     Icons.auto_awesome,
                     size: 16,
-                    color: AppColors.green800,
+                    color: AppColors.lime,
                   ),
                 ),
                 const SizedBox(width: 10),

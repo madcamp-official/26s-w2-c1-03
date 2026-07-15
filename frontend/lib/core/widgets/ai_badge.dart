@@ -13,7 +13,7 @@ class AiBadge extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
       decoration: BoxDecoration(
-        color: AppColors.lime,
+        color: AppColors.limeBg,
         borderRadius: BorderRadius.circular(999),
       ),
       child: Text(
@@ -21,7 +21,7 @@ class AiBadge extends StatelessWidget {
         style: const TextStyle(
           fontSize: 10.5,
           fontWeight: FontWeight.w800,
-          color: AppColors.green800,
+          color: AppColors.lime,
         ),
       ),
     );
@@ -41,7 +41,7 @@ class AiBanner extends StatelessWidget {
       width: double.infinity,
       padding: const EdgeInsets.all(18),
       decoration: BoxDecoration(
-        color: AppColors.lime,
+        color: AppColors.limeBg,
         borderRadius: BorderRadius.circular(20),
       ),
       child: Row(
@@ -58,7 +58,7 @@ class AiBanner extends StatelessWidget {
                   style: const TextStyle(
                     fontSize: 14.5,
                     fontWeight: FontWeight.w700,
-                    color: AppColors.green800,
+                    color: AppColors.lime,
                   ),
                 ),
                 const SizedBox(height: 4),
@@ -67,7 +67,7 @@ class AiBanner extends StatelessWidget {
                   style: const TextStyle(
                     fontSize: 13,
                     fontWeight: FontWeight.w600,
-                    color: AppColors.green700,
+                    color: AppColors.ink600,
                     height: 1.45,
                   ),
                 ),

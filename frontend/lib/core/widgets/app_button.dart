@@ -29,7 +29,9 @@ class AppButton extends StatelessWidget {
   Widget build(BuildContext context) {
     final (bg, fg, disabledBg) = switch (variant) {
       AppButtonVariant.ink => (AppColors.ink900, Colors.white, AppColors.ink300),
-      AppButtonVariant.lime => (AppColors.lime, AppColors.green900, const Color(0xFFFEFFE6)),
+      // disabled 배경은 옅은 민트가 아니라 회색으로 둔다 — fg(흰색)는 disabled일 때도
+      // 그대로라, 옅은 민트 위에 흰 글씨를 얹으면 거의 안 보인다.
+      AppButtonVariant.lime => (AppColors.lime, AppColors.onLime, AppColors.ink300),
       AppButtonVariant.outline => (Colors.white, AppColors.ink900, Colors.white),
     };
 

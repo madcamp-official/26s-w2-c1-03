@@ -458,7 +458,7 @@ class _PlaceEditRow extends StatelessWidget {
                   style: const TextStyle(
                     fontSize: 12,
                     fontWeight: FontWeight.w800,
-                    color: AppColors.green800,
+                    color: AppColors.lime,
                   ),
                 ),
               ),

@@ -217,7 +217,7 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
                   children: [
                     CircleAvatar(
                       radius: 44,
-                      backgroundColor: AppColors.lime,
+                      backgroundColor: AppColors.limeBg,
                       backgroundImage: user.profileImageUrl != null
                           ? NetworkImage(user.profileImageUrl!)
                           : null,
@@ -227,7 +227,7 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
                               style: const TextStyle(
                                 fontSize: 32,
                                 fontWeight: FontWeight.w800,
-                                color: AppColors.green800,
+                                color: AppColors.lime,
                               ),
                             )
                           : null,

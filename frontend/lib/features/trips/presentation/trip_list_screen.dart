@@ -475,7 +475,7 @@ class _DdayHeroCard extends StatelessWidget {
                     child: const Icon(
                       Icons.auto_awesome,
                       size: 21,
-                      color: AppColors.green800,
+                      color: AppColors.lime,
                     ),
                   ),
                 ],

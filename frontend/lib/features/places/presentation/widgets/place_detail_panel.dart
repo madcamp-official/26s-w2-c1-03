@@ -143,7 +143,7 @@ class _DetailInfo extends StatelessWidget {
           const SizedBox(height: 4),
           Row(
             children: [
-              const Icon(Icons.star, size: 15, color: AppColors.green800),
+              const Icon(Icons.star, size: 15, color: AppColors.lime),
               const SizedBox(width: 3),
               Text(
                 '${place.rating!.toStringAsFixed(1)} (${place.reviewCount ?? 0})',
@@ -257,7 +257,7 @@ class _ReviewTile extends StatelessWidget {
               (i) => Icon(
                 i < review.rating.round() ? Icons.star : Icons.star_border,
                 size: 14,
-                color: AppColors.green800,
+                color: AppColors.lime,
               ),
             ),
           ),

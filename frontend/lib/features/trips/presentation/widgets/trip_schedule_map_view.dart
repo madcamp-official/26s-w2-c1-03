@@ -349,7 +349,7 @@ class _TripScheduleMapViewState extends ConsumerState<TripScheduleMapView> {
         child: TextButton.icon(
           onPressed: () => widget.onAddPlace(_selectedDay),
           style: TextButton.styleFrom(
-            foregroundColor: AppColors.green800,
+            foregroundColor: AppColors.lime,
             padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
           ),
           icon: const Icon(Icons.add, size: 18),
@@ -450,7 +450,7 @@ class _RecordBanner extends StatelessWidget {
               const Icon(
                 Icons.auto_stories_outlined,
                 size: 18,
-                color: AppColors.green800,
+                color: AppColors.onLime,
               ),
               const SizedBox(width: 8),
               const Expanded(
@@ -459,14 +459,14 @@ class _RecordBanner extends StatelessWidget {
                   style: TextStyle(
                     fontSize: 13,
                     fontWeight: FontWeight.w800,
-                    color: AppColors.green800,
+                    color: AppColors.onLime,
                   ),
                 ),
               ),
               const Icon(
                 Icons.chevron_right,
                 size: 18,
-                color: AppColors.green800,
+                color: AppColors.onLime,
               ),
             ],
           ),
@@ -519,7 +519,7 @@ class _SheetHeader extends StatelessWidget {
             icon: const Icon(
               Icons.auto_awesome,
               size: 18,
-              color: AppColors.green800,
+              color: AppColors.lime,
             ),
           ),
           TextButton(
