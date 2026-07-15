@@ -24,4 +24,9 @@ export const RecordsErrorCode = {
     status: HttpStatus.NOT_FOUND,
     message: '기록 사진을 찾을 수 없습니다.',
   },
+  RECORD_DAY_ENTRY_NOT_FOUND: {
+    code: 'RECORD_DAY_ENTRY_NOT_FOUND',
+    status: HttpStatus.NOT_FOUND,
+    message: '해당 날짜의 기록을 찾을 수 없습니다.',
+  },
 } as const satisfies Record<string, ErrorCodeDefinition>;

@@ -16,6 +16,8 @@ import { ListRecordsQueryDto } from './dto/list-records-query.dto';
 import { RegisterPhotoMetadataDto } from './dto/register-photo-metadata.dto';
 import { UpdateRecordDto } from './dto/update-record.dto';
 import { UpdateRecordPhotoDto } from './dto/update-record-photo.dto';
+import { UpsertDayEntryDto } from './dto/upsert-day-entry.dto';
+import { RecordDayEntry } from './entities/record-day-entry.entity';
 import { RecordPhoto } from './entities/record-photo.entity';
 import { RecordPhotoRef, RecordPhotoRefStatus } from './entities/record-photo-ref.entity';
 import { TravelRecord, TravelRecordStatus } from './entities/travel-record.entity';
@@ -80,9 +82,19 @@ export interface PaginatedRecords {
   nextCursor: string | null;
 }
 
+export interface RecordDayEntrySummary {
+  date: string;
+  title: string | null;
+  content: string | null;
+  photo: RecordPhotoSummary | null;
+}
+
 export interface RecordDetail extends RecordSummary {
   tripCityName: string;
+  tripStartDate: string;
+  tripEndDate: string;
   photos: RecordPhotoSummary[];
+  dayEntries: RecordDayEntrySummary[];
 }
 
 interface DecodedRecordCursor {
@@ -105,6 +117,8 @@ export class RecordsService {
     private readonly recordPhotoRefRepository: Repository<RecordPhotoRef>,
     @InjectRepository(RecordPhoto)
     private readonly recordPhotoRepository: Repository<RecordPhoto>,
+    @InjectRepository(RecordDayEntry)
+    private readonly recordDayEntryRepository: Repository<RecordDayEntry>,
     private readonly tripsService: TripsService,
     private readonly storageService: StorageService,
     configService: ConfigService,
@@ -568,15 +582,70 @@ export class RecordsService {
       throw new BusinessException(RecordsErrorCode.RECORD_FORBIDDEN);
     }
 
-    const photos = await this.recordPhotoRepository.find({
-      where: { recordId: record.id },
-      order: { orderIndex: 'ASC' },
-    });
+    const [photos, dayEntries] = await Promise.all([
+      this.recordPhotoRepository.find({
+        where: { recordId: record.id },
+        order: { orderIndex: 'ASC' },
+      }),
+      this.recordDayEntryRepository.find({
+        where: { recordId: record.id },
+        relations: { photo: true },
+        order: { date: 'ASC' },
+      }),
+    ]);
     return {
       ...this.toSummary(record),
       tripCityName: record.trip.cityName,
+      tripStartDate: record.trip.startDate,
+      tripEndDate: record.trip.endDate,
       photos: photos.map((photo) => this.toPhotoSummary(photo)),
+      dayEntries: dayEntries.map((entry) => this.toDayEntrySummary(entry)),
     };
+  }
+
+  /**
+   * Day 항목(제목/본문/대표사진) 생성 또는 수정(PUT이라 전체 교체 — 값을 안
+   * 보내면 그 필드는 null로 지워진다). photoId를 지정하면 같은 기록 소속 사진인지
+   * 확인해(findOwnedPhoto) 다른 사람/기록 사진을 대표사진으로 몰래 지정하지
+   * 못하게 막는다.
+   */
+  async upsertDayEntry(
+    tripId: string,
+    recordId: string,
+    userId: string,
+    date: string,
+    dto: UpsertDayEntryDto,
+  ): Promise<RecordDayEntrySummary> {
+    const record = await this.findOwnedRecord(tripId, recordId, userId);
+
+    if (dto.photoId != null) {
+      await this.findOwnedPhoto(record.id, dto.photoId);
+    }
+
+    const existing = await this.recordDayEntryRepository.findOneBy({ recordId: record.id, date });
+    const saved = await this.recordDayEntryRepository.save({
+      ...(existing ?? { recordId: record.id, date }),
+      title: dto.title ?? null,
+      content: dto.content ?? null,
+      photoId: dto.photoId ?? null,
+    });
+
+    const withPhoto = await this.recordDayEntryRepository.findOne({
+      where: { id: saved.id },
+      relations: { photo: true },
+    });
+    return this.toDayEntrySummary(withPhoto!);
+  }
+
+  /** Day 항목 삭제 — 그 항목에 쓰인 사진 실물(record_photos)은 건드리지 않는다. */
+  async deleteDayEntry(tripId: string, recordId: string, userId: string, date: string): Promise<void> {
+    const record = await this.findOwnedRecord(tripId, recordId, userId);
+
+    const existing = await this.recordDayEntryRepository.findOneBy({ recordId: record.id, date });
+    if (!existing) {
+      throw new BusinessException(RecordsErrorCode.RECORD_DAY_ENTRY_NOT_FOUND);
+    }
+    await this.recordDayEntryRepository.delete({ id: existing.id });
   }
 
   /**
@@ -759,6 +828,15 @@ export class RecordsService {
       orderIndex: photo.orderIndex,
       isCover: photo.isCover,
       createdAt: photo.createdAt,
+    };
+  }
+
+  private toDayEntrySummary(entry: RecordDayEntry): RecordDayEntrySummary {
+    return {
+      date: entry.date,
+      title: entry.title,
+      content: entry.content,
+      photo: entry.photo ? this.toPhotoSummary(entry.photo) : null,
     };
   }
 

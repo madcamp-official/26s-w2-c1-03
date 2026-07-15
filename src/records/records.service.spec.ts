@@ -2,6 +2,7 @@ import * as fsSync from 'fs';
 import { promises as fs } from 'fs';
 import * as os from 'os';
 import * as path from 'path';
+import { RecordDayEntry } from './entities/record-day-entry.entity';
 import { RecordPhoto } from './entities/record-photo.entity';
 import { RecordPhotoRef, RecordPhotoRefStatus } from './entities/record-photo-ref.entity';
 import { TravelRecord, TravelRecordStatus } from './entities/travel-record.entity';
@@ -27,9 +28,11 @@ function createRepositoryMock<T extends object>(): RepoMock<T> {
     // create()만으로는 id가 없으므로 save() 단계에서 흉내낸다.
     save: jest.fn(async (entity) => ({ id: 'ref-1', ...entity })),
     findOneBy: jest.fn(),
+    findOne: jest.fn(),
     findBy: jest.fn().mockResolvedValue([]),
     find: jest.fn().mockResolvedValue([]),
     update: jest.fn(),
+    delete: jest.fn(),
   };
 }
 
@@ -83,6 +86,22 @@ function buildPhotoRef(overrides: Partial<RecordPhotoRef> = {}): RecordPhotoRef 
   };
 }
 
+function buildDayEntry(overrides: Partial<RecordDayEntry> = {}): RecordDayEntry {
+  return {
+    id: 'day-1',
+    recordId: 'record-1',
+    record: undefined as never,
+    date: '2026-10-02',
+    title: '도쿄 첫날',
+    content: '츠키지 시장에서 아침을',
+    photoId: null,
+    photo: null,
+    createdAt: new Date('2026-01-01T00:00:00Z'),
+    updatedAt: new Date('2026-01-01T00:00:00Z'),
+    ...overrides,
+  };
+}
+
 function buildRecordPhoto(overrides: Partial<RecordPhoto> = {}): RecordPhoto {
   return {
     id: 'photo-1',
@@ -115,6 +134,7 @@ describe('RecordsService', () => {
   let travelRecordRepository: RepoMock<TravelRecord>;
   let recordPhotoRefRepository: RepoMock<RecordPhotoRef>;
   let recordPhotoRepository: RepoMock<RecordPhoto>;
+  let recordDayEntryRepository: RepoMock<RecordDayEntry>;
   let tripsService: { assertMember: jest.Mock; setCoverImage: jest.Mock };
   let storageService: { uploadPermanent: jest.Mock; deletePermanent: jest.Mock };
   let configService: { getOrThrow: jest.Mock };
@@ -127,6 +147,7 @@ describe('RecordsService', () => {
     recordPhotoRefRepository = createRepositoryMock<RecordPhotoRef>();
     recordPhotoRepository = createRepositoryMock<RecordPhoto>();
     recordPhotoRepository.delete = jest.fn();
+    recordDayEntryRepository = createRepositoryMock<RecordDayEntry>();
     recordPhotoRepository.createQueryBuilder = jest.fn().mockReturnValue({
       update: jest.fn().mockReturnThis(),
       set: jest.fn().mockReturnThis(),
@@ -157,6 +178,7 @@ describe('RecordsService', () => {
       travelRecordRepository as never,
       recordPhotoRefRepository as never,
       recordPhotoRepository as never,
+      recordDayEntryRepository as never,
       tripsService as never,
       storageService as never,
       configService as never,
@@ -768,6 +790,105 @@ describe('RecordsService', () => {
     });
   });
 
+  describe('upsertDayEntry', () => {
+    it('본인 기록이 아니면 RECORD_FORBIDDEN을 던지고 photoId 검증조차 하지 않는다', async () => {
+      travelRecordRepository.findOneBy!.mockResolvedValue(buildRecord({ userId: 'other-user' }));
+
+      await expect(
+        service.upsertDayEntry('trip-1', 'record-1', 'user-1', '2026-10-02', { title: '제목' }),
+      ).rejects.toMatchObject({ code: 'RECORD_FORBIDDEN' });
+      expect(recordPhotoRepository.findOneBy).not.toHaveBeenCalled();
+    });
+
+    it('photoId가 이 기록 소속 사진이 아니면 RECORD_PHOTO_NOT_FOUND를 던지고 저장하지 않는다', async () => {
+      travelRecordRepository.findOneBy!.mockResolvedValue(buildRecord());
+      recordPhotoRepository.findOneBy!.mockResolvedValue(null);
+
+      await expect(
+        service.upsertDayEntry('trip-1', 'record-1', 'user-1', '2026-10-02', {
+          photoId: 'other-record-photo',
+        }),
+      ).rejects.toMatchObject({ code: 'RECORD_PHOTO_NOT_FOUND' });
+      expect(recordDayEntryRepository.save).not.toHaveBeenCalled();
+    });
+
+    it('처음 쓰는 날짜면 새 Day 항목을 만든다', async () => {
+      travelRecordRepository.findOneBy!.mockResolvedValue(buildRecord());
+      recordDayEntryRepository.findOneBy!.mockResolvedValue(null);
+      const saved = buildDayEntry({ id: 'day-1' });
+      recordDayEntryRepository.save!.mockResolvedValue(saved);
+      recordDayEntryRepository.findOne!.mockResolvedValue(saved);
+
+      const result = await service.upsertDayEntry('trip-1', 'record-1', 'user-1', '2026-10-02', {
+        title: '도쿄 첫날',
+        content: '츠키지 시장에서 아침을',
+      });
+
+      expect(recordDayEntryRepository.save).toHaveBeenCalledWith(
+        expect.objectContaining({
+          recordId: 'record-1',
+          date: '2026-10-02',
+          title: '도쿄 첫날',
+          content: '츠키지 시장에서 아침을',
+          photoId: null,
+        }),
+      );
+      expect(result).toMatchObject({ date: '2026-10-02', title: '도쿄 첫날', photo: null });
+    });
+
+    it('같은 날짜에 이미 항목이 있으면 새로 만들지 않고 덮어쓴다(PUT 전체 교체)', async () => {
+      travelRecordRepository.findOneBy!.mockResolvedValue(buildRecord());
+      const existing = buildDayEntry({ title: '예전 제목', content: '예전 본문' });
+      recordDayEntryRepository.findOneBy!.mockResolvedValue(existing);
+      recordDayEntryRepository.save!.mockResolvedValue({ ...existing, title: '새 제목', content: null });
+      recordDayEntryRepository.findOne!.mockResolvedValue({
+        ...existing,
+        title: '새 제목',
+        content: null,
+      });
+
+      const result = await service.upsertDayEntry('trip-1', 'record-1', 'user-1', '2026-10-02', {
+        title: '새 제목',
+      });
+
+      // content를 안 보냈으면(PUT) null로 지워진다 — PATCH의 부분 갱신(updateRecord)과 다르다.
+      expect(recordDayEntryRepository.save).toHaveBeenCalledWith(
+        expect.objectContaining({ id: 'day-1', title: '새 제목', content: null }),
+      );
+      expect(result.content).toBeNull();
+    });
+  });
+
+  describe('deleteDayEntry', () => {
+    it('본인 기록이 아니면 RECORD_FORBIDDEN을 던진다', async () => {
+      travelRecordRepository.findOneBy!.mockResolvedValue(buildRecord({ userId: 'other-user' }));
+
+      await expect(
+        service.deleteDayEntry('trip-1', 'record-1', 'user-1', '2026-10-02'),
+      ).rejects.toMatchObject({ code: 'RECORD_FORBIDDEN' });
+    });
+
+    it('해당 날짜에 항목이 없으면 RECORD_DAY_ENTRY_NOT_FOUND를 던진다', async () => {
+      travelRecordRepository.findOneBy!.mockResolvedValue(buildRecord());
+      recordDayEntryRepository.findOneBy!.mockResolvedValue(null);
+
+      await expect(
+        service.deleteDayEntry('trip-1', 'record-1', 'user-1', '2026-10-02'),
+      ).rejects.toMatchObject({ code: 'RECORD_DAY_ENTRY_NOT_FOUND' });
+      expect(recordDayEntryRepository.delete).not.toHaveBeenCalled();
+    });
+
+    it('있으면 그 항목만 삭제한다', async () => {
+      travelRecordRepository.findOneBy!.mockResolvedValue(buildRecord());
+      const existing = buildDayEntry();
+      recordDayEntryRepository.findOneBy!.mockResolvedValue(existing);
+
+      await service.deleteDayEntry('trip-1', 'record-1', 'user-1', '2026-10-02');
+
+      expect(recordDayEntryRepository.delete).toHaveBeenCalledWith({ id: 'day-1' });
+    });
+  });
+
   describe('listMyRecords', () => {
     const trip = { cityName: '오사카', startDate: '2026-07-16', endDate: '2026-07-19' };
 
@@ -897,6 +1018,30 @@ describe('RecordsService', () => {
       expect(recordPhotoRepository.find).toHaveBeenCalledWith({
         where: { recordId: 'record-1' },
         order: { orderIndex: 'ASC' },
+      });
+    });
+
+    it('Day 항목과 여행 시작/종료일을 함께 반환한다', async () => {
+      const record = buildRecord({
+        trip: { cityName: '오사카', startDate: '2026-10-02', endDate: '2026-10-05' } as never,
+      });
+      travelRecordRepository.createQueryBuilder = jest
+        .fn()
+        .mockReturnValue(createQueryBuilderMock([record]));
+      recordPhotoRepository.find!.mockResolvedValue([]);
+      recordDayEntryRepository.find!.mockResolvedValue([buildDayEntry()]);
+
+      const result = await service.getRecordDetail('record-1', 'user-1');
+
+      expect(result.tripStartDate).toBe('2026-10-02');
+      expect(result.tripEndDate).toBe('2026-10-05');
+      expect(result.dayEntries).toEqual([
+        { date: '2026-10-02', title: '도쿄 첫날', content: '츠키지 시장에서 아침을', photo: null },
+      ]);
+      expect(recordDayEntryRepository.find).toHaveBeenCalledWith({
+        where: { recordId: 'record-1' },
+        relations: { photo: true },
+        order: { date: 'ASC' },
       });
     });
   });

@@ -8,6 +8,7 @@ import {
   Param,
   Patch,
   Post,
+  Put,
   UploadedFiles,
   UseGuards,
   UseInterceptors,
@@ -19,6 +20,7 @@ import { FinalizePhotosDto } from './dto/finalize-photos.dto';
 import { RegisterPhotoMetadataDto } from './dto/register-photo-metadata.dto';
 import { UpdateRecordDto } from './dto/update-record.dto';
 import { UpdateRecordPhotoDto } from './dto/update-record-photo.dto';
+import { UpsertDayEntryDto } from './dto/upsert-day-entry.dto';
 import { RecordsService } from './records.service';
 
 @UseGuards(JwtAuthGuard)
@@ -110,5 +112,27 @@ export class RecordsController {
     @Body() dto: UpdateRecordDto,
   ) {
     return this.recordsService.updateRecord(tripId, recordId, user.userId, dto);
+  }
+
+  @Put(':recordId/days/:date')
+  upsertDayEntry(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param('tripId') tripId: string,
+    @Param('recordId') recordId: string,
+    @Param('date') date: string,
+    @Body() dto: UpsertDayEntryDto,
+  ) {
+    return this.recordsService.upsertDayEntry(tripId, recordId, user.userId, date, dto);
+  }
+
+  @Delete(':recordId/days/:date')
+  @HttpCode(HttpStatus.NO_CONTENT)
+  async deleteDayEntry(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param('tripId') tripId: string,
+    @Param('recordId') recordId: string,
+    @Param('date') date: string,
+  ): Promise<void> {
+    await this.recordsService.deleteDayEntry(tripId, recordId, user.userId, date);
   }
 }

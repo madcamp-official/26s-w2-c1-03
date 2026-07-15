@@ -3,14 +3,13 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../core/network/api_exception.dart';
 import '../../../core/theme/app_colors.dart';
+import '../../../core/utils/date_format.dart';
 import '../../../core/widgets/app_back_button.dart';
 import '../../../core/widgets/app_button.dart';
-import '../../trips/presentation/trip_list_controller.dart' show tripsApiProvider;
 import '../data/record_photo_models.dart';
 import '../data/record_summary_models.dart';
-import 'record_mode_sheet.dart';
+import 'record_photo_manage_screen.dart';
 import 'record_upload_screen.dart' show recordsApiProvider;
-import 'record_write_screen.dart';
 import 'records_list_controller.dart';
 
 sealed class _DetailState {
@@ -31,9 +30,10 @@ class _DetailFailed extends _DetailState {
   final String message;
 }
 
-/// 기록 상세(API 명세서 §5 GET /records/{recordId}) — 사진 목록 + 본문, 수정/삭제.
-/// TripDetailScreen과 같은 이유로 이 화면 하나에만 쓰는 상태라 로컬 setState로
-/// 관리한다(recordId 하나에 매인 일회성 화면).
+/// 기록을 Day별 다이어리로 보여주는 기본 화면 — 여행 시작일~종료일 각 날짜마다
+/// 제목/본문/대표사진 하나씩(RecordDayEntry). 사진 실물 업로드/캡션/대표사진
+/// 지정 같은 사진 파이프라인 관리는 RecordPhotoManageScreen으로 넘겼고, 여기서는
+/// 그 사진들 중 하나를 Day의 대표사진으로 고르는 것만 다룬다.
 class RecordDetailScreen extends ConsumerStatefulWidget {
   const RecordDetailScreen({super.key, required this.recordId});
 
@@ -45,9 +45,7 @@ class RecordDetailScreen extends ConsumerStatefulWidget {
 
 class _RecordDetailScreenState extends ConsumerState<RecordDetailScreen> {
   _DetailState _state = const _DetailLoading();
-  bool _deleting = false;
-  bool _openingPicker = false;
-  String? _togglingCoverPhotoId;
+  bool _editing = false;
 
   @override
   void initState() {
@@ -76,100 +74,31 @@ class _RecordDetailScreenState extends ConsumerState<RecordDetailScreen> {
     }
   }
 
-  Future<void> _openWrite(RecordDetail record) async {
-    final changed = await Navigator.of(
+  /// 사진 실물 관리(추가/캡션/대표사진)는 별도 화면으로 위임한다. 그 화면에서
+  /// 기록 자체가 삭제됐으면('deleted' 시그널) 이 화면도 같이 닫는다.
+  Future<void> _openPhotoManage(RecordDetail record) async {
+    final result = await Navigator.of(
       context,
-    ).push<bool>(MaterialPageRoute(builder: (_) => RecordWriteScreen(record: record)));
+    ).push<Object?>(MaterialPageRoute(builder: (_) => RecordPhotoManageScreen(recordId: record.id)));
     if (!mounted) return;
-    if (changed == true) {
-      await _load();
-      ref.read(recordsListControllerProvider.notifier).load();
-    }
-  }
-
-  Future<void> _confirmAndDelete() async {
-    final confirmed = await showDialog<bool>(
-      context: context,
-      builder: (dialogContext) => AlertDialog(
-        title: const Text('기록을 삭제할까요?'),
-        content: const Text('사진과 글이 모두 삭제되고 되돌릴 수 없어요.'),
-        actions: [
-          TextButton(onPressed: () => Navigator.of(dialogContext).pop(false), child: const Text('취소')),
-          TextButton(
-            onPressed: () => Navigator.of(dialogContext).pop(true),
-            child: const Text('삭제', style: TextStyle(color: AppColors.danger)),
-          ),
-        ],
-      ),
-    );
-    if (confirmed != true) return;
-
-    setState(() => _deleting = true);
-    try {
-      await ref.read(recordsApiProvider).deleteRecord(widget.recordId);
-      ref.read(recordsListControllerProvider.notifier).load();
-      if (!mounted) return;
+    if (result == 'deleted') {
       Navigator.of(context).pop();
-    } on DioException catch (e) {
-      if (!mounted) return;
-      final error = e.error;
-      setState(() => _deleting = false);
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(SnackBar(content: Text(error is ApiException ? error.message : '삭제하지 못했어요.')));
-    } catch (_) {
-      if (!mounted) return;
-      setState(() => _deleting = false);
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('삭제하지 못했어요.')));
+      return;
     }
+    await _load();
   }
 
-  /// 이 기록에 사진을 더 추가한다 — 같은 트립에 대해 "기록 시작"을 다시 밟는
-  /// 것과 동일하다(startSession이 (trip_id,user_id) unique라 기존 기록을 그대로
-  /// 재사용하므로 새 기록이 아니라 이 기록에 사진이 이어서 쌓인다). 모드 시트가
-  /// Trip 전체(기간/도시 등)를 필요로 해서 tripId로 상세를 한 번 더 조회한다.
-  Future<void> _addPhotos(RecordDetail record) async {
-    setState(() => _openingPicker = true);
-    try {
-      final trip = await ref.read(tripsApiProvider).getDetail(record.tripId);
-      if (!mounted) return;
-      setState(() => _openingPicker = false);
-
-      final added = await showRecordModeSheet(context, trip);
-      if (!mounted) return;
-      if (added) {
-        await _load();
-        ref.read(recordsListControllerProvider.notifier).load();
-      }
-    } on DioException catch (e) {
-      if (!mounted) return;
-      final error = e.error;
-      setState(() => _openingPicker = false);
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(SnackBar(content: Text(error is ApiException ? error.message : '여행 정보를 불러오지 못했어요.')));
-    } catch (_) {
-      if (!mounted) return;
-      setState(() => _openingPicker = false);
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(const SnackBar(content: Text('여행 정보를 불러오지 못했어요.')));
-    }
-  }
-
-  /// 사진 한 장의 캡션 수정(API 명세서 §4 PATCH .../photos/{recordPhotoId}).
-  Future<void> _editCaption(RecordDetail record, RecordPhoto photo) async {
-    final controller = TextEditingController(text: photo.caption ?? '');
+  Future<void> _editTitle(RecordDetail record) async {
+    final controller = TextEditingController(text: record.title ?? '');
     final saved = await showDialog<String>(
       context: context,
       builder: (dialogContext) => AlertDialog(
-        title: const Text('캡션'),
+        title: const Text('여행 기록 제목'),
         content: TextField(
           controller: controller,
-          maxLength: 200,
-          maxLines: 3,
+          maxLength: 100,
           autofocus: true,
-          decoration: const InputDecoration(hintText: '이 사진에 대한 한마디'),
+          decoration: const InputDecoration(hintText: '예: 도쿄 가을 여행'),
         ),
         actions: [
           TextButton(onPressed: () => Navigator.of(dialogContext).pop(), child: const Text('취소')),
@@ -180,54 +109,212 @@ class _RecordDetailScreenState extends ConsumerState<RecordDetailScreen> {
         ],
       ),
     );
-    if (saved == null || !mounted || saved == (photo.caption ?? '')) return;
+    if (saved == null || !mounted || saved == (record.title ?? '')) return;
+
+    try {
+      await ref.read(recordsApiProvider).updateRecordText(record.tripId, record.id, title: saved);
+      if (!mounted) return;
+      await _load();
+      ref.read(recordsListControllerProvider.notifier).load();
+    } on DioException catch (e) {
+      if (!mounted) return;
+      final error = e.error;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(error is ApiException ? error.message : '제목을 저장하지 못했어요.')),
+      );
+    } catch (_) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('제목을 저장하지 못했어요.')));
+    }
+  }
+
+  /// Day 항목(제목/본문/대표사진) 작성/수정 바텀시트 — 대표사진은 이미 업로드된
+  /// record.photos 중에서 사용자가 직접 고른다(§요청: 자동 선택 아님).
+  Future<void> _editDay(RecordDetail record, String date, RecordDayEntry? existing) async {
+    final titleController = TextEditingController(text: existing?.title ?? '');
+    final contentController = TextEditingController(text: existing?.content ?? '');
+    var selectedPhotoId = existing?.photo?.id;
+
+    final saved = await showModalBottomSheet<bool>(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.white,
+      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(24))),
+      builder: (sheetContext) {
+        return StatefulBuilder(
+          builder: (context, setSheetState) {
+            return Padding(
+              padding: EdgeInsets.only(
+                left: 20,
+                right: 20,
+                top: 20,
+                bottom: MediaQuery.of(context).viewInsets.bottom + 20,
+              ),
+              child: SingleChildScrollView(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Text(
+                      '${_dayLabel(record, date)} 기록',
+                      style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w800, color: AppColors.ink900),
+                    ),
+                    const SizedBox(height: 16),
+                    if (record.photos.isNotEmpty) ...[
+                      const Text(
+                        '대표 사진',
+                        style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: AppColors.ink400),
+                      ),
+                      const SizedBox(height: 8),
+                      SizedBox(
+                        height: 84,
+                        child: ListView.separated(
+                          scrollDirection: Axis.horizontal,
+                          itemCount: record.photos.length,
+                          separatorBuilder: (context, index) => const SizedBox(width: 8),
+                          itemBuilder: (context, index) {
+                            final photo = record.photos[index];
+                            final selected = selectedPhotoId == photo.id;
+                            return GestureDetector(
+                              onTap: () => setSheetState(
+                                () => selectedPhotoId = selected ? null : photo.id,
+                              ),
+                              child: Container(
+                                width: 84,
+                                height: 84,
+                                padding: const EdgeInsets.all(2),
+                                decoration: BoxDecoration(
+                                  borderRadius: BorderRadius.circular(10),
+                                  border: Border.all(
+                                    color: selected ? AppColors.lime : Colors.transparent,
+                                    width: 3,
+                                  ),
+                                ),
+                                child: ClipRRect(
+                                  borderRadius: BorderRadius.circular(8),
+                                  child: Image.network(photo.storageUrl, fit: BoxFit.cover),
+                                ),
+                              ),
+                            );
+                          },
+                        ),
+                      ),
+                      const SizedBox(height: 16),
+                    ],
+                    TextField(
+                      controller: titleController,
+                      maxLength: 100,
+                      style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w700, color: AppColors.ink900),
+                      decoration: const InputDecoration(hintText: '이 날의 제목'),
+                    ),
+                    TextField(
+                      controller: contentController,
+                      maxLength: 1000,
+                      maxLines: 4,
+                      style: const TextStyle(fontSize: 14, color: AppColors.ink900),
+                      decoration: const InputDecoration(hintText: '이 날은 어땠나요?'),
+                    ),
+                    const SizedBox(height: 8),
+                    AppButton(
+                      label: '저장',
+                      variant: AppButtonVariant.lime,
+                      onPressed: () => Navigator.of(sheetContext).pop(true),
+                    ),
+                  ],
+                ),
+              ),
+            );
+          },
+        );
+      },
+    );
+
+    if (saved != true || !mounted) return;
 
     try {
       await ref
           .read(recordsApiProvider)
-          .updatePhotoCaption(record.tripId, record.id, photo.id, saved);
+          .upsertDayEntry(
+            record.tripId,
+            record.id,
+            date,
+            title: titleController.text.trim().isEmpty ? null : titleController.text.trim(),
+            content: contentController.text.trim().isEmpty ? null : contentController.text.trim(),
+            photoId: selectedPhotoId,
+          );
       if (!mounted) return;
       await _load();
     } on DioException catch (e) {
       if (!mounted) return;
       final error = e.error;
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(error is ApiException ? error.message : '캡션을 저장하지 못했어요.')),
-      );
-    } catch (_) {
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('캡션을 저장하지 못했어요.')));
-    }
-  }
-
-  /// 여행 대표사진 지정/해제(API 명세서 §2.6 PUT/DELETE /trips/{tripId}/cover).
-  /// 이미 대표사진인 걸 다시 누르면 해제, 아니면 지정 — 트립당 대표사진은
-  /// 하나뿐이라 새로 지정하면 서버가 기존 것을 알아서 덮어쓴다.
-  Future<void> _toggleCover(RecordDetail record, RecordPhoto photo) async {
-    setState(() => _togglingCoverPhotoId = photo.id);
-    try {
-      final api = ref.read(recordsApiProvider);
-      if (photo.isCover) {
-        await api.clearTripCover(record.tripId);
-      } else {
-        await api.setTripCover(record.tripId, photo.id);
-      }
-      if (!mounted) return;
-      await _load();
-    } on DioException catch (e) {
-      if (!mounted) return;
-      final error = e.error;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(error is ApiException ? error.message : '대표사진 설정에 실패했어요.')),
+        SnackBar(content: Text(error is ApiException ? error.message : '저장하지 못했어요. 다시 시도해주세요.')),
       );
     } catch (_) {
       if (!mounted) return;
       ScaffoldMessenger.of(
         context,
-      ).showSnackBar(const SnackBar(content: Text('대표사진 설정에 실패했어요.')));
-    } finally {
-      if (mounted) setState(() => _togglingCoverPhotoId = null);
+      ).showSnackBar(const SnackBar(content: Text('저장하지 못했어요. 다시 시도해주세요.')));
     }
+  }
+
+  /// 아직 항목이 없는 날짜 중 하나를 골라 새 Day를 만든다. 목록 자체가 이미
+  /// 작성된 날짜만 보여주므로(빈 날은 표시하지 않음), 새 Day 추가는 이 진입점
+  /// 하나로 모은다.
+  Future<void> _addDay(RecordDetail record, List<String> availableDates) async {
+    final selectedDate = await showModalBottomSheet<String>(
+      context: context,
+      backgroundColor: Colors.white,
+      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(24))),
+      builder: (sheetContext) => SafeArea(
+        child: ListView(
+          shrinkWrap: true,
+          children: [
+            const Padding(
+              padding: EdgeInsets.fromLTRB(20, 20, 20, 8),
+              child: Text(
+                '어느 날짜를 기록할까요?',
+                style: TextStyle(fontSize: 16, fontWeight: FontWeight.w800, color: AppColors.ink900),
+              ),
+            ),
+            for (final date in availableDates)
+              ListTile(
+                title: Text(_dayLabel(record, date)),
+                onTap: () => Navigator.of(sheetContext).pop(date),
+              ),
+            const SizedBox(height: 12),
+          ],
+        ),
+      ),
+    );
+    if (selectedDate == null || !mounted) return;
+    await _editDay(record, selectedDate, null);
+  }
+
+  Future<void> _deleteDay(RecordDetail record, String date) async {
+    try {
+      await ref.read(recordsApiProvider).deleteDayEntry(record.tripId, record.id, date);
+      if (!mounted) return;
+      await _load();
+    } on DioException catch (e) {
+      if (!mounted) return;
+      final error = e.error;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(error is ApiException ? error.message : '삭제하지 못했어요.')),
+      );
+    } catch (_) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('삭제하지 못했어요.')));
+    }
+  }
+
+  String _dayLabel(RecordDetail record, String date) {
+    final dates = _datesInRange(record.tripStartDate, record.tripEndDate);
+    final dayNumber = dates.indexOf(date) + 1;
+    final parsed = DateTime.parse(date);
+    final monthDay =
+        '${parsed.month.toString().padLeft(2, '0')}.${parsed.day.toString().padLeft(2, '0')}';
+    return 'Day $dayNumber · $monthDay';
   }
 
   @override
@@ -239,28 +326,22 @@ class _RecordDetailScreenState extends ConsumerState<RecordDetailScreen> {
         backgroundColor: Colors.white,
         elevation: 0,
         leading: const AppBackButton(),
-        title: Text(
-          state is _DetailLoaded ? state.record.tripCityName : '기록',
-          style: const TextStyle(color: AppColors.ink900, fontWeight: FontWeight.w800),
-        ),
+        title: const Text('여행 기록', style: TextStyle(color: AppColors.ink900, fontWeight: FontWeight.w800)),
         iconTheme: const IconThemeData(color: AppColors.ink900),
         actions: [
-          if (state is _DetailLoaded)
+          if (state is _DetailLoaded) ...[
             IconButton(
-              icon: const Icon(Icons.edit_outlined, color: AppColors.ink900),
-              onPressed: () => _openWrite(state.record),
+              icon: const Icon(Icons.photo_library_outlined, color: AppColors.ink900),
+              onPressed: () => _openPhotoManage(state.record),
             ),
-          if (state is _DetailLoaded)
-            IconButton(
-              icon: _deleting
-                  ? const SizedBox(
-                      width: 18,
-                      height: 18,
-                      child: CircularProgressIndicator(strokeWidth: 2, color: AppColors.danger),
-                    )
-                  : const Icon(Icons.delete_outline, color: AppColors.danger),
-              onPressed: _deleting ? null : _confirmAndDelete,
+            TextButton(
+              onPressed: () => setState(() => _editing = !_editing),
+              child: Text(
+                _editing ? '완료' : '편집',
+                style: const TextStyle(color: AppColors.ink900, fontWeight: FontWeight.w700),
+              ),
             ),
+          ],
         ],
       ),
       body: SafeArea(child: _buildBody(state)),
@@ -283,206 +364,189 @@ class _RecordDetailScreenState extends ConsumerState<RecordDetailScreen> {
           ),
         ),
       ),
-      _DetailLoaded(:final record) => _RecordDetailBody(
+      _DetailLoaded(:final record) => _RecordDiaryBody(
         record: record,
-        togglingCoverPhotoId: _togglingCoverPhotoId,
-        onToggleCover: (photo) => _toggleCover(record, photo),
-        onEditCaption: (photo) => _editCaption(record, photo),
-        addingPhotos: _openingPicker,
-        onAddPhotos: () => _addPhotos(record),
+        editing: _editing,
+        onEditTitle: () => _editTitle(record),
+        onEditDay: (date, entry) => _editDay(record, date, entry),
+        onDeleteDay: (date) => _deleteDay(record, date),
+        onAddDay: (availableDates) => _addDay(record, availableDates),
       ),
     };
   }
 }
 
-class _RecordDetailBody extends StatelessWidget {
-  const _RecordDetailBody({
+List<String> _datesInRange(String startDate, String endDate) {
+  final start = DateTime.parse(startDate);
+  final end = DateTime.parse(endDate);
+  final dayCount = end.difference(start).inDays;
+  return [
+    for (var i = 0; i <= dayCount; i++) _formatDate(start.add(Duration(days: i))),
+  ];
+}
+
+String _formatDate(DateTime date) =>
+    '${date.year.toString().padLeft(4, '0')}-${date.month.toString().padLeft(2, '0')}-${date.day.toString().padLeft(2, '0')}';
+
+class _RecordDiaryBody extends StatelessWidget {
+  const _RecordDiaryBody({
     required this.record,
-    required this.togglingCoverPhotoId,
-    required this.onToggleCover,
-    required this.onEditCaption,
-    required this.addingPhotos,
-    required this.onAddPhotos,
+    required this.editing,
+    required this.onEditTitle,
+    required this.onEditDay,
+    required this.onDeleteDay,
+    required this.onAddDay,
   });
 
   final RecordDetail record;
-  final String? togglingCoverPhotoId;
-  final ValueChanged<RecordPhoto> onToggleCover;
-  final ValueChanged<RecordPhoto> onEditCaption;
-  final bool addingPhotos;
-  final VoidCallback onAddPhotos;
+  final bool editing;
+  final VoidCallback onEditTitle;
+  final void Function(String date, RecordDayEntry? entry) onEditDay;
+  final ValueChanged<String> onDeleteDay;
+  final ValueChanged<List<String>> onAddDay;
 
   @override
   Widget build(BuildContext context) {
+    final dates = _datesInRange(record.tripStartDate, record.tripEndDate);
+    final entryByDate = {for (final entry in record.dayEntries) entry.date: entry};
+    // 작성된 날짜만 보여준다 — 빈 날은 목록에서 아예 뺀다("+ 날짜 추가"로만 새로 만듦).
+    final writtenDates = record.dayEntries.map((e) => e.date).toList()..sort();
+    final availableDates = dates.where((d) => !entryByDate.containsKey(d)).toList();
+
     return ListView(
-      padding: const EdgeInsets.fromLTRB(20, 8, 20, 40),
+      padding: const EdgeInsets.fromLTRB(20, 12, 20, 40),
       children: [
-        if (record.photos.isNotEmpty) ...[
-          const Text(
-            '사진을 눌러 여행 대표사진으로, 캡션을 눌러 글을 남겨보세요',
-            style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: AppColors.ink400),
+        GestureDetector(
+          onTap: onEditTitle,
+          behavior: HitTestBehavior.opaque,
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.center,
+            children: [
+              Flexible(
+                child: Text(
+                  record.title?.isNotEmpty == true ? record.title! : '제목을 입력해주세요',
+                  style: TextStyle(
+                    fontSize: 22,
+                    fontWeight: FontWeight.w800,
+                    color: record.title?.isNotEmpty == true ? AppColors.ink900 : AppColors.ink300,
+                  ),
+                ),
+              ),
+              if (editing) ...[
+                const SizedBox(width: 8),
+                const Icon(Icons.edit_outlined, size: 18, color: AppColors.ink400),
+              ],
+            ],
           ),
-          const SizedBox(height: 12),
-          for (final photo in record.photos) ...[
-            _PhotoWithCaptionTile(
-              photo: photo,
-              toggling: togglingCoverPhotoId == photo.id,
-              onToggleCover: () => onToggleCover(photo),
-              onEditCaption: () => onEditCaption(photo),
-            ),
-            const SizedBox(height: 24),
-          ],
+        ),
+        const SizedBox(height: 6),
+        Text(
+          formatTripDateRange(record.tripStartDate, record.tripEndDate),
+          style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: AppColors.ink400),
+        ),
+        const SizedBox(height: 24),
+        for (final date in writtenDates) ...[
+          _DayEntryTile(
+            dayNumber: dates.indexOf(date) + 1,
+            date: date,
+            entry: entryByDate[date]!,
+            editing: editing,
+            onEdit: () => onEditDay(date, entryByDate[date]),
+            onDelete: () => onDeleteDay(date),
+          ),
+          const SizedBox(height: 28),
+        ],
+        if (editing && availableDates.isNotEmpty)
           AppButton(
-            label: '사진 추가하기',
+            label: '+ 날짜 추가',
             variant: AppButtonVariant.outline,
             height: 40,
-            loading: addingPhotos,
-            onPressed: addingPhotos ? null : onAddPhotos,
+            onPressed: () => onAddDay(availableDates),
           ),
-        ] else
-          _EmptyPhotosState(loading: addingPhotos, onAddPhotos: onAddPhotos),
       ],
     );
   }
 }
 
-/// 인스타그램 피드처럼 사진 한 장 아래에 그 사진의 캡션을 바로 보여준다 —
-/// 사진 탭은 기존 대표사진 지정/해제(§2.6), 캡션 영역 탭은 그 사진만의
-/// 캡션 입력/수정으로 서로 다른 액션이라 영역을 분리했다.
-class _PhotoWithCaptionTile extends StatelessWidget {
-  const _PhotoWithCaptionTile({
-    required this.photo,
-    required this.toggling,
-    required this.onToggleCover,
-    required this.onEditCaption,
+class _DayEntryTile extends StatelessWidget {
+  const _DayEntryTile({
+    required this.dayNumber,
+    required this.date,
+    required this.entry,
+    required this.editing,
+    required this.onEdit,
+    required this.onDelete,
   });
 
-  final RecordPhoto photo;
-  final bool toggling;
-  final VoidCallback onToggleCover;
-  final VoidCallback onEditCaption;
+  final int dayNumber;
+  final String date;
+  final RecordDayEntry entry;
+  final bool editing;
+  final VoidCallback onEdit;
+  final VoidCallback onDelete;
 
   @override
   Widget build(BuildContext context) {
-    final caption = photo.caption;
-    final hasCaption = caption != null && caption.isNotEmpty;
+    final parsed = DateTime.parse(date);
+    final monthDay = '${parsed.month.toString().padLeft(2, '0')}.${parsed.day.toString().padLeft(2, '0')}';
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        GestureDetector(
-          onTap: toggling ? null : onToggleCover,
-          child: AspectRatio(
+        Row(
+          children: [
+            Container(
+              width: 8,
+              height: 8,
+              decoration: const BoxDecoration(color: AppColors.lime, shape: BoxShape.circle),
+            ),
+            const SizedBox(width: 8),
+            Text(
+              'Day $dayNumber · $monthDay',
+              style: const TextStyle(fontSize: 13.5, fontWeight: FontWeight.w800, color: AppColors.ink900),
+            ),
+            const Spacer(),
+            if (editing) ...[
+              IconButton(
+                icon: const Icon(Icons.edit_outlined, size: 18, color: AppColors.ink400),
+                visualDensity: VisualDensity.compact,
+                onPressed: onEdit,
+              ),
+              IconButton(
+                icon: const Icon(Icons.delete_outline, size: 18, color: AppColors.danger),
+                visualDensity: VisualDensity.compact,
+                onPressed: onDelete,
+              ),
+            ],
+          ],
+        ),
+        const SizedBox(height: 10),
+        if (entry.photo != null) ...[
+          AspectRatio(
             aspectRatio: 4 / 3,
             child: ClipRRect(
               borderRadius: BorderRadius.circular(14),
-              child: Stack(
-                fit: StackFit.expand,
-                children: [
-                  Image.network(
-                    photo.storageUrl,
-                    fit: BoxFit.cover,
-                    errorBuilder: (context, error, stackTrace) =>
-                        Container(color: AppColors.surfaceSubtle),
-                  ),
-                  if (photo.isCover)
-                    Container(
-                      decoration: BoxDecoration(border: Border.all(color: AppColors.lime, width: 3)),
-                    ),
-                  Positioned(
-                    top: 8,
-                    right: 8,
-                    child: Container(
-                      padding: const EdgeInsets.all(5),
-                      decoration: const BoxDecoration(color: Color(0x99000000), shape: BoxShape.circle),
-                      child: toggling
-                          ? const SizedBox(
-                              width: 14,
-                              height: 14,
-                              child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
-                            )
-                          : Icon(
-                              photo.isCover ? Icons.star : Icons.star_border,
-                              color: photo.isCover ? AppColors.lime : Colors.white,
-                              size: 18,
-                            ),
-                    ),
-                  ),
-                ],
+              child: Image.network(
+                entry.photo!.storageUrl,
+                fit: BoxFit.cover,
+                errorBuilder: (context, error, stackTrace) => Container(color: AppColors.surfaceSubtle),
               ),
             ),
           ),
-        ),
-        const SizedBox(height: 8),
-        GestureDetector(
-          onTap: onEditCaption,
-          behavior: HitTestBehavior.opaque,
-          child: Row(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Icon(
-                hasCaption ? Icons.edit_note : Icons.add_comment_outlined,
-                size: 16,
-                color: AppColors.ink400,
-              ),
-              const SizedBox(width: 6),
-              Expanded(
-                child: Text(
-                  hasCaption ? caption : '캡션을 남겨보세요',
-                  style: TextStyle(
-                    fontSize: 13.5,
-                    height: 1.4,
-                    fontWeight: FontWeight.w500,
-                    color: hasCaption ? AppColors.ink600 : AppColors.ink400,
-                    fontStyle: hasCaption ? FontStyle.normal : FontStyle.italic,
-                  ),
-                ),
-              ),
-            ],
+          const SizedBox(height: 12),
+        ],
+        if (entry.title?.isNotEmpty == true)
+          Text(
+            entry.title!,
+            style: const TextStyle(fontSize: 15.5, fontWeight: FontWeight.w800, color: AppColors.ink900),
           ),
-        ),
-      ],
-    );
-  }
-}
-
-class _EmptyPhotosState extends StatelessWidget {
-  const _EmptyPhotosState({required this.loading, required this.onAddPhotos});
-
-  final bool loading;
-  final VoidCallback onAddPhotos;
-
-  @override
-  Widget build(BuildContext context) {
-    return Column(
-      children: [
-        const SizedBox(height: 32),
-        Container(
-          width: 96,
-          height: 96,
-          alignment: Alignment.center,
-          decoration: const BoxDecoration(color: AppColors.surfaceSubtle, shape: BoxShape.circle),
-          child: const Icon(Icons.image_outlined, size: 40, color: AppColors.ink300),
-        ),
-        const SizedBox(height: 20),
-        const Text(
-          '아직 기록이 없어요',
-          style: TextStyle(fontSize: 17, fontWeight: FontWeight.w800, color: AppColors.ink900),
-        ),
-        const SizedBox(height: 6),
-        const Text(
-          '첫 사진을 올리고\n여행의 첫 페이지를 시작해보세요',
-          textAlign: TextAlign.center,
-          style: TextStyle(fontSize: 13, height: 1.5, fontWeight: FontWeight.w600, color: AppColors.ink400),
-        ),
-        const SizedBox(height: 24),
-        AppButton(
-          label: '+  사진 추가하기',
-          variant: AppButtonVariant.lime,
-          loading: loading,
-          onPressed: loading ? null : onAddPhotos,
-        ),
-        const SizedBox(height: 32),
+        if (entry.content?.isNotEmpty == true) ...[
+          const SizedBox(height: 4),
+          Text(
+            entry.content!,
+            style: const TextStyle(fontSize: 14, height: 1.5, fontWeight: FontWeight.w500, color: AppColors.ink600),
+          ),
+        ],
       ],
     );
   }
