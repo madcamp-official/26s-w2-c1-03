@@ -17,7 +17,11 @@ import 'trip_list_controller.dart';
 /// 동작하기 때문이다(§places §AREA_CODE_REQUIRED). CTA는 AI 액션이 아니라
 /// "확정" 액션이라 lime이 아니라 ink 버튼을 쓴다(§2.4).
 class CreateTripScreen extends ConsumerStatefulWidget {
-  const CreateTripScreen({super.key});
+  const CreateTripScreen({super.key, this.initialCity});
+
+  /// 여행지 추천 상세 화면의 "여행 생성" 버튼처럼 도시가 이미 정해진 진입점에서
+  /// 도시 검색 단계를 건너뛰도록 미리 채워준다(사용자가 원하면 그대로 다시 바꿀 수 있음).
+  final SigunguEntry? initialCity;
 
   @override
   ConsumerState<CreateTripScreen> createState() => _CreateTripScreenState();
@@ -29,6 +33,12 @@ class _CreateTripScreenState extends ConsumerState<CreateTripScreen> {
   SigunguEntry? _selectedCity;
   String? _errorText;
   bool _submitting = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _selectedCity = widget.initialCity;
+  }
 
   @override
   void dispose() {
