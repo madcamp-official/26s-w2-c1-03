@@ -4,6 +4,8 @@ import '../../../core/theme/app_colors.dart';
 import '../../../core/theme/app_gradients.dart';
 import '../../../core/utils/date_format.dart';
 import '../../../core/widgets/ai_badge.dart';
+import '../../notifications/notification_inbox_controller.dart';
+import '../../notifications/presentation/notifications_screen.dart';
 import '../data/destination_models.dart';
 import '../data/trip_models.dart';
 import 'destination_detail_screen.dart';
@@ -117,12 +119,6 @@ class _TripListScreenState extends ConsumerState<TripListScreen> {
 
   Future<void> _reload() =>
       ref.read(tripListControllerProvider.notifier).load();
-}
-
-void _showComingSoon(BuildContext context, String label) {
-  ScaffoldMessenger.of(
-    context,
-  ).showSnackBar(SnackBar(content: Text('$label은(는) 곧 만나요 👋')));
 }
 
 class _TripListBody extends StatelessWidget {
@@ -246,12 +242,15 @@ class _HomeSection extends StatelessWidget {
   }
 }
 
-class _DdayHeroCard extends StatelessWidget {
+class _DdayHeroCard extends ConsumerWidget {
   const _DdayHeroCard({required this.trip});
   final Trip trip;
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
+    final hasUnread = ref.watch(
+      notificationInboxControllerProvider.select((items) => items.any((n) => !n.read)),
+    );
     final today = DateTime.now();
     final todayDate = DateTime(today.year, today.month, today.day);
     final start = DateTime.tryParse(trip.startDate) ?? todayDate;
@@ -283,95 +282,67 @@ class _DdayHeroCard extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
+          Align(
+            alignment: Alignment.centerRight,
+            child: _HeroIconButton(
+              icon: Icons.notifications_none_rounded,
+              showDot: hasUnread,
+              onTap: () => Navigator.of(context).push(
+                MaterialPageRoute(builder: (_) => const NotificationsScreen()),
+              ),
+            ),
+          ),
+          const SizedBox(height: 20),
           Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              InkWell(
-                borderRadius: BorderRadius.circular(18),
-                onTap: () => Navigator.of(context).maybePop(),
-                child: const SizedBox(
-                  width: 36,
-                  height: 36,
-                  child: Icon(Icons.close, size: 21, color: Colors.white),
+              Expanded(
+                child: Text(
+                  trip.cityName,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(
+                    fontSize: 32,
+                    fontWeight: FontWeight.w900,
+                    color: Colors.white,
+                    letterSpacing: -0.5,
+                    height: 1.08,
+                  ),
                 ),
               ),
-              Row(
+              const SizedBox(width: 12),
+              Column(
+                crossAxisAlignment: CrossAxisAlignment.end,
+                mainAxisSize: MainAxisSize.min,
                 children: [
-                  _HeroIconButton(
-                    icon: Icons.search,
-                    onTap: () => _showComingSoon(context, '검색'),
+                  Text(
+                    ddayLabel,
+                    style: const TextStyle(
+                      fontSize: 17,
+                      fontWeight: FontWeight.w900,
+                      color: Colors.white,
+                      letterSpacing: -0.5,
+                    ),
                   ),
-                  const SizedBox(width: 8),
-                  _HeroIconButton(
-                    icon: Icons.map_outlined,
-                    onTap: () {
-                      Navigator.of(context).push(
-                        MaterialPageRoute(
-                          builder: (_) => TripDetailScreen(tripId: trip.id),
-                        ),
-                      );
-                    },
-                  ),
-                  const SizedBox(width: 8),
-                  _HeroIconButton(
-                    icon: Icons.menu,
-                    showDot: true,
-                    onTap: () => _showComingSoon(context, '메뉴'),
+                  const SizedBox(height: 6),
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 11, vertical: 6),
+                    decoration: BoxDecoration(
+                      color: Colors.white.withValues(alpha: 0.18),
+                      borderRadius: BorderRadius.circular(999),
+                    ),
+                    child: Text(
+                      formatTripDateRange(trip.startDate, trip.endDate),
+                      style: const TextStyle(
+                        fontSize: 11.5,
+                        fontWeight: FontWeight.w800,
+                        color: Colors.white,
+                      ),
+                    ),
                   ),
                 ],
               ),
             ],
-          ),
-          const SizedBox(height: 28),
-          Text(
-            '${trip.title},',
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis,
-            style: const TextStyle(
-              fontSize: 25,
-              fontWeight: FontWeight.w900,
-              color: Colors.white,
-              letterSpacing: -0.5,
-              height: 1.08,
-            ),
-          ),
-          Text(
-            ddayLabel,
-            style: const TextStyle(
-              fontSize: 24,
-              fontWeight: FontWeight.w900,
-              color: Colors.white,
-              letterSpacing: -0.5,
-              height: 1.08,
-            ),
-          ),
-          const SizedBox(height: 16),
-          Container(
-            padding: const EdgeInsets.symmetric(horizontal: 13, vertical: 8),
-            decoration: BoxDecoration(
-              color: Colors.white.withValues(alpha: 0.18),
-              borderRadius: BorderRadius.circular(999),
-              border: Border.all(color: Colors.white.withValues(alpha: 0.18)),
-            ),
-            child: Row(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Text(
-                  formatTripDateRange(trip.startDate, trip.endDate),
-                  style: const TextStyle(
-                    fontSize: 12.5,
-                    fontWeight: FontWeight.w800,
-                    color: Colors.white,
-                  ),
-                ),
-                const SizedBox(width: 6),
-                const Icon(
-                  Icons.keyboard_arrow_down,
-                  size: 16,
-                  color: Colors.white,
-                ),
-              ],
-            ),
           ),
           const SizedBox(height: 22),
           Text(
@@ -381,38 +352,6 @@ class _DdayHeroCard extends StatelessWidget {
               fontWeight: FontWeight.w700,
               color: Colors.white.withValues(alpha: 0.86),
             ),
-          ),
-          const SizedBox(height: 24),
-          Row(
-            children: [
-              _HeroTextChip(
-                label: '가이드',
-                selected: true,
-                onTap: () => _showComingSoon(context, '가이드'),
-              ),
-              _HeroTextChip(
-                label: '일정',
-                onTap: () {
-                  Navigator.of(context).push(
-                    MaterialPageRoute(
-                      builder: (_) => TripDetailScreen(tripId: trip.id),
-                    ),
-                  );
-                },
-              ),
-              _HeroTextChip(
-                label: '관광',
-                onTap: () => _showComingSoon(context, '관광'),
-              ),
-              _HeroTextChip(
-                label: '맛집',
-                onTap: () => _showComingSoon(context, '맛집'),
-              ),
-              _HeroTextChip(
-                label: '기록',
-                onTap: () => _showComingSoon(context, '기록'),
-              ),
-            ],
           ),
           const SizedBox(height: 24),
           InkWell(
@@ -525,39 +464,6 @@ class _HeroIconButton extends StatelessWidget {
               ),
             ),
         ],
-      ),
-    );
-  }
-}
-
-class _HeroTextChip extends StatelessWidget {
-  const _HeroTextChip({
-    required this.label,
-    required this.onTap,
-    this.selected = false,
-  });
-
-  final String label;
-  final VoidCallback onTap;
-  final bool selected;
-
-  @override
-  Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.only(right: 20),
-      child: InkWell(
-        borderRadius: BorderRadius.circular(999),
-        onTap: onTap,
-        child: Text(
-          label,
-          style: TextStyle(
-            fontSize: 13,
-            fontWeight: FontWeight.w800,
-            color: selected
-                ? Colors.white
-                : Colors.white.withValues(alpha: 0.78),
-          ),
-        ),
       ),
     );
   }
