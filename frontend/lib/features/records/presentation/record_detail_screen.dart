@@ -53,8 +53,11 @@ class _RecordDetailScreenState extends ConsumerState<RecordDetailScreen> {
     _load();
   }
 
-  Future<void> _load() async {
-    setState(() => _state = const _DetailLoading());
+  /// [silent]가 true면(Day 저장/삭제, 제목 수정 등 이미 화면에 데이터가 떠 있는
+  /// 상태에서의 새로고침) 로딩 스피너로 갈아엎지 않는다 — 매번 _DetailLoading을
+  /// 거치면 ListView가 통째로 새로 만들어져 스크롤 위치가 맨 위로 튀어버린다.
+  Future<void> _load({bool silent = false}) async {
+    if (!silent) setState(() => _state = const _DetailLoading());
     try {
       final record = await ref.read(recordsApiProvider).getRecordDetail(widget.recordId);
       if (!mounted) return;
@@ -62,6 +65,12 @@ class _RecordDetailScreenState extends ConsumerState<RecordDetailScreen> {
     } on DioException catch (e) {
       if (!mounted) return;
       final error = e.error;
+      if (silent) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(error is ApiException ? error.message : '새로고침하지 못했어요.')),
+        );
+        return;
+      }
       setState(
         () => _state = _DetailFailed(error is ApiException ? error.message : '네트워크 연결을 확인해주세요.'),
       );
@@ -70,6 +79,10 @@ class _RecordDetailScreenState extends ConsumerState<RecordDetailScreen> {
       // 로딩 상태로 영원히 멈추지 않는다 — 실기기에서 실제로 겪었던 문제
       // (서버가 예상과 다른 응답을 줬을 때 화면이 그대로 멈춤).
       if (!mounted) return;
+      if (silent) {
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('새로고침하지 못했어요.')));
+        return;
+      }
       setState(() => _state = const _DetailFailed('기록을 불러오지 못했어요. 다시 시도해주세요.'));
     }
   }
@@ -85,7 +98,7 @@ class _RecordDetailScreenState extends ConsumerState<RecordDetailScreen> {
       Navigator.of(context).pop();
       return;
     }
-    await _load();
+    await _load(silent: true);
   }
 
   Future<void> _editTitle(RecordDetail record) async {
@@ -114,7 +127,7 @@ class _RecordDetailScreenState extends ConsumerState<RecordDetailScreen> {
     try {
       await ref.read(recordsApiProvider).updateRecordText(record.tripId, record.id, title: saved);
       if (!mounted) return;
-      await _load();
+      await _load(silent: true);
       ref.read(recordsListControllerProvider.notifier).load();
     } on DioException catch (e) {
       if (!mounted) return;
@@ -243,7 +256,7 @@ class _RecordDetailScreenState extends ConsumerState<RecordDetailScreen> {
             photoId: selectedPhotoId,
           );
       if (!mounted) return;
-      await _load();
+      await _load(silent: true);
     } on DioException catch (e) {
       if (!mounted) return;
       final error = e.error;
@@ -295,7 +308,7 @@ class _RecordDetailScreenState extends ConsumerState<RecordDetailScreen> {
     try {
       await ref.read(recordsApiProvider).deleteDayEntry(record.tripId, record.id, date);
       if (!mounted) return;
-      await _load();
+      await _load(silent: true);
     } on DioException catch (e) {
       if (!mounted) return;
       final error = e.error;

@@ -31,6 +31,11 @@ class _ManageFailed extends _ManageState {
   final String message;
 }
 
+/// Day별 다이어리(record_detail_screen.dart)와 같은 기준으로 앱바 제목을 정한다
+/// — 사용자가 쓴 기록 제목을 우선하고, 아직 안 썼으면 여행 장소로 대체한다.
+String _titleOf(RecordDetail record) =>
+    record.title?.isNotEmpty == true ? record.title! : record.tripCityName;
+
 /// 사진 관리(API 명세서 §5 GET /records/{recordId}) — 사진 추가/캡션/대표사진
 /// 지정, 기록 제목 수정, 기록 전체 삭제. Day별 다이어리(record_detail_screen.dart)
 /// 가 기본 화면이 된 뒤 이 화면은 그 안의 "사진 관리" 진입점을 통해서만 들어온다
@@ -57,8 +62,12 @@ class _RecordPhotoManageScreenState extends ConsumerState<RecordPhotoManageScree
     _load();
   }
 
-  Future<void> _load() async {
-    setState(() => _state = const _ManageLoading());
+  /// [silent]가 true면(캡션 저장/대표사진 지정 등 이미 화면에 데이터가 떠 있는
+  /// 상태에서의 새로고침) 로딩 스피너로 갈아엎지 않는다 — 매번 _ManageLoading을
+  /// 거치면 ListView가 통째로 새로 만들어져 스크롤 위치가 맨 위로 튀어버려서,
+  /// 사용자 눈엔 "캡션 저장했더니 사진 위치가 바뀌었다"처럼 보이는 문제였다.
+  Future<void> _load({bool silent = false}) async {
+    if (!silent) setState(() => _state = const _ManageLoading());
     try {
       final record = await ref.read(recordsApiProvider).getRecordDetail(widget.recordId);
       if (!mounted) return;
@@ -66,11 +75,21 @@ class _RecordPhotoManageScreenState extends ConsumerState<RecordPhotoManageScree
     } on DioException catch (e) {
       if (!mounted) return;
       final error = e.error;
+      if (silent) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(error is ApiException ? error.message : '새로고침하지 못했어요.')),
+        );
+        return;
+      }
       setState(
         () => _state = _ManageFailed(error is ApiException ? error.message : '네트워크 연결을 확인해주세요.'),
       );
     } catch (_) {
       if (!mounted) return;
+      if (silent) {
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('새로고침하지 못했어요.')));
+        return;
+      }
       setState(() => _state = const _ManageFailed('기록을 불러오지 못했어요. 다시 시도해주세요.'));
     }
   }
@@ -81,7 +100,7 @@ class _RecordPhotoManageScreenState extends ConsumerState<RecordPhotoManageScree
     ).push<bool>(MaterialPageRoute(builder: (_) => RecordWriteScreen(record: record)));
     if (!mounted) return;
     if (changed == true) {
-      await _load();
+      await _load(silent: true);
       ref.read(recordsListControllerProvider.notifier).load();
     }
   }
@@ -140,7 +159,7 @@ class _RecordPhotoManageScreenState extends ConsumerState<RecordPhotoManageScree
       final added = await showRecordModeSheet(context, trip);
       if (!mounted) return;
       if (added) {
-        await _load();
+        await _load(silent: true);
         ref.read(recordsListControllerProvider.notifier).load();
       }
     } on DioException catch (e) {
@@ -189,7 +208,7 @@ class _RecordPhotoManageScreenState extends ConsumerState<RecordPhotoManageScree
           .read(recordsApiProvider)
           .updatePhotoCaption(record.tripId, record.id, photo.id, saved);
       if (!mounted) return;
-      await _load();
+      await _load(silent: true);
     } on DioException catch (e) {
       if (!mounted) return;
       final error = e.error;
@@ -215,7 +234,7 @@ class _RecordPhotoManageScreenState extends ConsumerState<RecordPhotoManageScree
         await api.setTripCover(record.tripId, photo.id);
       }
       if (!mounted) return;
-      await _load();
+      await _load(silent: true);
     } on DioException catch (e) {
       if (!mounted) return;
       final error = e.error;
@@ -242,7 +261,7 @@ class _RecordPhotoManageScreenState extends ConsumerState<RecordPhotoManageScree
         elevation: 0,
         leading: const AppBackButton(),
         title: Text(
-          state is _ManageLoaded ? state.record.tripCityName : '사진 관리',
+          state is _ManageLoaded ? _titleOf(state.record) : '사진 관리',
           style: const TextStyle(color: AppColors.ink900, fontWeight: FontWeight.w800),
         ),
         iconTheme: const IconThemeData(color: AppColors.ink900),
