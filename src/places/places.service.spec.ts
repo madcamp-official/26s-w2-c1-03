@@ -71,7 +71,7 @@ function buildPlace(
 function findByContentType(placesByContentType: Record<string, Place[]>) {
   return jest.fn(async (options?: { where?: { contentTypeId?: string } }) => {
     const ct = options?.where?.contentTypeId;
-    return ct ? placesByContentType[ct] ?? [] : [];
+    return ct ? (placesByContentType[ct] ?? []) : [];
   });
 }
 
@@ -184,10 +184,87 @@ describe('PlacesService', () => {
       expect(result.candidates.map((c) => c.name)).toEqual(['가덕도 등대']);
     });
 
+    it('캐시된 후보 중 요청 지역 코드나 좌표 범위를 벗어난 장소는 제외한다', async () => {
+      const valid = buildTourApiItem({ contentId: 'ok', title: '부산 안 장소' });
+      const wrongSigungu = buildTourApiItem({
+        contentId: 'wrong-sigungu',
+        title: '다른 구 장소',
+        sigunguCode: '16',
+      });
+      const wrongCoordinate = buildTourApiItem({
+        contentId: 'wrong-coordinate',
+        title: '좌표가 서울인 장소',
+        mapX: '127.0276',
+        mapY: '37.4979',
+      });
+      tripsService.getDetail.mockResolvedValue({
+        areaCode: '6',
+        sigunguCode: '1',
+        startDate: '2026-07-13',
+      });
+      freshCache(placeRepository);
+      placeRepository.find = findByContentType({
+        '12': [
+          buildPlace(valid, 'ok'),
+          buildPlace(wrongSigungu, 'wrong-sigungu'),
+          buildPlace(wrongCoordinate, 'wrong-coordinate'),
+        ],
+      });
+
+      const result = await service.getCandidates('trip-1', 'user-1', {});
+
+      expect(result.candidates.map((c) => c.name)).toEqual(['부산 안 장소']);
+    });
+
+    it('TourAPI 동기화 시 요청 지역 밖 좌표를 가진 항목은 저장하지 않는다', async () => {
+      const valid = buildTourApiItem({ contentId: 'ok', title: '부산 안 장소' });
+      const wrongCoordinate = buildTourApiItem({
+        contentId: 'wrong-coordinate',
+        title: '좌표가 서울인 장소',
+        mapX: '127.0276',
+        mapY: '37.4979',
+      });
+      tripsService.getDetail.mockResolvedValue({
+        areaCode: '6',
+        sigunguCode: '1',
+        startDate: '2026-07-13',
+      });
+      (placeRepository.findOne as jest.Mock).mockResolvedValue(null);
+      tourApiClient.fetchAreaBasedList.mockResolvedValue([valid, wrongCoordinate]);
+      placeRepository.find = findByContentType({ '12': [buildPlace(valid, 'ok')] });
+
+      await service.getCandidates('trip-1', 'user-1', {});
+
+      const upsertRows = (placeRepository.upsert as jest.Mock).mock.calls[0][0];
+      expect(upsertRows).toHaveLength(1);
+      expect(upsertRows[0]).toMatchObject({ externalId: 'ok', name: '부산 안 장소' });
+    });
+
     it('category 미지정("전체")이면 관광지/음식점/쇼핑을 각각 DB에서 읽어 합친다', async () => {
-      const attraction = buildTourApiItem({ contentId: 'a1', contentTypeId: '12', title: '관광지' });
-      const restaurant = buildTourApiItem({ contentId: 'r1', contentTypeId: '39', title: '식당' });
-      const shopping = buildTourApiItem({ contentId: 's1', contentTypeId: '38', title: '쇼핑몰' });
+      const yeosuArea = {
+        areaCode: '38',
+        sigunguCode: '13',
+        mapX: '127.6622',
+        mapY: '34.7604',
+      };
+      const attraction = buildTourApiItem({
+        ...yeosuArea,
+        contentId: 'a1',
+        contentTypeId: '12',
+        title: '관광지',
+      });
+      const restaurant = buildTourApiItem({
+        ...yeosuArea,
+        contentId: 'r1',
+        contentTypeId: '39',
+        title: '식당',
+      });
+      const shopping = buildTourApiItem({
+        ...yeosuArea,
+        contentId: 's1',
+        contentTypeId: '38',
+        title: '쇼핑몰',
+      });
       tripsService.getDetail.mockResolvedValue({
         areaCode: '38',
         sigunguCode: '13',
@@ -535,7 +612,13 @@ describe('PlacesService', () => {
         externalId: 'ChIJ-gyeongbok',
       });
       googlePlacesClient.getPlaceReviews.mockResolvedValue([
-        { authorName: '홍길동', rating: 5, text: '좋아요', relativeTime: '1주 전', profilePhotoUrl: null },
+        {
+          authorName: '홍길동',
+          rating: 5,
+          text: '좋아요',
+          relativeTime: '1주 전',
+          profilePhotoUrl: null,
+        },
       ]);
 
       const result = await service.getPlaceDetail('place-1');
@@ -610,7 +693,13 @@ describe('PlacesService', () => {
         reviewCount: 500,
       });
       googlePlacesClient.getPlaceReviews.mockResolvedValue([
-        { authorName: '김철수', rating: 4, text: '괜찮아요', relativeTime: '2일 전', profilePhotoUrl: null },
+        {
+          authorName: '김철수',
+          rating: 4,
+          text: '괜찮아요',
+          relativeTime: '2일 전',
+          profilePhotoUrl: null,
+        },
       ]);
 
       const result = await service.getPlaceDetail('place-g');

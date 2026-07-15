@@ -16,11 +16,15 @@ class ScheduleChatPanel extends ConsumerStatefulWidget {
     required this.tripId,
     required this.onScheduleChanged,
     required this.onClose,
+    required this.onHeaderDragUpdate,
+    required this.onHeaderDragEnd,
   });
 
   final String tripId;
   final ValueChanged<SchedulePlan> onScheduleChanged;
   final VoidCallback onClose;
+  final GestureDragUpdateCallback onHeaderDragUpdate;
+  final GestureDragEndCallback onHeaderDragEnd;
 
   @override
   ConsumerState<ScheduleChatPanel> createState() => _ScheduleChatPanelState();
@@ -30,23 +34,26 @@ class ScheduleChatPanel extends ConsumerStatefulWidget {
 /// — 실제로 오간 적 없는 assistant 턴을 AI에게 사실처럼 되돌려주면 안 되기 때문이다.
 class _ChatEntry {
   _ChatEntry.user(String content)
-      : message = ChatMessage(role: 'user', content: content),
-        snapshotBefore = null,
-        changed = false,
-        isLocalError = false,
-        reverted = false;
+    : message = ChatMessage(role: 'user', content: content),
+      snapshotBefore = null,
+      changed = false,
+      isLocalError = false,
+      reverted = false;
 
-  _ChatEntry.assistant(String content, {required this.snapshotBefore, required this.changed})
-      : message = ChatMessage(role: 'assistant', content: content),
-        isLocalError = false,
-        reverted = false;
+  _ChatEntry.assistant(
+    String content, {
+    required this.snapshotBefore,
+    required this.changed,
+  }) : message = ChatMessage(role: 'assistant', content: content),
+       isLocalError = false,
+       reverted = false;
 
   _ChatEntry.localError(String content)
-      : message = ChatMessage(role: 'assistant', content: content),
-        snapshotBefore = null,
-        changed = false,
-        isLocalError = true,
-        reverted = false;
+    : message = ChatMessage(role: 'assistant', content: content),
+      snapshotBefore = null,
+      changed = false,
+      isLocalError = true,
+      reverted = false;
 
   final ChatMessage message;
   final SchedulePlan? snapshotBefore;
@@ -79,7 +86,9 @@ class _ScheduleChatPanelState extends ConsumerState<ScheduleChatPanel> {
 
   Future<void> _loadInitialSchedule() async {
     try {
-      final schedule = await ref.read(scheduleApiProvider).getSchedule(widget.tripId);
+      final schedule = await ref
+          .read(scheduleApiProvider)
+          .getSchedule(widget.tripId);
       if (!mounted) return;
       setState(() {
         _currentSchedule = schedule;
@@ -106,26 +115,35 @@ class _ScheduleChatPanelState extends ConsumerState<ScheduleChatPanel> {
     });
   }
 
-  List<ChatMessage> _buildHistory() =>
-      [for (final entry in _entries) if (!entry.isLocalError) entry.message];
+  List<ChatMessage> _buildHistory() => [
+    for (final entry in _entries)
+      if (!entry.isLocalError) entry.message,
+  ];
 
   Future<void> _send() async {
     final text = _inputController.text.trim();
     if (text.isEmpty || _sending || _currentSchedule == null) return;
-    _inputController.clear();
     FocusScope.of(context).unfocus();
 
-    final snapshotBeforeTurn = _currentSchedule!;
     setState(() {
-      _entries.add(_ChatEntry.user(text));
       _sending = true;
     });
-    _scrollToBottom();
-
     try {
-      final reply = await ref
-          .read(scheduleApiProvider)
-          .chat(tripId: widget.tripId, messages: _buildHistory());
+      final api = ref.read(scheduleApiProvider);
+      final latestSchedule = await api.getSchedule(widget.tripId);
+      if (!mounted) return;
+      _inputController.clear();
+      setState(() {
+        _currentSchedule = latestSchedule;
+        _entries.add(_ChatEntry.user(text));
+      });
+      _scrollToBottom();
+
+      final snapshotBeforeTurn = latestSchedule;
+      final reply = await api.chat(
+        tripId: widget.tripId,
+        messages: _buildHistory(),
+      );
       if (!mounted) return;
       setState(() {
         _entries.add(
@@ -141,7 +159,9 @@ class _ScheduleChatPanelState extends ConsumerState<ScheduleChatPanel> {
     } on DioException catch (e) {
       if (!mounted) return;
       final error = e.error;
-      final message = error is ApiException ? error.message : 'AI와 통신하지 못했어요. 다시 시도해줘.';
+      final message = error is ApiException
+          ? error.message
+          : 'AI와 통신하지 못했어요. 다시 시도해줘.';
       setState(() => _entries.add(_ChatEntry.localError(message)));
     } finally {
       if (mounted) setState(() => _sending = false);
@@ -182,7 +202,9 @@ class _ScheduleChatPanelState extends ConsumerState<ScheduleChatPanel> {
       if (!mounted) return;
       final error = e.error;
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(error is ApiException ? error.message : '되돌리지 못했어요.')),
+        SnackBar(
+          content: Text(error is ApiException ? error.message : '되돌리지 못했어요.'),
+        ),
       );
     } finally {
       if (mounted) setState(() => _sending = false);
@@ -225,28 +247,11 @@ class _ScheduleChatPanelState extends ConsumerState<ScheduleChatPanel> {
     );
   }
 
-  /// 헤더를 아래로 끄는 제스처로도 패널을 닫을 수 있게 한다("채팅을 내리면 화면이
-  /// 돌아온다"). 누적 드래그 거리가 임계치를 넘거나 빠르게 아래로 튕기면 닫는다 —
-  /// 살짝 스친 정도로는 안 닫혀야 실수로 닫히지 않는다.
-  double _dragDy = 0;
-
-  void _onHeaderDragUpdate(DragUpdateDetails details) {
-    _dragDy = (_dragDy + details.delta.dy).clamp(0, double.infinity);
-  }
-
-  void _onHeaderDragEnd(DragEndDetails details) {
-    final flungDown = (details.primaryVelocity ?? 0) > 300;
-    if (flungDown || _dragDy > 40) {
-      widget.onClose();
-    }
-    _dragDy = 0;
-  }
-
   Widget _buildHeader() {
     return GestureDetector(
       behavior: HitTestBehavior.opaque,
-      onVerticalDragUpdate: _onHeaderDragUpdate,
-      onVerticalDragEnd: _onHeaderDragEnd,
+      onVerticalDragUpdate: widget.onHeaderDragUpdate,
+      onVerticalDragEnd: widget.onHeaderDragEnd,
       child: Column(
         children: [
           const SizedBox(height: 8),
@@ -266,17 +271,31 @@ class _ScheduleChatPanelState extends ConsumerState<ScheduleChatPanel> {
                   width: 34,
                   height: 34,
                   alignment: Alignment.center,
-                  decoration: const BoxDecoration(color: AppColors.limeBg, shape: BoxShape.circle),
-                  child: const Icon(Icons.auto_awesome, size: 16, color: AppColors.lime),
+                  decoration: const BoxDecoration(
+                    color: AppColors.limeBg,
+                    shape: BoxShape.circle,
+                  ),
+                  child: const Icon(
+                    Icons.auto_awesome,
+                    size: 16,
+                    color: AppColors.lime,
+                  ),
                 ),
                 const SizedBox(width: 10),
                 const Text(
                   'AI와 대화',
-                  style: TextStyle(fontSize: 15.5, fontWeight: FontWeight.w800, color: AppColors.ink900),
+                  style: TextStyle(
+                    fontSize: 15.5,
+                    fontWeight: FontWeight.w800,
+                    color: AppColors.ink900,
+                  ),
                 ),
                 const Spacer(),
                 IconButton(
-                  icon: const Icon(Icons.keyboard_arrow_down, color: AppColors.ink400),
+                  icon: const Icon(
+                    Icons.keyboard_arrow_down,
+                    color: AppColors.ink400,
+                  ),
                   onPressed: widget.onClose,
                 ),
               ],
@@ -300,7 +319,10 @@ class _ScheduleChatPanelState extends ConsumerState<ScheduleChatPanel> {
             children: [
               Text(_loadError!, textAlign: TextAlign.center),
               const SizedBox(height: 10),
-              TextButton(onPressed: _loadInitialSchedule, child: const Text('다시 시도')),
+              TextButton(
+                onPressed: _loadInitialSchedule,
+                child: const Text('다시 시도'),
+              ),
             ],
           ),
         ),
@@ -312,12 +334,21 @@ class _ScheduleChatPanelState extends ConsumerState<ScheduleChatPanel> {
         children: const [
           Text(
             '무엇이든 편하게 말해보세요',
-            style: TextStyle(fontSize: 15.5, fontWeight: FontWeight.w800, color: AppColors.ink900),
+            style: TextStyle(
+              fontSize: 15.5,
+              fontWeight: FontWeight.w800,
+              color: AppColors.ink900,
+            ),
           ),
           SizedBox(height: 6),
           Text(
-            '예: "둘째 날에 바다 보이는 카페 넣어줘", "그 식당 빼줘", "1일차 순서를 바꿔줘"',
-            style: TextStyle(fontSize: 13, height: 1.5, fontWeight: FontWeight.w600, color: AppColors.ink600),
+            '예: "둘째 날에 바다 보이는 카페 넣어줘", "한라산을 10:30으로 바꿔줘", "1일차 순서를 바꿔줘"',
+            style: TextStyle(
+              fontSize: 13,
+              height: 1.5,
+              fontWeight: FontWeight.w600,
+              color: AppColors.ink600,
+            ),
           ),
         ],
       );
@@ -352,7 +383,10 @@ class _ScheduleChatPanelState extends ConsumerState<ScheduleChatPanel> {
                 hintText: '메시지를 입력하세요',
                 filled: true,
                 fillColor: AppColors.surfaceSubtle,
-                contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 11),
+                contentPadding: const EdgeInsets.symmetric(
+                  horizontal: 16,
+                  vertical: 11,
+                ),
                 border: OutlineInputBorder(
                   borderRadius: BorderRadius.circular(20),
                   borderSide: BorderSide.none,
@@ -400,22 +434,38 @@ class _ChatBubble extends StatelessWidget {
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 5),
       child: Column(
-        crossAxisAlignment: isUser ? CrossAxisAlignment.end : CrossAxisAlignment.start,
+        crossAxisAlignment: isUser
+            ? CrossAxisAlignment.end
+            : CrossAxisAlignment.start,
         children: [
           Container(
-            constraints: BoxConstraints(maxWidth: MediaQuery.of(context).size.width * 0.7),
+            constraints: BoxConstraints(
+              maxWidth: MediaQuery.of(context).size.width * 0.7,
+            ),
             padding: const EdgeInsets.symmetric(horizontal: 13, vertical: 9),
-            decoration: BoxDecoration(color: bubbleColor, borderRadius: BorderRadius.circular(16)),
+            decoration: BoxDecoration(
+              color: bubbleColor,
+              borderRadius: BorderRadius.circular(16),
+            ),
             child: Text(
               entry.message.content,
-              style: TextStyle(fontSize: 13.5, height: 1.4, fontWeight: FontWeight.w600, color: textColor),
+              style: TextStyle(
+                fontSize: 13.5,
+                height: 1.4,
+                fontWeight: FontWeight.w600,
+                color: textColor,
+              ),
             ),
           ),
           if (entry.reverted) ...[
             const SizedBox(height: 3),
             const Text(
               '되돌렸어요',
-              style: TextStyle(fontSize: 11.5, fontWeight: FontWeight.w700, color: AppColors.ink400),
+              style: TextStyle(
+                fontSize: 11.5,
+                fontWeight: FontWeight.w700,
+                color: AppColors.ink400,
+              ),
             ),
           ] else if (canRevert) ...[
             const SizedBox(height: 3),
@@ -428,7 +478,10 @@ class _ChatBubble extends StatelessWidget {
                 foregroundColor: AppColors.ink400,
               ),
               icon: const Icon(Icons.undo, size: 13),
-              label: const Text('되돌리기', style: TextStyle(fontSize: 11.5, fontWeight: FontWeight.w700)),
+              label: const Text(
+                '되돌리기',
+                style: TextStyle(fontSize: 11.5, fontWeight: FontWeight.w700),
+              ),
             ),
           ],
         ],

@@ -103,6 +103,7 @@ const LUNCH_TIME = '12:00';
 const DINNER_TIME = '18:00';
 /** 이 시각 전에 배치된 식당은 점심으로 간주한다(이후면 저녁). */
 const LUNCH_DINNER_BOUNDARY = '15:00';
+const START_TIME_PATTERN = /^([01]\d|2[0-3]):[0-5]\d$/;
 
 /** 챗봇 한 요청당 최대 도구 호출 왕복 횟수(무한루프 방지). */
 const MAX_CHAT_TURNS = 5;
@@ -147,15 +148,36 @@ const CHAT_TOOLS: ChatToolDefinition[] = [
   },
   {
     name: 'move_place',
-    description: '현재 일정에 있는 장소를 다른 날짜/순서로 옮긴다.',
+    description:
+      '현재 일정에 있는 장소를 다른 날짜/순서로 옮긴다. 이동과 동시에 방문 시각을 바꿔야 하면 startTime도 함께 넣는다.',
     parameters: {
       type: 'object',
       properties: {
         tripPlaceId: { type: 'string', description: '옮길 일정 항목의 id' },
         dayNumber: { type: 'integer', description: '옮길 날짜(1부터 시작)' },
         orderInDay: { type: 'integer', description: '그 날짜 안에서의 순서(1부터 시작)' },
+        startTime: {
+          type: ['string', 'null'],
+          description: '선택: 방문 시각. HH:MM 24시간 형식, 삭제하려면 null',
+        },
       },
       required: ['tripPlaceId', 'dayNumber', 'orderInDay'],
+    },
+  },
+  {
+    name: 'update_time',
+    description:
+      '현재 일정에 있는 장소의 방문 시각만 수정하거나 삭제한다. 시간 관련 요청에는 이 도구를 우선 사용한다.',
+    parameters: {
+      type: 'object',
+      properties: {
+        tripPlaceId: { type: 'string', description: '시각을 수정할 일정 항목의 id' },
+        startTime: {
+          type: ['string', 'null'],
+          description: '방문 시각. HH:MM 24시간 형식, 시각을 비우려면 null',
+        },
+      },
+      required: ['tripPlaceId', 'startTime'],
     },
   },
 ];
@@ -459,9 +481,7 @@ export class ScheduleService {
       return target;
     });
 
-    const infos = saved.placeId
-      ? await this.placesService.resolveForSchedule([saved.placeId])
-      : [];
+    const infos = saved.placeId ? await this.placesService.resolveForSchedule([saved.placeId]) : [];
     this.emitScheduleChanged(tripId, userId);
     return { tripPlace: this.toPlaceDto(saved, infos[0]) };
   }
@@ -538,9 +558,7 @@ export class ScheduleService {
       where: { tripId },
       order: { dayNumber: 'ASC', orderInDay: 'ASC' },
     });
-    const placeIds = rows
-      .map((row) => row.placeId)
-      .filter((id): id is string => id !== null);
+    const placeIds = rows.map((row) => row.placeId).filter((id): id is string => id !== null);
     const infos = await this.placesService.resolveForSchedule(placeIds);
     const infoById = new Map(infos.map((info) => [info.id, info]));
 
@@ -822,7 +840,7 @@ export class ScheduleService {
       lines.push(`Day ${day.dayNumber}:`);
       for (const place of [...day.places].sort((a, b) => a.orderInDay - b.orderInDay)) {
         lines.push(
-          `- tripPlaceId=${place.id} | ${place.startTime ?? '시간미정'} | ${place.name}` +
+          `- tripPlaceId=${place.id} | dayNumber=${place.dayNumber} | orderInDay=${place.orderInDay} | startTime=${place.startTime ?? '시간미정'} | ${place.name}` +
             (place.address ? ` | ${place.address}` : ''),
         );
       }
@@ -835,7 +853,7 @@ export class ScheduleService {
       '당신은 여행 일정을 채팅으로 편집해주는 도우미다. 사용자의 자연어 요청을 이해해 필요한 도구를 호출해 실제로 일정을 바꾸고, 무엇을 했는지 친근한 채팅 말투로 답한다.',
       `이 여행은 총 ${durationDays}일이다. 각 날짜는 1부터 ${durationDays}까지의 dayNumber로 부른다.`,
       '',
-      '현재 일정(각 항목의 tripPlaceId는 remove_place/move_place에 쓴다):',
+      '현재 일정(각 항목의 tripPlaceId, dayNumber, orderInDay, startTime을 그대로 참고한다):',
       ...lines,
       '',
       '행동 규칙:',
@@ -845,6 +863,9 @@ export class ScheduleService {
       'D) search_places로 전혀 찾지 못했는데 사용자가 이름을 명확히 지정했다면, customName으로 직접 추가할 수 있다.',
       'E) 도구 실행 결과에 error가 있으면 원인을 사용자에게 알기 쉽게 설명하고, 필요하면 다시 시도한다.',
       'F) 한 번의 답장에서 여러 도구를 순서대로 호출해도 된다. 모든 변경이 끝나면 마지막에 무엇을 했는지 요약해 답한다.',
+      'G) 사용자가 특정 장소의 방문 시각을 묻기만 하면 현재 일정의 startTime을 근거로 답하고, 변경을 요구하면 update_time을 호출한다.',
+      'H) startTime은 반드시 24시간제 HH:MM 형식으로 보낸다. "시간을 비워줘/미정으로 해줘"는 startTime=null로 update_time을 호출한다.',
+      'I) 날짜/순서 이동과 시간 변경이 함께 있으면 move_place의 startTime을 함께 쓰거나, 이동 후 update_time을 이어서 호출한다.',
     ].join('\n');
   }
 
@@ -859,7 +880,10 @@ export class ScheduleService {
     try {
       args = call.argumentsJson ? JSON.parse(call.argumentsJson) : {};
     } catch {
-      return { content: JSON.stringify({ error: '요청 형식이 올바르지 않습니다.' }), changed: false };
+      return {
+        content: JSON.stringify({ error: '요청 형식이 올바르지 않습니다.' }),
+        changed: false,
+      };
     }
 
     try {
@@ -872,11 +896,17 @@ export class ScheduleService {
           return await this.executeRemovePlace(tripId, userId, args);
         case 'move_place':
           return await this.executeMovePlace(tripId, userId, args, durationDays);
+        case 'update_time':
+          return await this.executeUpdateTime(tripId, userId, args);
         default:
-          return { content: JSON.stringify({ error: `알 수 없는 도구: ${call.name}` }), changed: false };
+          return {
+            content: JSON.stringify({ error: `알 수 없는 도구: ${call.name}` }),
+            changed: false,
+          };
       }
     } catch (error) {
-      const message = error instanceof BusinessException ? error.message : '처리 중 오류가 발생했습니다.';
+      const message =
+        error instanceof BusinessException ? error.message : '처리 중 오류가 발생했습니다.';
       return { content: JSON.stringify({ error: message }), changed: false };
     }
   }
@@ -969,18 +999,66 @@ export class ScheduleService {
       };
     }
     if (!Number.isInteger(orderInDay) || orderInDay < 1) {
-      return { content: JSON.stringify({ error: 'orderInDay는 1 이상의 정수여야 합니다.' }), changed: false };
+      return {
+        content: JSON.stringify({ error: 'orderInDay는 1 이상의 정수여야 합니다.' }),
+        changed: false,
+      };
     }
     const { tripPlace } = await this.updatePlace(tripId, userId, tripPlaceId, {
       dayNumber,
       orderInDay,
+      ...(this.hasStartTimeArgument(args)
+        ? { startTime: this.parseStartTimeArgument(args.startTime) }
+        : {}),
     });
     return {
       content: JSON.stringify({
-        moved: { tripPlaceId: tripPlace.id, dayNumber: tripPlace.dayNumber, orderInDay: tripPlace.orderInDay },
+        moved: {
+          tripPlaceId: tripPlace.id,
+          dayNumber: tripPlace.dayNumber,
+          orderInDay: tripPlace.orderInDay,
+          startTime: tripPlace.startTime,
+        },
       }),
       changed: true,
     };
+  }
+
+  private async executeUpdateTime(
+    tripId: string,
+    userId: string,
+    args: Record<string, unknown>,
+  ): Promise<{ content: string; changed: boolean }> {
+    const tripPlaceId = typeof args.tripPlaceId === 'string' ? args.tripPlaceId : '';
+    if (!tripPlaceId) {
+      return { content: JSON.stringify({ error: 'tripPlaceId가 필요합니다.' }), changed: false };
+    }
+    if (!this.hasStartTimeArgument(args)) {
+      return { content: JSON.stringify({ error: 'startTime이 필요합니다.' }), changed: false };
+    }
+
+    const startTime = this.parseStartTimeArgument(args.startTime);
+    const { tripPlace } = await this.updatePlace(tripId, userId, tripPlaceId, { startTime });
+    return {
+      content: JSON.stringify({
+        updated: { tripPlaceId: tripPlace.id, startTime: tripPlace.startTime },
+      }),
+      changed: true,
+    };
+  }
+
+  private hasStartTimeArgument(args: Record<string, unknown>): boolean {
+    return Object.prototype.hasOwnProperty.call(args, 'startTime');
+  }
+
+  private parseStartTimeArgument(value: unknown): string | null {
+    if (value === null) {
+      return null;
+    }
+    if (typeof value !== 'string' || !START_TIME_PATTERN.test(value)) {
+      throw new BusinessException(ScheduleErrorCode.SCHEDULE_PLACE_INPUT_INVALID);
+    }
+    return value;
   }
 
   /**
@@ -994,7 +1072,11 @@ export class ScheduleService {
       for (let j = i + 1; j < candidates.length; j++) {
         const regionA = this.regionKeyOf(candidates[i].address);
         const regionB = this.regionKeyOf(candidates[j].address);
-        if (regionA && regionA === regionB && this.areNamesSimilar(candidates[i].name, candidates[j].name)) {
+        if (
+          regionA &&
+          regionA === regionB &&
+          this.areNamesSimilar(candidates[i].name, candidates[j].name)
+        ) {
           return true;
         }
       }
@@ -1244,10 +1326,7 @@ export class ScheduleService {
     }
   }
 
-  private buildView(
-    rows: TripPlace[],
-    infoById: Map<string, ScheduledPlaceInfo>,
-  ): ScheduleView {
+  private buildView(rows: TripPlace[], infoById: Map<string, ScheduledPlaceInfo>): ScheduleView {
     const sorted = [...rows].sort(
       (a, b) => a.dayNumber - b.dayNumber || a.orderInDay - b.orderInDay,
     );

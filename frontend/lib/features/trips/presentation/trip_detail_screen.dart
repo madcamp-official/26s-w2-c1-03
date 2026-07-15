@@ -6,7 +6,8 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../core/network/api_exception.dart';
 import '../../../core/network/trip_socket.dart';
 import '../../../core/theme/app_colors.dart';
-import '../../auth/presentation/login_controller.dart' show tokenStorageProvider;
+import '../../auth/presentation/login_controller.dart'
+    show tokenStorageProvider;
 import '../../../core/utils/date_format.dart';
 import '../../../core/widgets/app_back_button.dart';
 import '../../../core/widgets/app_button.dart';
@@ -85,10 +86,18 @@ class _TripDetailScreenState extends ConsumerState<TripDetailScreen> {
   /// WS 이벤트 수신 시 스피너 없이 데이터만 교체한다. 인라인 수정 중에는 입력을
   /// 덮어쓰지 않도록 건너뛴다(저장/취소 후 다음 이벤트나 새로고침에서 반영).
   Future<void> _reloadSilently() async {
-    if (!mounted || _editing || _saving || _deleting || _state is! _DetailLoaded) return;
+    if (!mounted ||
+        _editing ||
+        _saving ||
+        _deleting ||
+        _state is! _DetailLoaded) {
+      return;
+    }
     try {
       final trip = await ref.read(tripsApiProvider).getDetail(widget.tripId);
-      final schedule = await ref.read(scheduleApiProvider).getSchedule(widget.tripId);
+      final schedule = await ref
+          .read(scheduleApiProvider)
+          .getSchedule(widget.tripId);
       if (!mounted || _editing) return;
       setState(() => _state = _DetailLoaded(trip, schedule));
     } on DioException {
@@ -128,6 +137,11 @@ class _TripDetailScreenState extends ConsumerState<TripDetailScreen> {
       firstDate: DateTime(now.year - 1),
       lastDate: DateTime(now.year + 2),
       initialDateRange: _dateRange,
+      builder: (context, child) => MediaQuery.removeViewInsets(
+        context: context,
+        removeBottom: true,
+        child: child ?? const SizedBox.shrink(),
+      ),
     );
     if (picked != null) {
       setState(() => _dateRange = picked);
@@ -270,7 +284,9 @@ class _TripDetailScreenState extends ConsumerState<TripDetailScreen> {
   /// 상세 화면도 함께 닫고 목록을 갱신한다.
   Future<void> _openMembers() async {
     final leftTrip = await Navigator.of(context).push<bool>(
-      MaterialPageRoute(builder: (_) => TripMembersScreen(tripId: widget.tripId)),
+      MaterialPageRoute(
+        builder: (_) => TripMembersScreen(tripId: widget.tripId),
+      ),
     );
     if (!mounted) return;
     if (leftTrip == true) {
