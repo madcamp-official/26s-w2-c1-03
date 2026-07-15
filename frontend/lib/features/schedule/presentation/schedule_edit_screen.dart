@@ -26,11 +26,16 @@ class ScheduleEditScreen extends ConsumerStatefulWidget {
 }
 
 class _ScheduleEditScreenState extends ConsumerState<ScheduleEditScreen> {
+  static const double _chatMinExtent = 0.34;
+  static const double _chatDefaultExtent = 0.50;
+  static const double _chatMaxExtent = 0.86;
+
   /// 서버 상태를 반영하는 로컬 가변 목록(플랫). 렌더링 시 dayNumber로 그룹핑한다.
   late List<ScheduledTripPlace> _places;
   bool _changed = false;
   final Set<String> _busyIds = {};
   bool _chatOpen = false;
+  double _chatExtent = _chatDefaultExtent;
 
   @override
   void initState() {
@@ -139,6 +144,41 @@ class _ScheduleEditScreenState extends ConsumerState<ScheduleEditScreen> {
     });
   }
 
+  void _openChat() {
+    setState(() => _chatOpen = true);
+  }
+
+  void _closeChat() {
+    FocusScope.of(context).unfocus();
+    setState(() => _chatOpen = false);
+  }
+
+  void _handleChatDragUpdate(DragUpdateDetails details) {
+    final delta = details.primaryDelta;
+    if (delta == null) return;
+    final height = MediaQuery.sizeOf(context).height;
+    if (height <= 0) return;
+    setState(() {
+      _chatExtent = (_chatExtent - delta / height).clamp(
+        _chatMinExtent,
+        _chatMaxExtent,
+      );
+    });
+  }
+
+  void _handleChatDragEnd(DragEndDetails details) {
+    final velocity = details.primaryVelocity ?? 0;
+    if (velocity > 700 || _chatExtent <= _chatMinExtent + 0.02) {
+      _closeChat();
+      return;
+    }
+
+    final target = velocity < -500
+        ? _chatMaxExtent
+        : (_chatExtent >= 0.68 ? _chatMaxExtent : _chatDefaultExtent);
+    setState(() => _chatExtent = target);
+  }
+
   /// 상세 설정 버튼 — 메모/시간/비용을 한 시트에서 편집하고 세 값을 한 번에 저장한다.
   Future<void> _editDetail(ScheduledTripPlace place) async {
     final result = await showSchedulePlaceDetailSheet(
@@ -178,7 +218,6 @@ class _ScheduleEditScreenState extends ConsumerState<ScheduleEditScreen> {
   Widget build(BuildContext context) {
     final days = _byDay.keys.toList()..sort();
     final keyboardHeight = MediaQuery.viewInsetsOf(context).bottom;
-    final keyboardVisible = keyboardHeight > 0;
 
     return PopScope(
       canPop: false,
@@ -204,84 +243,102 @@ class _ScheduleEditScreenState extends ConsumerState<ScheduleEditScreen> {
           ),
         ),
         body: SafeArea(
-          // 채팅창이 열리면 일정 영역을 Stack으로 덮는 대신 실제로 위쪽 절반만
-          // 차지하도록 Column으로 공간을 나눈다 — 오버레이 방식은 아래쪽 일정이
-          // 패널 뒤로 완전히 가려 안 보이는 문제가 있었다. 닫히면 Column이 다시
-          // 계산되어 일정 영역이 자동으로 전체 높이를 되찾는다.
-          child: Column(
-            children: [
-              Expanded(
-                child: Stack(
-                  children: [
-                    days.isEmpty
-                        ? const _EmptyState()
-                        : ListView(
-                            padding: const EdgeInsets.fromLTRB(22, 12, 22, 100),
-                            children: [
-                              const Padding(
-                                padding: EdgeInsets.only(bottom: 10),
-                                child: Text(
-                                  '손잡이를 끌어 같은 날 안에서 순서를 바꿀 수 있어요.',
-                                  style: TextStyle(
-                                    fontSize: 12.5,
-                                    fontWeight: FontWeight.w600,
-                                    color: AppColors.ink400,
-                                  ),
+          child: LayoutBuilder(
+            builder: (context, constraints) {
+              final availableHeight = (constraints.maxHeight - keyboardHeight)
+                  .clamp(260.0, constraints.maxHeight)
+                  .toDouble();
+              final panelHeight = (availableHeight * _chatExtent)
+                  .clamp(240.0, availableHeight)
+                  .toDouble();
+              final listBottomPadding = _chatOpen
+                  ? panelHeight + keyboardHeight + 24
+                  : 100.0;
+
+              return Stack(
+                children: [
+                  days.isEmpty
+                      ? const _EmptyState()
+                      : ListView(
+                          padding: EdgeInsets.fromLTRB(
+                            22,
+                            12,
+                            22,
+                            listBottomPadding,
+                          ),
+                          children: [
+                            const Padding(
+                              padding: EdgeInsets.only(bottom: 10),
+                              child: Text(
+                                '손잡이를 끌어 같은 날 안에서 순서를 바꿀 수 있어요.',
+                                style: TextStyle(
+                                  fontSize: 12.5,
+                                  fontWeight: FontWeight.w600,
+                                  color: AppColors.ink400,
                                 ),
                               ),
-                              for (final day in days) ...[
-                                _DayEditSection(
-                                  dayNumber: day,
-                                  places: _byDay[day]!,
-                                  busyIds: _busyIds,
-                                  onDelete: _delete,
-                                  onEditDetail: _editDetail,
-                                  onReorder: (oldIndex, newIndex) =>
-                                      _reorderWithinDay(
-                                        day,
-                                        oldIndex,
-                                        newIndex,
-                                      ),
-                                ),
-                                const SizedBox(height: 18),
-                              ],
+                            ),
+                            for (final day in days) ...[
+                              _DayEditSection(
+                                dayNumber: day,
+                                places: _byDay[day]!,
+                                busyIds: _busyIds,
+                                onDelete: _delete,
+                                onEditDetail: _editDetail,
+                                onReorder: (oldIndex, newIndex) =>
+                                    _reorderWithinDay(day, oldIndex, newIndex),
+                              ),
+                              const SizedBox(height: 18),
                             ],
-                          ),
-                    // 챗봇 진입 FAB — 채팅창이 닫혀 있을 때만 보인다.
-                    if (!_chatOpen)
-                      Positioned(
-                        right: 18,
-                        bottom: 18,
-                        child: FloatingActionButton(
-                          heroTag: 'schedule-chat-fab',
-                          backgroundColor: AppColors.ink900,
-                          onPressed: () => setState(() => _chatOpen = true),
-                          child: const Icon(
-                            Icons.chat_bubble_outline,
-                            color: Colors.white,
+                          ],
+                        ),
+                  if (!_chatOpen)
+                    Positioned(
+                      right: 18,
+                      bottom: 18,
+                      child: FloatingActionButton(
+                        heroTag: 'schedule-chat-fab',
+                        backgroundColor: AppColors.ink900,
+                        onPressed: _openChat,
+                        child: const Icon(
+                          Icons.chat_bubble_outline,
+                          color: Colors.white,
+                        ),
+                      ),
+                    ),
+                  Positioned(
+                    left: 0,
+                    right: 0,
+                    bottom: 0,
+                    child: AnimatedPadding(
+                      duration: const Duration(milliseconds: 180),
+                      curve: Curves.easeOut,
+                      padding: EdgeInsets.only(bottom: keyboardHeight),
+                      child: AnimatedSlide(
+                        duration: const Duration(milliseconds: 220),
+                        curve: Curves.easeOutCubic,
+                        offset: _chatOpen ? Offset.zero : const Offset(0, 1.08),
+                        child: IgnorePointer(
+                          ignoring: !_chatOpen,
+                          child: AnimatedContainer(
+                            duration: const Duration(milliseconds: 160),
+                            curve: Curves.easeOut,
+                            height: panelHeight,
+                            child: ScheduleChatPanel(
+                              tripId: widget.tripId,
+                              onScheduleChanged: _onChatScheduleChanged,
+                              onClose: _closeChat,
+                              onHeaderDragUpdate: _handleChatDragUpdate,
+                              onHeaderDragEnd: _handleChatDragEnd,
+                            ),
                           ),
                         ),
                       ),
-                  ],
-                ),
-              ),
-              if (_chatOpen)
-                AnimatedPadding(
-                  duration: const Duration(milliseconds: 180),
-                  curve: Curves.easeOut,
-                  padding: EdgeInsets.only(bottom: keyboardHeight),
-                  child: SizedBox(
-                    height:
-                        MediaQuery.sizeOf(context).height *
-                        (keyboardVisible ? 0.42 : 0.5),
-                    child: ScheduleChatPanel(
-                      tripId: widget.tripId,
-                      onScheduleChanged: _onChatScheduleChanged,
-                      onClose: () => setState(() => _chatOpen = false),
                     ),
                   ),
-                ),
-            ],
+                ],
+              );
+            },
           ),
         ),
       ),
