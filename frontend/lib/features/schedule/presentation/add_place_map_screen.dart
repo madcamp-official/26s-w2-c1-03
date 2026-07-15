@@ -385,11 +385,7 @@ class _AddPlaceMapScreenState extends ConsumerState<AddPlaceMapScreen> {
           ),
           title: Text(
             'Day ${widget.dayNumber}에 장소 추가',
-            style: const TextStyle(
-              fontSize: 17,
-              fontWeight: FontWeight.w800,
-              color: AppColors.ink900,
-            ),
+            style: const TextStyle(fontWeight: FontWeight.w800, color: AppColors.ink900),
           ),
           actions: [
             IconButton(

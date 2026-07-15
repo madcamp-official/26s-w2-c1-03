@@ -7,6 +7,9 @@ abstract final class AppColors {
   static const surface = Color(0xFFFFFFFF);
   static const surfaceMuted = Color(0xFFF2F3F5);
   static const surfaceSubtle = Color(0xFFF2F3F5);
+  /// surfaceMuted보다 한 단계 더 옅은 회색 — 흰 카드가 얹히는 섹션 배경처럼
+  /// 거의 흰색에 가깝게 은은한 구분만 필요할 때 쓴다.
+  static const surfaceFaint = Color(0xFFF8F9FA);
   static const border = Color(0xFFEEEEEE);
   static const borderStrong = Color(0xFFEEEEEE);
 

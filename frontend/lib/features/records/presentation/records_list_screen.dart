@@ -32,9 +32,9 @@ class _RecordsListScreenState extends ConsumerState<RecordsListScreen> {
     final state = ref.watch(recordsListControllerProvider);
 
     return Scaffold(
-      backgroundColor: Colors.white,
+      backgroundColor: AppColors.surfaceFaint,
       appBar: AppBar(
-        backgroundColor: Colors.white,
+        backgroundColor: AppColors.surfaceFaint,
         elevation: 0,
         title: const Text('기록', style: TextStyle(color: AppColors.ink900, fontWeight: FontWeight.w800)),
         actions: [

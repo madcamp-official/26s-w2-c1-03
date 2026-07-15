@@ -162,7 +162,7 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
     }
 
     return Scaffold(
-      backgroundColor: Colors.white,
+      backgroundColor: AppColors.surfaceFaint,
       body: SafeArea(
         child: Padding(
           padding: const EdgeInsets.symmetric(horizontal: 22),
@@ -253,48 +253,55 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
           ),
           const SizedBox(height: 16),
           _StatsRow(tripState: tripState),
-          const SizedBox(height: 28),
-          const Text(
-            '닉네임',
-            style: TextStyle(fontSize: 13, fontWeight: FontWeight.w700, color: AppColors.ink600),
-          ),
-          const SizedBox(height: 8),
-          TextField(
-            controller: _controller,
-            maxLength: 30,
-            style: const TextStyle(fontSize: 14.5, fontWeight: FontWeight.w600, color: AppColors.ink900),
-            decoration: InputDecoration(
-              errorText: _errorText,
-              filled: true,
-              fillColor: AppColors.surfaceSubtle,
-              border: OutlineInputBorder(
-                borderRadius: BorderRadius.circular(16),
-                borderSide: BorderSide.none,
-              ),
+          const SizedBox(height: 20),
+          _ProfileCard(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Text(
+                  '닉네임',
+                  style: TextStyle(fontSize: 13, fontWeight: FontWeight.w700, color: AppColors.ink600),
+                ),
+                const SizedBox(height: 8),
+                TextField(
+                  controller: _controller,
+                  maxLength: 30,
+                  style: const TextStyle(fontSize: 14.5, fontWeight: FontWeight.w600, color: AppColors.ink900),
+                  decoration: InputDecoration(
+                    errorText: _errorText,
+                    filled: true,
+                    fillColor: AppColors.surfaceSubtle,
+                    border: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(16),
+                      borderSide: BorderSide.none,
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 4),
+                AppButton(label: '저장', height: 48, loading: _submitting, onPressed: _save),
+              ],
             ),
           ),
-          AppButton(label: '저장', height: 48, loading: _submitting, onPressed: _save),
-          const SizedBox(height: 24),
-          Container(
-            decoration: const BoxDecoration(
-              border: Border(top: BorderSide(color: AppColors.border, width: 1)),
-            ),
+          const SizedBox(height: 20),
+          _ProfileCard(
+            padding: EdgeInsets.zero,
             child: Column(
               children: [
                 InkWell(
                   onTap: _logout,
                   child: const Padding(
-                    padding: EdgeInsets.symmetric(vertical: 14),
+                    padding: EdgeInsets.symmetric(horizontal: 20, vertical: 16),
                     child: Text(
                       '로그아웃',
                       style: TextStyle(fontSize: 14.5, fontWeight: FontWeight.w700, color: AppColors.ink900),
                     ),
                   ),
                 ),
+                const Divider(height: 1, color: AppColors.border),
                 InkWell(
                   onTap: _withdrawing ? null : _confirmAndWithdraw,
                   child: Padding(
-                    padding: const EdgeInsets.symmetric(vertical: 14),
+                    padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
                     child: _withdrawing
                         ? const SizedBox(
                             width: 16,
@@ -320,6 +327,36 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
   }
 }
 
+/// 옅은 회색 페이지 배경 위에 얹는 흰 카드 — 홈 탭 `_HomeSection`과 같은 스타일.
+class _ProfileCard extends StatelessWidget {
+  const _ProfileCard({required this.child, this.padding = const EdgeInsets.all(18)});
+
+  final Widget child;
+  final EdgeInsetsGeometry padding;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: double.infinity,
+      padding: padding,
+      clipBehavior: Clip.antiAlias,
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(18),
+        border: Border.all(color: AppColors.border),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: 0.035),
+            blurRadius: 18,
+            offset: const Offset(0, 8),
+          ),
+        ],
+      ),
+      child: child,
+    );
+  }
+}
+
 class _StatsRow extends StatelessWidget {
   const _StatsRow({required this.tripState});
   final TripListState tripState;
@@ -331,8 +368,16 @@ class _StatsRow extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.symmetric(vertical: 18),
       decoration: BoxDecoration(
-        color: AppColors.surfaceMuted,
+        color: Colors.white,
         borderRadius: BorderRadius.circular(18),
+        border: Border.all(color: AppColors.border),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: 0.035),
+            blurRadius: 18,
+            offset: const Offset(0, 8),
+          ),
+        ],
       ),
       child: Row(
         children: [

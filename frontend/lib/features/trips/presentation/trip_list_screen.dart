@@ -42,7 +42,7 @@ class _TripListScreenState extends ConsumerState<TripListScreen> {
     final state = ref.watch(tripListControllerProvider);
 
     return Scaffold(
-      backgroundColor: Colors.white,
+      backgroundColor: AppColors.surfaceFaint,
       body: SafeArea(
         child: Column(children: [Expanded(child: _buildBody(state))]),
       ),
@@ -223,7 +223,6 @@ class _HomeSection extends StatelessWidget {
   Widget build(BuildContext context) {
     return Container(
       width: double.infinity,
-      color: AppColors.surfaceMuted,
       padding: const EdgeInsets.fromLTRB(18, 18, 18, 6),
       child: Container(
         width: double.infinity,

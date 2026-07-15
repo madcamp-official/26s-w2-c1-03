@@ -129,7 +129,7 @@ class _TabButton extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final color = selected ? AppColors.ink900 : AppColors.ink300;
+    final color = selected ? AppColors.lime : AppColors.ink300;
     return InkWell(
       onTap: onTap,
       customBorder: const CircleBorder(),
