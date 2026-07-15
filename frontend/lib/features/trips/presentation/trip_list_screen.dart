@@ -190,7 +190,7 @@ class _TripListBody extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final upcoming = _nearestUpcoming(trips);
-    final others = trips.where((t) => t.id != upcoming?.id).toList()
+    final completedTrips = trips.where((trip) => trip.status == 'completed').toList()
       ..sort((a, b) => b.startDate.compareTo(a.startDate));
 
     return RefreshIndicator(
@@ -205,7 +205,7 @@ class _TripListBody extends StatelessWidget {
           ],
           const _RecommendedDestinationsSection(),
           const SizedBox(height: 28),
-          if (others.isNotEmpty) ...[
+          if (completedTrips.isNotEmpty) ...[
             const Text(
               '지난 여행 기록',
               style: TextStyle(fontSize: 17, fontWeight: FontWeight.w800, color: AppColors.ink900),
@@ -216,9 +216,9 @@ class _TripListBody extends StatelessWidget {
               child: ListView.separated(
                 scrollDirection: Axis.horizontal,
                 clipBehavior: Clip.none,
-                itemCount: others.length,
+                itemCount: completedTrips.length,
                 separatorBuilder: (context, index) => const SizedBox(width: 14),
-                itemBuilder: (context, index) => _TripCard(trip: others[index]),
+                itemBuilder: (context, index) => _TripCard(trip: completedTrips[index]),
               ),
             ),
           ],
