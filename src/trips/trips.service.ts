@@ -1,7 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { InjectDataSource, InjectRepository } from '@nestjs/typeorm';
-import { DataSource, IsNull, Repository } from 'typeorm';
+import { DataSource, IsNull, LessThan, Not, Repository } from 'typeorm';
 import { CollaborationEventBus } from '../collaboration/collaboration-event-bus';
 import { BusinessException } from '../common/exceptions/business-exception';
 import { CommonErrorCode } from '../common/exceptions/error-code';
@@ -11,7 +11,7 @@ import { ListTripsQueryDto } from './dto/list-trips-query.dto';
 import { UpdateTripDto } from './dto/update-trip.dto';
 import { TripInviteLink } from './entities/trip-invite-link.entity';
 import { TripMember, TripMemberRole } from './entities/trip-member.entity';
-import { Trip } from './entities/trip.entity';
+import { Trip, TripStatus } from './entities/trip.entity';
 import { TripsErrorCode } from './exceptions/trips-error-code';
 import { generateInviteToken } from './util/invite-token';
 
@@ -199,6 +199,38 @@ export class TripsService {
    */
   async setCoverImage(tripId: string, coverImageUrl: string | null): Promise<void> {
     await this.tripRepository.update({ id: tripId }, { coverImageUrl });
+  }
+
+  // ── Phase 13: 여행 종료 감지 배치가 재사용하는 진입점 ──────────────────
+  // notifications 도메인은 파생 도메인(§1.4)이라 자체 Repository로 trips를 건드리지
+  // 않고, 아래 메서드들을 통해서만 조회/전환한다(§3.1 도메인 간 결합은 Service 수준).
+
+  /**
+   * [today](YYYY-MM-DD, KST 기준) "이전"에 끝난(= 종료일 다음날이 된) 아직 미완료
+   * 여행 목록. soft delete된 여행은 제외한다. status 전환/알림 대상 선별에 쓴다.
+   */
+  async findEndedActiveTrips(today: string): Promise<Trip[]> {
+    return this.tripRepository.find({
+      where: {
+        status: Not(TripStatus.COMPLETED),
+        deletedAt: IsNull(),
+        endDate: LessThan(today),
+      },
+    });
+  }
+
+  /** 여행을 완료 상태로 전환한다(종료 배치 전용, 멱등). */
+  async markCompleted(tripId: string): Promise<void> {
+    await this.tripRepository.update({ id: tripId }, { status: TripStatus.COMPLETED });
+  }
+
+  /** 해당 여행의 전체 멤버 userId. 종료 알림을 멤버 각자에게 보내기 위한 조회. */
+  async findMemberUserIds(tripId: string): Promise<string[]> {
+    const members = await this.tripMemberRepository.find({
+      where: { tripId },
+      select: { userId: true },
+    });
+    return members.map((member) => member.userId);
   }
 
   // ── Phase 10: 초대 링크 ─────────────────────────────────────────────

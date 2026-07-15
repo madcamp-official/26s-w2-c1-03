@@ -295,7 +295,7 @@ erDiagram
 
 > **[2026-07-12 갱신]** Phase 1~7을 실제 코드와 대조 감사(백엔드 `npm test`/`tsc --noEmit`, 프론트 `flutter analyze` + 전 소스 리딩)한 결과를 반영해 각 Phase를 체크리스트로 재작성했습니다. `[x]`는 코드로 확인된 완료 항목, `[ ]`는 아직 안 됐거나 계획과 실제 구현이 어긋나 있어 **정리가 필요한 항목**입니다. 이 갱신은 문서만 손보는 작업이며 코드는 건드리지 않았습니다 — 아래 `[ ]` 항목은 실제 수정 작업의 To-do 목록으로 사용하세요.
 >
-> **[2026-07-15 갱신]** Phase 8~13을 실제 코드와 재대조했습니다. 결과: **Phase 8~12는 BE·FE 모두 구현 완료**(BE `tsc --noEmit` 통과 + 전체 `jest` **21 suites/250 tests 통과**, FE `flutter analyze` 에러 0). **Phase 7 정렬 정책이 Google 평점 → TourAPI 관광지 집중률로 변경**된 것을 반영. **Phase 13(알림)만 BE 미착수**(Entity/Module 스켈레톤만, 종료 감지 cron·푸시 발송 없음), **Phase 14(통합/배포)는 미착수**. 남은 실작업은 Phase 13 BE 구현, Phase 11 실기기 완주 검증, Phase 14 배포 준비뿐입니다.
+> **[2026-07-15 갱신]** Phase 8~13을 실제 코드와 재대조했습니다. 결과: **Phase 8~12는 BE·FE 모두 구현 완료**, **Phase 7 정렬 정책이 Google 평점 → TourAPI 관광지 집중률로 변경**된 것을 반영. **Phase 13(알림) BE는 이 갱신에서 구현 완료**(종료 감지 cron + FCM 발송 + `clicked_at` 엔드포인트 + 단위테스트 12건). 최종 검증: BE `tsc --noEmit` 통과 + 전체 `jest` **22 suites/261 tests 통과**, FE `flutter analyze` 에러 0. 남은 실작업은 **Phase 13 FE 딥링크 연결**, **Phase 11 실기기 완주 검증**, **Phase 14(통합/배포) 착수**뿐입니다.
 
 ### Phase 1 — 프로젝트 초기 설정 ✅ 완료
 - **목표**: 실행 가능한 최소 골격 구축, Supabase 프로젝트 연결 확보
@@ -542,20 +542,22 @@ erDiagram
 - **선행 Phase**: Phase 11
 - **산출물**: `records/` 모듈 완성
 
-### Phase 13 — 알림(Notification) ⚠️ BE 미착수 (Entity/Module 스켈레톤만 · FE 푸시 등록은 Phase 5에서 완료)
+### Phase 13 — 알림(Notification) ✅ BE 구현 완료 (실기기 푸시 수신 확인만 대기 · FE 딥링크 연결 잔여)
 - **목표**: 여행 종료를 감지해 기록 작성을 유도
-- **[2026-07-15 감사]** `src/notifications`에는 `notification-log.entity.ts` + `notifications.module.ts`(Entity/Repository만)뿐이고 **종료 감지 배치·푸시 발송 Service·`clicked_at` 엔드포인트가 전부 미구현**. 현재 앱에서 유일하게 도는 `@Cron`은 `photo-buffer-cleanup`뿐 — `trips.status`를 `completed`로 전환하는 배치가 없어 여행이 자동으로 종료 처리되지 않음. FE는 `push_notification_service.dart`(FCM 토큰 발급 + `/users/me/devices` 등록/해제)와 로컬 알림 인박스(`notification_inbox_store.dart`, 서버 `/notifications` 호출 없음)만 존재.
-- **선행 조건**: Phase 5의 "푸시 권한 요청 + 디바이스 토큰 등록"(FE) 및 `POST /users/me/devices` 실사용 연동 — **완료됨**(발송 대상 디바이스 확보 가능)
+- **[2026-07-15 구현]** `notifications` 모듈에 종료 감지 배치 + FCM 발송 + `clicked_at` 엔드포인트를 구현함. 아키텍처(§3.1)를 지키려고 notifications는 자체 Entity(`NotificationLog`)만 직접 다루고, 여행/디바이스는 **TripsService·UsersService에 추가한 얇은 메서드**(`findEndedActiveTrips`/`markCompleted`/`findMemberUserIds`, `findActiveDeviceTokens`/`deactivateDeviceTokens`)를 통해서만 접근함. 발송은 `PushSender` 인터페이스(`PUSH_SENDER` 토큰) 뒤의 `FcmClient`(Firebase Admin Messaging, Storage와 같은 앱 싱글턴 재사용)로 위임해 테스트에서 Mock 교체 가능(§9.1 패턴). `npx tsc --noEmit` + 전체 `npx jest`(**22 suites / 261 tests**, 신규 알림 12건 포함) 통과.
+- **선행 조건**: Phase 5의 "푸시 권한 요청 + 디바이스 토큰 등록"(FE) 및 `POST /users/me/devices` — **완료됨**
 - **BE 체크리스트**:
-  - [ ] 여행 종료 배치(cron) — `end_date` 다음날 `trips.status`를 `completed`로 전환 **(미구현)**
-  - [ ] `notification_logs(type=trip_end_reminder)` insert **(미구현)**
-  - [ ] 등록된 `user_devices`(활성 상태만)로 푸시 발송(FCM 등) **(미구현)**
-  - [ ] 알림 클릭 시 `clicked_at` 기록 엔드포인트/딥링크 처리 **(미구현)**
+  - [x] 여행 종료 배치(cron) — `notification.scheduler.ts`가 매일 **KST 01:00**(`@Cron(EVERY_DAY_AT_1AM, { timeZone: 'Asia/Seoul' })`)에 실행, `NotificationsService.runTripEndReminderBatch`가 **종료일 다음날(KST)**이 된 미완료·미삭제 여행을 `completed`로 전환. 시각 주입 가능(`now` 파라미터)해 단위 테스트로 KST 경계 검증
+  - [x] `notification_logs(type=trip_end_reminder)` insert — 여행 **멤버 각자**에게 1건씩. **멱등** 설계: 이미 로그가 있는 멤버는 스킵하고, 모든 멤버 처리 후에야 `markCompleted`를 호출해 중간 실패 시 안전 재시도(완료 전환을 먼저 하면 재시도 대상에서 빠져 알림 유실)
+  - [x] 등록된 `user_devices`(활성만) FCM 발송 — `FcmClient.sendEachForMulticast`, FCM이 미등록/무효로 응답한 토큰은 `deactivateDeviceTokens`로 비활성화(발송 후 정리). 푸시 예외는 삼켜서 로그/다른 멤버 처리를 막지 않음
+  - [x] 알림 클릭 시 `clicked_at` 기록 — `POST /notifications/{notificationId}/clicked`(JwtAuthGuard, 204). 본인 알림만 갱신, 이미 클릭됐으면 최초 시각 유지(멱등), 없거나 타인 알림은 `NOTIFICATION_NOT_FOUND`(404). 푸시 `data`에 `{ type, tripId, notificationId }`를 실어 FE 딥링크가 이 엔드포인트를 호출하게 함
+  - [x] Service 단위 테스트: `notifications.service.spec.ts` 12건(KST 경계/멤버별 발송/멱등 스킵/무디바이스/무효 토큰 정리/여행 단위 실패 격리/푸시 예외 격리/`clicked_at` 4케이스)
 - **FE 체크리스트**:
-  - [~] 푸시 수신 인프라(`push_notification_service.dart`, FCM 토큰/권한)와 로컬 인박스 UI는 있으나, "기록 시작" 딥링크 → Phase 11 기록 세션 진입 연결은 서버 발송분이 없어 **미검증**
-- **완료 조건**: 종료일이 지난 여행이 배치로 `completed` 전환되고 푸시가 발송됨, 클릭 시 `clicked_at` 기록 — **미충족(BE 착수 필요)**
+  - [x] 푸시 수신 인프라(`push_notification_service.dart`, FCM 토큰/권한) — Phase 5에서 완료
+  - [ ] 푸시 `data.notificationId`로 `POST /notifications/{id}/clicked` 호출 + "기록 시작" 딥링크 → Phase 11 기록 세션 진입 연결 **(FE 잔여 작업)**
+- **완료 조건**: 종료일이 지난 여행이 배치로 `completed` 전환되고 푸시가 발송됨, 클릭 시 `clicked_at` 기록 — **BE 충족**(cron·발송·clicked 엔드포인트·테스트). 실기기 푸시 수신은 Firebase 서비스 계정에 FCM 사용 설정 + Android 실기기로 확인 필요(iOS는 APNs = Apple Developer 계정 필요, Phase 4 제약과 동일)
 - **선행 Phase**: Phase 12 (records 진입점이 있어야 알림의 딥링크가 의미를 가짐)
-- **산출물**: `notifications/` 모듈
+- **산출물**: `notifications/` 모듈(`notifications.service.ts`/`notification.scheduler.ts`/`notifications.controller.ts`/`fcm.client.ts`/`push-sender.ts`/`exceptions`), TripsService·UsersService 배치용 메서드
 
 ### Phase 14 — 통합 테스트, 보안 점검 및 배포 준비
 - **목표**: 전체 플로우 검증과 배포 가능한 상태 확보

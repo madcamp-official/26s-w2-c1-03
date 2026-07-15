@@ -1,6 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { IsNull, Repository } from 'typeorm';
+import { In, IsNull, Repository } from 'typeorm';
 import { BusinessException } from '../common/exceptions/business-exception';
 import { RefreshToken } from '../auth/entities/refresh-token.entity';
 import { RegisterDeviceDto } from './dto/register-device.dto';
@@ -86,6 +86,30 @@ export class UsersService {
     }
     device.isActive = false;
     await this.deviceRepository.save(device);
+  }
+
+  // ── Phase 13: 알림 발송이 재사용하는 진입점 ──────────────────────────
+  // notifications 도메인은 user_devices Repository를 직접 건드리지 않고 아래
+  // 메서드로만 활성 토큰을 조회/비활성화한다(§3.1).
+
+  /** 해당 유저의 활성(isActive) 디바이스 푸시 토큰 목록. 발송 대상 선별에 쓴다. */
+  async findActiveDeviceTokens(userId: string): Promise<string[]> {
+    const devices = await this.deviceRepository.find({
+      where: { userId, isActive: true },
+      select: { pushToken: true },
+    });
+    return devices.map((device) => device.pushToken);
+  }
+
+  /**
+   * FCM이 "등록되지 않은/무효" 토큰이라고 응답한 토큰들을 비활성화한다. 만료·삭제된
+   * 앱 설치가 계속 발송 대상에 남아 실패를 반복하는 것을 막는다(발송 후 정리).
+   */
+  async deactivateDeviceTokens(pushTokens: string[]): Promise<void> {
+    if (pushTokens.length === 0) {
+      return;
+    }
+    await this.deviceRepository.update({ pushToken: In(pushTokens) }, { isActive: false });
   }
 
   private async findActiveUser(userId: string): Promise<User> {
