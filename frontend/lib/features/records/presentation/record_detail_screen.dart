@@ -343,10 +343,13 @@ class _RecordDetailScreenState extends ConsumerState<RecordDetailScreen> {
         iconTheme: const IconThemeData(color: AppColors.ink900),
         actions: [
           if (state is _DetailLoaded) ...[
-            IconButton(
-              icon: const Icon(Icons.photo_library_outlined, color: AppColors.ink900),
-              onPressed: () => _openPhotoManage(state.record),
-            ),
+            // 사진관리 진입점은 평소엔 숨겨두고(이미지엔 "편집"만 보임), 편집
+            // 모드에 들어갔을 때만 드러낸다.
+            if (_editing)
+              IconButton(
+                icon: const Icon(Icons.photo_library_outlined, color: AppColors.ink900),
+                onPressed: () => _openPhotoManage(state.record),
+              ),
             TextButton(
               onPressed: () => setState(() => _editing = !_editing),
               child: Text(
@@ -458,24 +461,135 @@ class _RecordDiaryBody extends StatelessWidget {
           style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: AppColors.ink400),
         ),
         const SizedBox(height: 24),
-        for (final date in writtenDates) ...[
-          _DayEntryTile(
-            dayNumber: dates.indexOf(date) + 1,
-            date: date,
-            entry: entryByDate[date]!,
-            editing: editing,
-            onEdit: () => onEditDay(date, entryByDate[date]),
-            onDelete: () => onDeleteDay(date),
-          ),
-          const SizedBox(height: 28),
+        if (writtenDates.isEmpty) ...[
+          _AddFirstEntryCard(onTap: () => onAddDay(availableDates)),
+          const SizedBox(height: 90),
+          const Center(child: _EmptyDiaryState()),
+        ] else ...[
+          for (var i = 0; i < writtenDates.length; i++)
+            _DayEntryTile(
+              entry: entryByDate[writtenDates[i]]!,
+              editing: editing,
+              isLast: i == writtenDates.length - 1,
+              onEdit: () => onEditDay(writtenDates[i], entryByDate[writtenDates[i]]),
+              onDelete: () => onDeleteDay(writtenDates[i]),
+            ),
+          if (editing && availableDates.isNotEmpty) ...[
+            const SizedBox(height: 8),
+            AppButton(
+              label: '+ 날짜 추가',
+              variant: AppButtonVariant.outline,
+              height: 40,
+              onPressed: () => onAddDay(availableDates),
+            ),
+          ],
         ],
-        if (editing && availableDates.isNotEmpty)
-          AppButton(
-            label: '+ 날짜 추가',
-            variant: AppButtonVariant.outline,
-            height: 40,
-            onPressed: () => onAddDay(availableDates),
+      ],
+    );
+  }
+}
+
+/// 기록이 하나도 없을 때 항상 보이는 CTA — "편집" 모드로 들어가지 않아도 바로
+/// 첫 Day를 추가할 수 있게 한다(빈 상태에선 이게 유일한 다음 행동이라서).
+class _AddFirstEntryCard extends StatelessWidget {
+  const _AddFirstEntryCard({required this.onTap});
+
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return InkWell(
+      borderRadius: BorderRadius.circular(16),
+      onTap: onTap,
+      child: CustomPaint(
+        painter: const _DashedRRectPainter(color: AppColors.lime, radius: 16),
+        child: Container(
+          width: double.infinity,
+          padding: const EdgeInsets.all(16),
+          decoration: BoxDecoration(
+            color: AppColors.limeBg,
+            borderRadius: BorderRadius.circular(16),
           ),
+          child: Row(
+            children: [
+              Container(
+                width: 40,
+                height: 40,
+                alignment: Alignment.center,
+                decoration: const BoxDecoration(color: AppColors.lime, shape: BoxShape.circle),
+                child: const Icon(Icons.add, color: AppColors.onLime, size: 22),
+              ),
+              const SizedBox(width: 12),
+              const Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      '첫 기록 추가하기',
+                      style: TextStyle(fontSize: 14.5, fontWeight: FontWeight.w800, color: AppColors.ink900),
+                    ),
+                    SizedBox(height: 2),
+                    Text(
+                      '사진을 올리면 여기 리스트에 쌓여요',
+                      style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: AppColors.ink400),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _DashedRRectPainter extends CustomPainter {
+  const _DashedRRectPainter({required this.color, required this.radius});
+
+  final Color color;
+  final double radius;
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final rrect = RRect.fromRectAndRadius(Offset.zero & size, Radius.circular(radius));
+    final path = Path()..addRRect(rrect);
+    final paint = Paint()
+      ..color = color
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 1.4;
+
+    const dashWidth = 6.0;
+    const dashSpace = 4.0;
+    for (final metric in path.computeMetrics()) {
+      var distance = 0.0;
+      while (distance < metric.length) {
+        final next = distance + dashWidth;
+        canvas.drawPath(metric.extractPath(distance, next.clamp(0, metric.length)), paint);
+        distance = next + dashSpace;
+      }
+    }
+  }
+
+  @override
+  bool shouldRepaint(covariant _DashedRRectPainter oldDelegate) =>
+      oldDelegate.color != color || oldDelegate.radius != radius;
+}
+
+class _EmptyDiaryState extends StatelessWidget {
+  const _EmptyDiaryState();
+
+  @override
+  Widget build(BuildContext context) {
+    return const Column(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Icon(Icons.image_outlined, size: 44, color: AppColors.ink300),
+        SizedBox(height: 12),
+        Text(
+          '아직 등록된 기록이 없어요',
+          style: TextStyle(fontSize: 13.5, fontWeight: FontWeight.w600, color: AppColors.ink400),
+        ),
       ],
     );
   }
@@ -483,84 +597,149 @@ class _RecordDiaryBody extends StatelessWidget {
 
 class _DayEntryTile extends StatelessWidget {
   const _DayEntryTile({
-    required this.dayNumber,
-    required this.date,
     required this.entry,
     required this.editing,
+    required this.isLast,
     required this.onEdit,
     required this.onDelete,
   });
 
-  final int dayNumber;
-  final String date;
   final RecordDayEntry entry;
   final bool editing;
+  final bool isLast;
   final VoidCallback onEdit;
   final VoidCallback onDelete;
 
   @override
   Widget build(BuildContext context) {
-    final parsed = DateTime.parse(date);
-    final monthDay = '${parsed.month.toString().padLeft(2, '0')}.${parsed.day.toString().padLeft(2, '0')}';
-
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Row(
-          children: [
-            Container(
-              width: 8,
-              height: 8,
-              decoration: const BoxDecoration(color: AppColors.lime, shape: BoxShape.circle),
-            ),
-            const SizedBox(width: 8),
-            Text(
-              'Day $dayNumber · $monthDay',
-              style: const TextStyle(fontSize: 13.5, fontWeight: FontWeight.w800, color: AppColors.ink900),
-            ),
-            const Spacer(),
-            if (editing) ...[
-              IconButton(
-                icon: const Icon(Icons.edit_outlined, size: 18, color: AppColors.ink400),
-                visualDensity: VisualDensity.compact,
-                onPressed: onEdit,
+    return IntrinsicHeight(
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Column(
+            children: [
+              Container(
+                width: 8,
+                height: 8,
+                margin: const EdgeInsets.only(top: 6),
+                decoration: const BoxDecoration(color: AppColors.lime, shape: BoxShape.circle),
               ),
-              IconButton(
-                icon: const Icon(Icons.delete_outline, size: 18, color: AppColors.danger),
-                visualDensity: VisualDensity.compact,
-                onPressed: onDelete,
-              ),
+              if (!isLast)
+                Expanded(
+                  child: Container(
+                    width: 2,
+                    margin: const EdgeInsets.only(top: 4),
+                    color: AppColors.border,
+                  ),
+                ),
             ],
-          ],
-        ),
-        const SizedBox(height: 10),
-        if (entry.photo != null) ...[
-          AspectRatio(
-            aspectRatio: 4 / 3,
-            child: ClipRRect(
-              borderRadius: BorderRadius.circular(14),
-              child: Image.network(
-                entry.photo!.storageUrl,
-                fit: BoxFit.cover,
-                errorBuilder: (context, error, stackTrace) => Container(color: AppColors.surfaceSubtle),
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Padding(
+              padding: const EdgeInsets.only(bottom: 28),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  if (entry.photo != null) ...[
+                    AspectRatio(
+                      aspectRatio: 4 / 3,
+                      child: Stack(
+                        fit: StackFit.expand,
+                        children: [
+                          ClipRRect(
+                            borderRadius: BorderRadius.circular(14),
+                            child: Image.network(
+                              entry.photo!.storageUrl,
+                              fit: BoxFit.cover,
+                              errorBuilder: (context, error, stackTrace) =>
+                                  Container(color: AppColors.surfaceSubtle),
+                            ),
+                          ),
+                          // 사진마다 개별로 수정/삭제할 수 있게, 평소엔 숨겨두고
+                          // 편집 모드일 때만 사진 위에 작은 원형 아이콘으로 띄운다.
+                          if (editing)
+                            Positioned(
+                              top: 8,
+                              right: 8,
+                              child: Row(
+                                children: [
+                                  _PhotoIconButton(icon: Icons.edit_outlined, onTap: onEdit),
+                                  const SizedBox(width: 6),
+                                  _PhotoIconButton(
+                                    icon: Icons.delete_outline,
+                                    color: AppColors.danger,
+                                    onTap: onDelete,
+                                  ),
+                                ],
+                              ),
+                            ),
+                        ],
+                      ),
+                    ),
+                    const SizedBox(height: 12),
+                  ] else if (editing)
+                    Padding(
+                      padding: const EdgeInsets.only(bottom: 8),
+                      child: Row(
+                        children: [
+                          _PhotoIconButton(icon: Icons.edit_outlined, onTap: onEdit),
+                          const SizedBox(width: 6),
+                          _PhotoIconButton(
+                            icon: Icons.delete_outline,
+                            color: AppColors.danger,
+                            onTap: onDelete,
+                          ),
+                        ],
+                      ),
+                    ),
+                  if (entry.title?.isNotEmpty == true)
+                    Text(
+                      entry.title!,
+                      style: const TextStyle(fontSize: 15.5, fontWeight: FontWeight.w800, color: AppColors.ink900),
+                    ),
+                  if (entry.content?.isNotEmpty == true) ...[
+                    const SizedBox(height: 4),
+                    Text(
+                      entry.content!,
+                      style: const TextStyle(
+                        fontSize: 14,
+                        height: 1.5,
+                        fontWeight: FontWeight.w500,
+                        color: AppColors.ink600,
+                      ),
+                    ),
+                  ],
+                ],
               ),
             ),
           ),
-          const SizedBox(height: 12),
         ],
-        if (entry.title?.isNotEmpty == true)
-          Text(
-            entry.title!,
-            style: const TextStyle(fontSize: 15.5, fontWeight: FontWeight.w800, color: AppColors.ink900),
-          ),
-        if (entry.content?.isNotEmpty == true) ...[
-          const SizedBox(height: 4),
-          Text(
-            entry.content!,
-            style: const TextStyle(fontSize: 14, height: 1.5, fontWeight: FontWeight.w500, color: AppColors.ink600),
-          ),
-        ],
-      ],
+      ),
+    );
+  }
+}
+
+/// 편집 모드에서 사진 위/캡션 옆에 뜨는 작은 원형 아이콘 버튼(수정·삭제).
+class _PhotoIconButton extends StatelessWidget {
+  const _PhotoIconButton({required this.icon, required this.onTap, this.color = AppColors.ink900});
+
+  final IconData icon;
+  final VoidCallback onTap;
+  final Color color;
+
+  @override
+  Widget build(BuildContext context) {
+    return InkWell(
+      onTap: onTap,
+      customBorder: const CircleBorder(),
+      child: Container(
+        width: 30,
+        height: 30,
+        alignment: Alignment.center,
+        decoration: const BoxDecoration(color: Color(0xF2FFFFFF), shape: BoxShape.circle),
+        child: Icon(icon, size: 16, color: color),
+      ),
     );
   }
 }

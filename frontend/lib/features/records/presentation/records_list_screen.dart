@@ -4,11 +4,16 @@ import '../../../core/theme/app_colors.dart';
 import '../../../core/theme/app_gradients.dart';
 import '../../../core/utils/date_format.dart';
 import '../../../core/widgets/tab_header.dart';
+import '../../places/data/places_api.dart';
 import '../data/record_summary_models.dart';
 import 'record_detail_screen.dart';
 import 'record_trip_picker_screen.dart';
 import 'records_list_controller.dart';
 import 'records_list_state.dart';
+
+/// TourAPI 관광지(contentTypeId=12) 후보를 카드 대표 사진으로 우선 쓴다
+/// (schedule_trip_list_screen.dart의 _PlanningTripCard와 동일한 규칙).
+const _touristSpotContentTypeId = '12';
 
 /// "기록" 탭 콘텐츠(API 명세서 §5 GET /records) — 본인이 작성한 여행 기록 전체를
 /// 최신순으로 보여준다. AppShell의 IndexedStack 탭이라 화면이 계속 살아있으므로
@@ -134,13 +139,50 @@ class _RecordsListScreenState extends ConsumerState<RecordsListScreen> {
   }
 }
 
-class _RecordCard extends StatelessWidget {
+class _RecordCard extends ConsumerStatefulWidget {
   const _RecordCard({required this.record});
   final RecordListItemSummary record;
 
   @override
+  ConsumerState<_RecordCard> createState() => _RecordCardState();
+}
+
+class _RecordCardState extends ConsumerState<_RecordCard> {
+  String? _fallbackPhotoUrl;
+
+  @override
+  void initState() {
+    super.initState();
+    if (widget.record.coverPhotoUrl == null) _loadFallbackPhoto();
+  }
+
+  /// 대표 사진(coverPhotoUrl)을 사용자가 직접 고르지 않은 기록은, 스케줄 탭
+  /// 카드와 같은 규칙으로 그 여행 지역의 관광지 후보 사진을 대신 보여준다.
+  Future<void> _loadFallbackPhoto() async {
+    try {
+      final candidates = await ref
+          .read(placesApiProvider)
+          .getCandidates(widget.record.tripId);
+      final withImages = candidates
+          .where((c) => c.imageUrl != null && c.imageUrl!.isNotEmpty)
+          .toList()
+        ..sort((a, b) {
+          final aSpot = a.contentTypeId == _touristSpotContentTypeId ? 0 : 1;
+          final bSpot = b.contentTypeId == _touristSpotContentTypeId ? 0 : 1;
+          return aSpot.compareTo(bSpot);
+        });
+      if (!mounted || withImages.isEmpty) return;
+      setState(() => _fallbackPhotoUrl = withImages.first.imageUrl);
+    } catch (_) {
+      // 대표 사진은 있으면 좋은 정도라, 후보 조회 실패는 카드 표시를 막지 않는다.
+    }
+  }
+
+  @override
   Widget build(BuildContext context) {
+    final record = widget.record;
     final isDraft = record.status == 'draft';
+    final photoUrl = record.coverPhotoUrl ?? _fallbackPhotoUrl;
     return InkWell(
       borderRadius: BorderRadius.circular(20),
       onTap: () {
@@ -152,16 +194,16 @@ class _RecordCard extends StatelessWidget {
         height: 110,
         decoration: BoxDecoration(
           borderRadius: BorderRadius.circular(20),
-          gradient: record.coverPhotoUrl == null ? AppGradients.forKey(record.id) : null,
+          gradient: photoUrl == null ? AppGradients.forKey(record.id) : null,
           color: AppColors.surfaceSubtle,
         ),
         clipBehavior: Clip.antiAlias,
         child: Stack(
           fit: StackFit.expand,
           children: [
-            if (record.coverPhotoUrl != null)
+            if (photoUrl != null)
               Image.network(
-                record.coverPhotoUrl!,
+                photoUrl,
                 fit: BoxFit.cover,
                 errorBuilder: (context, error, stackTrace) => Container(
                   decoration: BoxDecoration(gradient: AppGradients.forKey(record.id)),
