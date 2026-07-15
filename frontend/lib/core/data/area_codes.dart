@@ -18,12 +18,29 @@ class SigunguEntry {
 
   final String areaCode;
   final String areaName;
-  final String sigunguCode;
+  final String? sigunguCode;
   final String sigunguName;
 
-  /// 검색용 표시 라벨. 예) '부산 해운대구'.
-  String get label => "$areaName $sigunguName";
+  bool get isWholeArea => sigunguCode == null;
+
+  /// 검색용 표시 라벨. 예) '부산 해운대구', 광역시 전체 선택은 '부산'.
+  String get label => isWholeArea ? areaName : "$areaName $sigunguName";
 }
+
+const List<SigunguEntry> koreaAreaLevelList = [
+  SigunguEntry(areaCode: '1', areaName: '서울', sigunguCode: null, sigunguName: '전체'),
+  SigunguEntry(areaCode: '2', areaName: '인천', sigunguCode: null, sigunguName: '전체'),
+  SigunguEntry(areaCode: '3', areaName: '대전', sigunguCode: null, sigunguName: '전체'),
+  SigunguEntry(areaCode: '4', areaName: '대구', sigunguCode: null, sigunguName: '전체'),
+  SigunguEntry(areaCode: '5', areaName: '광주', sigunguCode: null, sigunguName: '전체'),
+  SigunguEntry(areaCode: '6', areaName: '부산', sigunguCode: null, sigunguName: '전체'),
+  SigunguEntry(areaCode: '7', areaName: '울산', sigunguCode: null, sigunguName: '전체'),
+];
+
+const List<SigunguEntry> koreaAreaSelectionList = [
+  ...koreaAreaLevelList,
+  ...koreaSigunguList,
+];
 
 const List<SigunguEntry> koreaSigunguList = [
   SigunguEntry(areaCode: '1', areaName: '서울', sigunguCode: '1', sigunguName: '강남구'),

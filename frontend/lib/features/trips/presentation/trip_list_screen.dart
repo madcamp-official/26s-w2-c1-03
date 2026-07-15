@@ -171,7 +171,7 @@ class _TripListBody extends StatelessWidget {
                     height: 148,
                     child: ListView.separated(
                       scrollDirection: Axis.horizontal,
-                      clipBehavior: Clip.none,
+                      clipBehavior: Clip.hardEdge,
                       itemCount: completedTrips.length,
                       separatorBuilder: (context, index) =>
                           const SizedBox(width: 14),
@@ -228,6 +228,7 @@ class _HomeSection extends StatelessWidget {
       child: Container(
         width: double.infinity,
         padding: const EdgeInsets.fromLTRB(18, 18, 18, 20),
+        clipBehavior: Clip.antiAlias,
         decoration: BoxDecoration(
           color: Colors.white,
           borderRadius: BorderRadius.circular(24),
@@ -638,7 +639,7 @@ class _RecommendedDestinationsSection extends ConsumerWidget {
           height: 148,
           child: ListView.separated(
             scrollDirection: Axis.horizontal,
-            clipBehavior: Clip.none,
+            clipBehavior: Clip.hardEdge,
             itemCount: itemCount,
             separatorBuilder: (context, index) => const SizedBox(width: 14),
             itemBuilder: (context, index) => isLoading

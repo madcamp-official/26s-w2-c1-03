@@ -2,11 +2,9 @@ import 'package:flutter/material.dart';
 import '../../../core/data/area_codes.dart';
 import '../../../core/theme/app_colors.dart';
 
-/// 시/군/구 234개(§core/data/area_codes.dart) 중 검색해서 하나를 고르는 바텀시트.
+/// 광역시 전체 또는 시/군/구(§core/data/area_codes.dart) 중 검색해서 하나를 고르는 바텀시트.
 /// design.md 시안 `3b`의 "도시 검색" 입력을 대체한다 — 자유 텍스트 대신 TourAPI
-/// 지역코드에 곧바로 매핑되는 고정 목록에서 고르게 해서, 매칭 실패(오타, "부산" vs
-/// "부산광역시" 같은 표기 차이) 문제 자체가 생기지 않게 한다. 국내 여행 전용
-/// 결정(plan.md §16)에 맞춰 목록도 국내 234개뿐이다.
+/// 지역코드에 곧바로 매핑되는 고정 목록에서 고르게 해서, 매칭 실패를 줄인다.
 Future<SigunguEntry?> showCitySearchSheet(BuildContext context) {
   return showModalBottomSheet<SigunguEntry>(
     context: context,
@@ -28,7 +26,7 @@ class _CitySearchSheet extends StatefulWidget {
 
 class _CitySearchSheetState extends State<_CitySearchSheet> {
   final _controller = TextEditingController();
-  List<SigunguEntry> _results = koreaSigunguList;
+  List<SigunguEntry> _results = koreaAreaSelectionList;
 
   @override
   void dispose() {
@@ -40,8 +38,15 @@ class _CitySearchSheetState extends State<_CitySearchSheet> {
     final trimmed = query.trim();
     setState(() {
       _results = trimmed.isEmpty
-          ? koreaSigunguList
-          : koreaSigunguList.where((e) => e.label.contains(trimmed)).toList();
+          ? koreaAreaSelectionList
+          : koreaAreaSelectionList
+                .where(
+                  (e) =>
+                      e.label.contains(trimmed) ||
+                      e.areaName.contains(trimmed) ||
+                      e.sigunguName.contains(trimmed),
+                )
+                .toList();
     });
   }
 
@@ -104,7 +109,7 @@ class _CitySearchSheetState extends State<_CitySearchSheet> {
                             child: Row(
                               children: [
                                 Text(
-                                  entry.sigunguName,
+                                  entry.isWholeArea ? entry.areaName : entry.sigunguName,
                                   style: const TextStyle(
                                     fontSize: 15,
                                     fontWeight: FontWeight.w700,
@@ -113,7 +118,7 @@ class _CitySearchSheetState extends State<_CitySearchSheet> {
                                 ),
                                 const SizedBox(width: 8),
                                 Text(
-                                  entry.areaName,
+                                  entry.isWholeArea ? '전체 지역' : entry.areaName,
                                   style: const TextStyle(
                                     fontSize: 12.5,
                                     fontWeight: FontWeight.w600,
