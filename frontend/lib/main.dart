@@ -16,7 +16,12 @@ import 'features/trips/presentation/join_trip_screen.dart';
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
   await _initializeFirebase();
-  KakaoSdk.init(nativeAppKey: AppConfig.kakaoNativeAppKey);
+  KakaoSdk.init(
+    nativeAppKey: AppConfig.kakaoNativeAppKey,
+    javaScriptAppKey: AppConfig.kakaoJavaScriptAppKey.isEmpty
+        ? null
+        : AppConfig.kakaoJavaScriptAppKey,
+  );
   // 초대 딥링크(plan.md Phase 10). 토큰이 와도 세션 준비(AppShell 진입) 전까지는
   // 핸들러가 보관만 하므로 로그인 흐름을 방해하지 않는다.
   unawaited(
@@ -120,7 +125,9 @@ class _StartupGateState extends ConsumerState<_StartupGate> {
       future: _resolved,
       builder: (context, snapshot) {
         if (snapshot.connectionState != ConnectionState.done) {
-          return const Scaffold(body: Center(child: CircularProgressIndicator()));
+          return const Scaffold(
+            body: Center(child: CircularProgressIndicator()),
+          );
         }
         return snapshot.data ?? const LoginScreen();
       },

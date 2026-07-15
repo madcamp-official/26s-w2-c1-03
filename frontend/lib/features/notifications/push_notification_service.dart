@@ -8,7 +8,10 @@ sealed class DeviceRegistration {
 }
 
 class DeviceRegistrationAvailable extends DeviceRegistration {
-  const DeviceRegistrationAvailable({required this.pushToken, required this.platform});
+  const DeviceRegistrationAvailable({
+    required this.pushToken,
+    required this.platform,
+  });
   final String pushToken;
   final String platform;
 }
@@ -55,7 +58,10 @@ class PushNotificationService {
   /// 권한 거부, FCM 토큰 발급 실패, 네트워크 오류 등 어떤 이유로 실패하든 로그인/앱
   /// 시작 흐름 자체를 막으면 안 되므로 예외를 전부 삼킨다 — 실패해도 다음 세션
   /// 확립 시점에 다시 시도된다.
-  Future<void> syncDevice({required UsersApi usersApi, required TokenStorage tokenStorage}) async {
+  Future<void> syncDevice({
+    required UsersApi usersApi,
+    required TokenStorage tokenStorage,
+  }) async {
     try {
       final registration = await requestPermissionAndGetToken();
       if (registration is! DeviceRegistrationAvailable) {

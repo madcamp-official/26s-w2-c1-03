@@ -1,4 +1,5 @@
 import 'package:flutter/services.dart' show PlatformException;
+import 'package:flutter/foundation.dart';
 import 'package:google_sign_in/google_sign_in.dart';
 import '../../core/config/app_config.dart';
 import 'provider_token_result.dart';
@@ -13,6 +14,7 @@ import 'provider_token_result.dart';
 class GoogleLoginService {
   GoogleLoginService()
     : _googleSignIn = GoogleSignIn(
+        clientId: kIsWeb ? AppConfig.googleWebClientId : null,
         serverClientId: AppConfig.googleServerClientId,
         scopes: const ['email'],
       );
