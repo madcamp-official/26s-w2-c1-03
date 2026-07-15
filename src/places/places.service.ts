@@ -8,10 +8,7 @@ import {
   GoogleReview,
   PlacePopularity,
 } from './clients/google-places.client';
-import {
-  normalizePlaceName,
-  TatsCnctrRateClient,
-} from './clients/tats-cnctr-rate.client';
+import { normalizePlaceName, TatsCnctrRateClient } from './clients/tats-cnctr-rate.client';
 import { TourApiClient, TourApiPlaceItem } from './clients/tour-api.client';
 import { ListCandidatesQueryDto, PlaceCategory } from './dto/list-candidates-query.dto';
 import { Place, PlaceSource } from './entities/place.entity';
@@ -132,6 +129,38 @@ const UNCATEGORIZED_FETCH_CATEGORIES: readonly PlaceCategory[] = [
 
 /** 맛집/카페 카테고리 요청 시 음식점(39)을 넉넉히 받아 cat3로 걸러낸다(필터링 후에도 후보가 부족하지 않게). */
 const CATEGORY_FOOD_FETCH_ROWS = 60;
+
+interface CoordinateBounds {
+  minLat: number;
+  maxLat: number;
+  minLng: number;
+  maxLng: number;
+}
+
+/**
+ * TourAPI 지역 코드별 대략적인 시/도 좌표 범위. 외부 API가 간혹 요청 지역과 다른
+ * 좌표를 가진 항목을 섞어 내려주는 경우가 있어, 지도 마커에 올리기 전 1차 방어선으로
+ * 쓴다. 경계 근처 관광지를 과하게 버리지 않도록 실제 행정 경계보다 약간 넓게 잡았다.
+ */
+const AREA_COORDINATE_BOUNDS: Record<string, CoordinateBounds> = {
+  '1': { minLat: 37.4, maxLat: 37.72, minLng: 126.73, maxLng: 127.27 },
+  '2': { minLat: 37.0, maxLat: 38.0, minLng: 124.5, maxLng: 127.0 },
+  '3': { minLat: 36.15, maxLat: 36.55, minLng: 127.2, maxLng: 127.55 },
+  '4': { minLat: 35.6, maxLat: 36.1, minLng: 128.35, maxLng: 128.85 },
+  '5': { minLat: 35.0, maxLat: 35.3, minLng: 126.65, maxLng: 127.0 },
+  '6': { minLat: 34.85, maxLat: 35.45, minLng: 128.75, maxLng: 129.35 },
+  '7': { minLat: 35.3, maxLat: 35.75, minLng: 129.0, maxLng: 129.55 },
+  '8': { minLat: 36.4, maxLat: 36.75, minLng: 127.1, maxLng: 127.4 },
+  '31': { minLat: 36.85, maxLat: 38.35, minLng: 126.35, maxLng: 127.85 },
+  '32': { minLat: 37.0, maxLat: 38.65, minLng: 127.0, maxLng: 129.4 },
+  '33': { minLat: 36.0, maxLat: 37.35, minLng: 127.25, maxLng: 128.75 },
+  '34': { minLat: 35.95, maxLat: 37.1, minLng: 125.9, maxLng: 127.65 },
+  '35': { minLat: 35.55, maxLat: 37.6, minLng: 128.0, maxLng: 130.0 },
+  '36': { minLat: 34.55, maxLat: 35.9, minLng: 127.5, maxLng: 129.3 },
+  '37': { minLat: 35.25, maxLat: 36.2, minLng: 126.4, maxLng: 127.9 },
+  '38': { minLat: 33.9, maxLat: 35.5, minLng: 125.0, maxLng: 127.9 },
+  '39': { minLat: 33.0, maxLat: 34.0, minLng: 126.0, maxLng: 127.1 },
+};
 
 @Injectable()
 export class PlacesService {
@@ -274,7 +303,9 @@ export class PlacesService {
 
     // 같은 contentId가 여러 카테고리에 중복으로 내려올 수 있어 먼저 나온 것을 유지한다.
     const byContentId = new Map<string, TourApiPlaceItem>();
-    for (const item of results.flat()) {
+    for (const item of results
+      .flat()
+      .filter((item) => this.isTourApiItemInRegion(item, areaCode, sigunguCode))) {
       if (!byContentId.has(item.contentId)) {
         byContentId.set(item.contentId, item);
       }
@@ -304,7 +335,11 @@ export class PlacesService {
         ),
       );
       // 음식점(39)과 쇼핑/관광이 겹칠 일은 없지만 방어적으로 중복 제거한다.
-      return this.dedupePlaces([...spots, ...foods, ...shops]);
+      return this.filterPlacesInRegion(
+        this.dedupePlaces([...spots, ...foods, ...shops]),
+        areaCode,
+        sigunguCode,
+      );
     }
 
     if (category === 'restaurant' || category === 'cafe') {
@@ -315,15 +350,20 @@ export class PlacesService {
         CATEGORY_FOOD_FETCH_ROWS,
       );
       const wantCafe = category === 'cafe';
-      return foods.filter((place) => (place.categoryCode === CAT3_CAFE) === wantCafe);
+      return this.filterPlacesInRegion(
+        foods.filter((place) => (place.categoryCode === CAT3_CAFE) === wantCafe),
+        areaCode,
+        sigunguCode,
+      );
     }
 
-    return this.queryByContentType(
+    const places = await this.queryByContentType(
       areaCode,
       sigunguCode,
       CATEGORY_TO_CONTENT_TYPE_ID[category],
       PlacesService.SINGLE_CATEGORY_LIMIT,
     );
+    return this.filterPlacesInRegion(places, areaCode, sigunguCode);
   }
 
   /** 한 contentTypeId의 지역 후보를 최신 동기화순으로 상한만큼 읽는다((areaCode, sigunguCode) 인덱스 활용). */
@@ -353,6 +393,56 @@ export class PlacesService {
       }
     }
     return [...byId.values()];
+  }
+
+  private filterPlacesInRegion(places: Place[], areaCode: string, sigunguCode?: string): Place[] {
+    return places.filter((place) => this.isCachedPlaceInRegion(place, areaCode, sigunguCode));
+  }
+
+  private isTourApiItemInRegion(
+    item: TourApiPlaceItem,
+    areaCode: string,
+    sigunguCode?: string,
+  ): boolean {
+    if (item.areaCode !== areaCode) {
+      return false;
+    }
+    if (sigunguCode && item.sigunguCode && item.sigunguCode !== sigunguCode) {
+      return false;
+    }
+    return this.isCoordinateInAreaBounds(item.mapY, item.mapX, areaCode);
+  }
+
+  private isCachedPlaceInRegion(place: Place, areaCode: string, sigunguCode?: string): boolean {
+    if (place.areaCode !== areaCode) {
+      return false;
+    }
+    if (sigunguCode && place.sigunguCode && place.sigunguCode !== sigunguCode) {
+      return false;
+    }
+    return this.isCoordinateInAreaBounds(place.latitude, place.longitude, areaCode);
+  }
+
+  private isCoordinateInAreaBounds(
+    rawLat: string | number | null,
+    rawLng: string | number | null,
+    areaCode: string,
+  ): boolean {
+    if (rawLat === null || rawLng === null) {
+      return true;
+    }
+    const lat = Number(rawLat);
+    const lng = Number(rawLng);
+    if (!Number.isFinite(lat) || !Number.isFinite(lng)) {
+      return false;
+    }
+    const bounds = AREA_COORDINATE_BOUNDS[areaCode];
+    if (!bounds) {
+      return true;
+    }
+    return (
+      lat >= bounds.minLat && lat <= bounds.maxLat && lng >= bounds.minLng && lng <= bounds.maxLng
+    );
   }
 
   /**
@@ -397,9 +487,10 @@ export class PlacesService {
    */
   private resolveConcentrationBaseYmd(tripStartDate: string): string {
     const toYmd = (d: Date): string =>
-      `${d.getFullYear()}${String(d.getMonth() + 1).padStart(2, '0')}${String(
-        d.getDate(),
-      ).padStart(2, '0')}`;
+      `${d.getFullYear()}${String(d.getMonth() + 1).padStart(2, '0')}${String(d.getDate()).padStart(
+        2,
+        '0',
+      )}`;
 
     const today = new Date();
     const todayYmd = toYmd(today);
@@ -430,7 +521,12 @@ export class PlacesService {
       return [];
     }
 
-    const spots = await this.queryByContentType(areaCode, sigunguCode, CONTENT_TYPE_TOURIST_SPOT, limit);
+    const spots = await this.queryByContentType(
+      areaCode,
+      sigunguCode,
+      CONTENT_TYPE_TOURIST_SPOT,
+      limit,
+    );
     if (spots.length === 0) {
       return [];
     }
@@ -442,7 +538,7 @@ export class PlacesService {
     );
     return spots.map((place) => ({
       place,
-      rate: place.name ? concentrationMap.get(normalizePlaceName(place.name)) ?? null : null,
+      rate: place.name ? (concentrationMap.get(normalizePlaceName(place.name)) ?? null) : null,
     }));
   }
 
@@ -572,13 +668,12 @@ export class PlacesService {
     const withRate = places.map((place) => ({
       place,
       concentrationRate: place.name
-        ? concentrationMap.get(normalizePlaceName(place.name)) ?? null
+        ? (concentrationMap.get(normalizePlaceName(place.name)) ?? null)
         : null,
     }));
     withRate.sort(
       (a, b) =>
-        this.concentrationScore(b.concentrationRate) -
-        this.concentrationScore(a.concentrationRate),
+        this.concentrationScore(b.concentrationRate) - this.concentrationScore(a.concentrationRate),
     );
 
     return withRate.map(({ place, concentrationRate }) =>
@@ -786,7 +881,9 @@ export class PlacesService {
       const reviews = await this.googlePlacesClient.getPlaceReviews(googlePlaceId);
       return reviews.map((r) => this.toReviewDto(r));
     } catch (error) {
-      this.logger.warn(`Google 리뷰 조회 실패(placeId=${googlePlaceId}): ${(error as Error).message}`);
+      this.logger.warn(
+        `Google 리뷰 조회 실패(placeId=${googlePlaceId}): ${(error as Error).message}`,
+      );
       return [];
     }
   }

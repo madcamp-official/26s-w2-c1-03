@@ -53,7 +53,9 @@ class _CitySearchSheetState extends State<_CitySearchSheet> {
   @override
   Widget build(BuildContext context) {
     return Padding(
-      padding: EdgeInsets.only(bottom: MediaQuery.of(context).viewInsets.bottom),
+      padding: EdgeInsets.only(
+        bottom: MediaQuery.of(context).viewInsets.bottom,
+      ),
       child: SizedBox(
         height: MediaQuery.of(context).size.height * 0.75,
         child: Column(
@@ -75,8 +77,15 @@ class _CitySearchSheetState extends State<_CitySearchSheet> {
                 onChanged: _onChanged,
                 decoration: InputDecoration(
                   hintText: '시/군/구 검색 · 예) 강릉, 해운대구',
-                  hintStyle: const TextStyle(color: AppColors.ink400, fontWeight: FontWeight.w600),
-                  prefixIcon: const Icon(Icons.search, color: AppColors.ink400, size: 20),
+                  hintStyle: const TextStyle(
+                    color: AppColors.ink400,
+                    fontWeight: FontWeight.w600,
+                  ),
+                  prefixIcon: const Icon(
+                    Icons.search,
+                    color: AppColors.ink400,
+                    size: 20,
+                  ),
                   filled: true,
                   fillColor: AppColors.surfaceSubtle,
                   border: OutlineInputBorder(
@@ -91,7 +100,10 @@ class _CitySearchSheetState extends State<_CitySearchSheet> {
                   ? const Center(
                       child: Text(
                         '검색 결과가 없어',
-                        style: TextStyle(color: AppColors.ink400, fontWeight: FontWeight.w600),
+                        style: TextStyle(
+                          color: AppColors.ink400,
+                          fontWeight: FontWeight.w600,
+                        ),
                       ),
                     )
                   : ListView.builder(
@@ -104,12 +116,19 @@ class _CitySearchSheetState extends State<_CitySearchSheet> {
                           child: Container(
                             padding: const EdgeInsets.symmetric(vertical: 13),
                             decoration: const BoxDecoration(
-                              border: Border(bottom: BorderSide(color: AppColors.border, width: 1)),
+                              border: Border(
+                                bottom: BorderSide(
+                                  color: AppColors.border,
+                                  width: 1,
+                                ),
+                              ),
                             ),
                             child: Row(
                               children: [
                                 Text(
-                                  entry.isWholeArea ? entry.areaName : entry.sigunguName,
+                                  entry.isWholeArea
+                                      ? entry.areaName
+                                      : entry.sigunguName,
                                   style: const TextStyle(
                                     fontSize: 15,
                                     fontWeight: FontWeight.w700,
