@@ -45,4 +45,21 @@ class AppConfig {
     'KAKAO_NATIVE_APP_KEY',
     defaultValue: 'ad103f738ca5b988358a62e5e15c8bed',
   );
+
+  /// Firebase Web은 Android/iOS처럼 google-services.json /
+  /// GoogleService-Info.plist를 자동으로 읽지 못한다. 웹에서 Firebase 기능을
+  /// 쓰려면 Firebase Console의 Web app 설정값을 --dart-define으로 주입한다.
+  static const String firebaseWebApiKey = String.fromEnvironment('FIREBASE_WEB_API_KEY');
+  static const String firebaseWebAuthDomain = String.fromEnvironment('FIREBASE_WEB_AUTH_DOMAIN');
+  static const String firebaseWebProjectId = String.fromEnvironment('FIREBASE_WEB_PROJECT_ID');
+  static const String firebaseWebStorageBucket = String.fromEnvironment('FIREBASE_WEB_STORAGE_BUCKET');
+  static const String firebaseWebMessagingSenderId = String.fromEnvironment('FIREBASE_WEB_MESSAGING_SENDER_ID');
+  static const String firebaseWebAppId = String.fromEnvironment('FIREBASE_WEB_APP_ID');
+
+  static bool get hasFirebaseWebOptions =>
+      firebaseWebApiKey.isNotEmpty &&
+      firebaseWebProjectId.isNotEmpty &&
+      firebaseWebStorageBucket.isNotEmpty &&
+      firebaseWebMessagingSenderId.isNotEmpty &&
+      firebaseWebAppId.isNotEmpty;
 }

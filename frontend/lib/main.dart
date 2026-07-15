@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:firebase_core/firebase_core.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:kakao_flutter_sdk_user/kakao_flutter_sdk_user.dart';
@@ -14,10 +15,7 @@ import 'features/trips/presentation/join_trip_screen.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
-  // firebase_options.dart 없이 초기화 — android/app/google-services.json,
-  // ios/Runner/GoogleService-Info.plist를 네이티브 빌드가 읽어서 자동으로 설정을 채운다
-  // (FlutterFire CLI로 만드는 DefaultFirebaseOptions와 동일한 값을 얻는 또 다른 방법).
-  await Firebase.initializeApp();
+  await _initializeFirebase();
   KakaoSdk.init(nativeAppKey: AppConfig.kakaoNativeAppKey);
   // 초대 딥링크(plan.md Phase 10). 토큰이 와도 세션 준비(AppShell 진입) 전까지는
   // 핸들러가 보관만 하므로 로그인 흐름을 방해하지 않는다.
@@ -29,6 +27,30 @@ void main() async {
     ),
   );
   runApp(const ProviderScope(child: TripAndEndApp()));
+}
+
+Future<void> _initializeFirebase() async {
+  if (kIsWeb) {
+    if (!AppConfig.hasFirebaseWebOptions) {
+      return;
+    }
+    await Firebase.initializeApp(
+      options: const FirebaseOptions(
+        apiKey: AppConfig.firebaseWebApiKey,
+        authDomain: AppConfig.firebaseWebAuthDomain,
+        projectId: AppConfig.firebaseWebProjectId,
+        storageBucket: AppConfig.firebaseWebStorageBucket,
+        messagingSenderId: AppConfig.firebaseWebMessagingSenderId,
+        appId: AppConfig.firebaseWebAppId,
+      ),
+    );
+    return;
+  }
+
+  // firebase_options.dart 없이 초기화 — android/app/google-services.json,
+  // ios/Runner/GoogleService-Info.plist를 네이티브 빌드가 읽어서 자동으로 설정을 채운다
+  // (FlutterFire CLI로 만드는 DefaultFirebaseOptions와 동일한 값을 얻는 또 다른 방법).
+  await Firebase.initializeApp();
 }
 
 class TripAndEndApp extends StatelessWidget {

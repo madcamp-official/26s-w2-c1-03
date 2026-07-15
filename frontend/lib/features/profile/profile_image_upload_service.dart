@@ -1,5 +1,3 @@
-import 'dart:io';
-
 import 'package:firebase_storage/firebase_storage.dart';
 import 'package:image_picker/image_picker.dart';
 
@@ -58,8 +56,8 @@ class ProfileImageUploadService {
       final ref = _storage.ref(
         'profile-images/$userId/${DateTime.now().millisecondsSinceEpoch}$extension',
       );
-      await ref.putFile(
-        File(picked.path),
+      await ref.putData(
+        await picked.readAsBytes(),
         SettableMetadata(contentType: picked.mimeType ?? 'image/jpeg'),
       );
       final url = await ref.getDownloadURL();
