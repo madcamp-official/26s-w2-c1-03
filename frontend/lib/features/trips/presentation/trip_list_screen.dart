@@ -196,29 +196,50 @@ class _TripListBody extends StatelessWidget {
     return RefreshIndicator(
       onRefresh: onRefresh,
       color: AppColors.ink900,
+      // 가로 패딩을 ListView 전체가 아니라 섹션마다 각자 주는 이유 — 섹션 사이의
+      // 구분 바(_SectionDivider)는 화면 끝까지 꽉 채워야(full-bleed) 해서, 그
+      // 바만 패딩 밖에 있어야 한다.
       child: ListView(
-        padding: const EdgeInsets.fromLTRB(22, 20, 22, 120),
+        padding: const EdgeInsets.only(top: 20, bottom: 120),
         children: [
           if (upcoming != null) ...[
-            _DdayHeroCard(trip: upcoming),
-            const SizedBox(height: 28),
-          ],
-          const _RecommendedDestinationsSection(),
-          const SizedBox(height: 28),
-          if (completedTrips.isNotEmpty) ...[
-            const Text(
-              '지난 여행 기록',
-              style: TextStyle(fontSize: 17, fontWeight: FontWeight.w800, color: AppColors.ink900),
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 22),
+              child: _DdayHeroCard(trip: upcoming),
             ),
-            const SizedBox(height: 14),
-            SizedBox(
-              height: 148,
-              child: ListView.separated(
-                scrollDirection: Axis.horizontal,
-                clipBehavior: Clip.none,
-                itemCount: completedTrips.length,
-                separatorBuilder: (context, index) => const SizedBox(width: 14),
-                itemBuilder: (context, index) => _TripCard(trip: completedTrips[index]),
+            const SizedBox(height: 24),
+            const _SectionDivider(),
+            const SizedBox(height: 24),
+          ],
+          const Padding(
+            padding: EdgeInsets.symmetric(horizontal: 22),
+            child: _RecommendedDestinationsSection(),
+          ),
+          if (completedTrips.isNotEmpty) ...[
+            const SizedBox(height: 24),
+            const _SectionDivider(),
+            const SizedBox(height: 24),
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 22),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Text(
+                    '지난 여행 기록',
+                    style: TextStyle(fontSize: 17, fontWeight: FontWeight.w800, color: AppColors.ink900),
+                  ),
+                  const SizedBox(height: 14),
+                  SizedBox(
+                    height: 148,
+                    child: ListView.separated(
+                      scrollDirection: Axis.horizontal,
+                      clipBehavior: Clip.none,
+                      itemCount: completedTrips.length,
+                      separatorBuilder: (context, index) => const SizedBox(width: 14),
+                      itemBuilder: (context, index) => _TripCard(trip: completedTrips[index]),
+                    ),
+                  ),
+                ],
               ),
             ),
           ],
@@ -247,6 +268,19 @@ class _TripListBody extends StatelessWidget {
       }
     }
     return best;
+  }
+}
+
+/// 콘텐츠 섹션 사이를 화면 끝까지 꽉 채운 옅은 회색 바로 나눈다(내용별 구분
+/// 요청 참고 — D-day 카드 / "다음엔 여기 어때?" / 지난 여행 기록 세 구간을
+/// 시각적으로 분리). 부모(ListView)가 가로 패딩을 안 주기 때문에 이 위젯만
+/// 화면 폭 전체를 그대로 차지한다.
+class _SectionDivider extends StatelessWidget {
+  const _SectionDivider();
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(height: 10, width: double.infinity, color: AppColors.canvas);
   }
 }
 
