@@ -85,6 +85,16 @@ export interface ScheduleCandidatePoolLimits {
   cafes: number;
 }
 
+/**
+ * 지역 대표 하이라이트 — destinations 도메인("다음엔 여기 어때?" 추천)이 소비한다.
+ * score는 오늘 기준 관광지 집중률 평균(0~100, 데이터 없으면 0), imageUrl은 대표
+ * 관광지 사진(TourAPI 캐시, 없으면 null → FE가 그라디언트 플레이스홀더로 대체).
+ */
+export interface AreaHighlight {
+  score: number;
+  imageUrl: string | null;
+}
+
 /** TourAPI contentTypeId — 맛집/카페는 TourAPI에 별도 contentTypeId가 없어 둘 다 39다. */
 const CATEGORY_TO_CONTENT_TYPE_ID: Record<PlaceCategory, string> = {
   tourist_spot: '12',
@@ -392,6 +402,55 @@ export class PlacesService {
 
     const tripYmd = tripStartDate.replace(/-/g, '');
     return tripYmd >= todayYmd && tripYmd <= maxYmd ? tripYmd : todayYmd;
+  }
+
+  /**
+   * 지역 대표 "하이라이트"(오늘 기준 관광지 집중률 평균 + 대표 이미지) — destinations
+   * 도메인(홈 화면 "다음엔 여기 어때?" 추천)이 재사용하는 진입점. Repository를 직접
+   * 건드리지 않고 이 메서드로만 places 데이터에 접근한다(§3.1). getCandidates와 같은
+   * 지역 캐시(ensureAreaSynced/TTL 7일)를 재사용하므로 반복 호출 시 대부분 DB만 읽는다.
+   */
+  async getAreaHighlight(areaCode: string, sigunguCode: string): Promise<AreaHighlight> {
+    const empty: AreaHighlight = { score: 0, imageUrl: null };
+    try {
+      await this.ensureAreaSynced(areaCode, sigunguCode);
+    } catch (error) {
+      this.logger.warn(
+        `지역 하이라이트 조회 실패(area=${areaCode}, sigungu=${sigunguCode}): ${(error as Error).message}`,
+      );
+      return empty;
+    }
+
+    const spots = await this.queryByContentType(areaCode, sigunguCode, CONTENT_TYPE_TOURIST_SPOT, 10);
+    if (spots.length === 0) {
+      return empty;
+    }
+
+    const concentrationMap = await this.safeFetchConcentration(
+      areaCode,
+      sigunguCode,
+      PlacesService.todayDateString(),
+    );
+    const scored = spots.map((place) => ({
+      place,
+      rate: place.name ? concentrationMap.get(normalizePlaceName(place.name)) ?? null : null,
+    }));
+
+    const matched = scored.filter((s): s is { place: Place; rate: number } => s.rate !== null);
+    const score =
+      matched.length > 0 ? matched.reduce((sum, s) => sum + s.rate, 0) / matched.length : 0;
+
+    // 대표 이미지 — 집중률 높은 순으로 훑어 이미지가 있는 첫 장소를 쓴다(가장 눈에 띄는 관광지 우선).
+    const withImage = [...scored]
+      .sort((a, b) => (b.rate ?? -1) - (a.rate ?? -1))
+      .find((s) => s.place.imageUrl);
+
+    return { score, imageUrl: withImage?.place.imageUrl ?? null };
+  }
+
+  private static todayDateString(): string {
+    const d = new Date();
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
   }
 
   /**
