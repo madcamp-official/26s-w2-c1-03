@@ -384,6 +384,15 @@ erDiagram
 - **선행 Phase**: Phase 5
 - **산출물**: `trips/` 모듈(Trip CRUD 부분)
 
+#### 부록 — 홈 화면 "다음엔 여기 어때?" 추천 ✅ 신규 완료 (2026-07-15, 원 계획에 없던 기능)
+- **배경**: 홈 화면(`trip_list_screen.dart`)의 "다음엔 여기 어때?" 섹션이 정적 더미(강릉/여수/경주 하드코딩)였던 것을 실제 추천 기능으로 완성.
+- **알고리즘(규칙 기반, `destinations/destinations.service.ts`)**: 큐레이션된 인기 국내 시군구 20곳(`curated-destinations.data.ts`)을 대상으로 (1) 오늘 기준 TourAPI 관광지 집중률 평균(핵심 인기 신호, `PlacesService.getAreaHighlight`가 Phase 7 지역 캐시를 재사용) + (2) 계절 적합도(`bestSeasons` 겹치면 가산점) + (3) 날짜 기반 해시 타이브레이커(매일 살짝 순서 회전)로 점수를 매기고, `TripsService.findVisitedAreaKeys`로 이미 계획/방문한 지역은 제외한 뒤 상위 6개를 반환. 점수 자체(사용자 무관 부분)는 전역 6시간 캐시로 재사용해 트래픽이 몰려도 지역당 TourAPI/집중률 조회가 캐시 주기당 1회로 제한됨.
+- **이미지**: 새 외부 API 없이 TourAPI가 이미 캐싱해둔 대표 관광지 사진(`firstimage`, 공공누리 1유형 저장 허용)을 재사용 — Phase 7 places 성능 개선(§DB-우선 캐싱) 인프라를 그대로 활용.
+- **엔드포인트**: `GET /destinations/recommendations`(카드 목록), `GET /destinations/:areaCode/:sigunguCode`(상세 — 대표 관광지 최대 6곳 포함, `PlacesService.getAreaAttractions`). 둘 다 JWT 인증 필요.
+- **FE 플로우**: 홈 화면 카드 탭 → `DestinationDetailScreen`(대표 이미지·설명·대표 관광지 목록) → 하단 "이 여행지로 여행 만들기" 버튼 → `CreateTripScreen`(해당 도시 프리필, `initialCity` 파라미터 추가). 추천 API 실패 시 섹션 자체를 조용히 숨김(부가 기능이라 홈 화면 전체를 막지 않음).
+- **검증**: 백엔드 단위테스트 `destinations.service.spec.ts`(10건) + `places.service.spec.ts` 신규 케이스(getAreaHighlight/getAreaAttractions), 전체 `npx jest` 23 suites/280 tests 통과, `tsc --noEmit` 통과. FE `flutter analyze` 신규 이슈 0건(기존 info 24건과 동일).
+- **산출물**: `destinations/` 모듈 신규(BE), `features/trips/data/destination_models.dart`·`destinations_api.dart`·`presentation/destination_detail_screen.dart`·`destination_recommendations_controller.dart`·`destination_recommendations_state.dart`(FE)
+
 ### Phase 7 — Place 후보 추천 (국내 여행 전용) ⚠️ 부분 완료 (FE가 명세와 다르게 구현됨)
 - **목표**: 도시 기준 관광지 후보를 인기순으로 제시
 - **범위 변경(팀 결정, 유지)**: TourAPI(한국관광공사)가 국내 지역코드만 제공함을 착수 전 확인(`areaCode2` 응답에 서울/부산 등 17개 국내 광역만 존재, 해외 지역코드 없음). **이번 범위는 국내 여행으로 한정.** 해외 여행 지원은 후속 과제.
