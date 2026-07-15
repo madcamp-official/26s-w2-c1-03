@@ -157,6 +157,49 @@ class _RecordDetailScreenState extends ConsumerState<RecordDetailScreen> {
     }
   }
 
+  /// 사진 한 장의 캡션 수정(API 명세서 §4 PATCH .../photos/{recordPhotoId}).
+  Future<void> _editCaption(RecordDetail record, RecordPhoto photo) async {
+    final controller = TextEditingController(text: photo.caption ?? '');
+    final saved = await showDialog<String>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('캡션'),
+        content: TextField(
+          controller: controller,
+          maxLength: 200,
+          maxLines: 3,
+          autofocus: true,
+          decoration: const InputDecoration(hintText: '이 사진에 대한 한마디'),
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.of(dialogContext).pop(), child: const Text('취소')),
+          TextButton(
+            onPressed: () => Navigator.of(dialogContext).pop(controller.text.trim()),
+            child: const Text('저장'),
+          ),
+        ],
+      ),
+    );
+    if (saved == null || !mounted || saved == (photo.caption ?? '')) return;
+
+    try {
+      await ref
+          .read(recordsApiProvider)
+          .updatePhotoCaption(record.tripId, record.id, photo.id, saved);
+      if (!mounted) return;
+      await _load();
+    } on DioException catch (e) {
+      if (!mounted) return;
+      final error = e.error;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(error is ApiException ? error.message : '캡션을 저장하지 못했어요.')),
+      );
+    } catch (_) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('캡션을 저장하지 못했어요.')));
+    }
+  }
+
   /// 여행 대표사진 지정/해제(API 명세서 §2.6 PUT/DELETE /trips/{tripId}/cover).
   /// 이미 대표사진인 걸 다시 누르면 해제, 아니면 지정 — 트립당 대표사진은
   /// 하나뿐이라 새로 지정하면 서버가 기존 것을 알아서 덮어쓴다.
@@ -244,6 +287,7 @@ class _RecordDetailScreenState extends ConsumerState<RecordDetailScreen> {
         record: record,
         togglingCoverPhotoId: _togglingCoverPhotoId,
         onToggleCover: (photo) => _toggleCover(record, photo),
+        onEditCaption: (photo) => _editCaption(record, photo),
         addingPhotos: _openingPicker,
         onAddPhotos: () => _addPhotos(record),
       ),
@@ -256,6 +300,7 @@ class _RecordDetailBody extends StatelessWidget {
     required this.record,
     required this.togglingCoverPhotoId,
     required this.onToggleCover,
+    required this.onEditCaption,
     required this.addingPhotos,
     required this.onAddPhotos,
   });
@@ -263,6 +308,7 @@ class _RecordDetailBody extends StatelessWidget {
   final RecordDetail record;
   final String? togglingCoverPhotoId;
   final ValueChanged<RecordPhoto> onToggleCover;
+  final ValueChanged<RecordPhoto> onEditCaption;
   final bool addingPhotos;
   final VoidCallback onAddPhotos;
 
@@ -273,29 +319,19 @@ class _RecordDetailBody extends StatelessWidget {
       children: [
         if (record.photos.isNotEmpty) ...[
           const Text(
-            '사진을 눌러 여행 대표사진으로 지정할 수 있어요',
+            '사진을 눌러 여행 대표사진으로, 캡션을 눌러 글을 남겨보세요',
             style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: AppColors.ink400),
           ),
-          const SizedBox(height: 10),
-          GridView.builder(
-            shrinkWrap: true,
-            physics: const NeverScrollableScrollPhysics(),
-            gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-              crossAxisCount: 3,
-              crossAxisSpacing: 8,
-              mainAxisSpacing: 8,
-            ),
-            itemCount: record.photos.length,
-            itemBuilder: (context, index) {
-              final photo = record.photos[index];
-              return _CoverablePhotoTile(
-                photo: photo,
-                toggling: togglingCoverPhotoId == photo.id,
-                onTap: () => onToggleCover(photo),
-              );
-            },
-          ),
           const SizedBox(height: 12),
+          for (final photo in record.photos) ...[
+            _PhotoWithCaptionTile(
+              photo: photo,
+              toggling: togglingCoverPhotoId == photo.id,
+              onToggleCover: () => onToggleCover(photo),
+              onEditCaption: () => onEditCaption(photo),
+            ),
+            const SizedBox(height: 24),
+          ],
           AppButton(
             label: '사진 추가하기',
             variant: AppButtonVariant.outline,
@@ -305,68 +341,107 @@ class _RecordDetailBody extends StatelessWidget {
           ),
         ] else
           _EmptyPhotosState(loading: addingPhotos, onAddPhotos: onAddPhotos),
-        const SizedBox(height: 20),
-        Text(
-          record.content?.isNotEmpty == true ? record.content! : '아직 작성된 글이 없어요. 오른쪽 위 연필 아이콘으로 글을 써보세요.',
-          style: const TextStyle(
-            fontSize: 14.5,
-            height: 1.6,
-            fontWeight: FontWeight.w500,
-            color: AppColors.ink600,
-          ),
-        ),
       ],
     );
   }
 }
 
-class _CoverablePhotoTile extends StatelessWidget {
-  const _CoverablePhotoTile({required this.photo, required this.toggling, required this.onTap});
+/// 인스타그램 피드처럼 사진 한 장 아래에 그 사진의 캡션을 바로 보여준다 —
+/// 사진 탭은 기존 대표사진 지정/해제(§2.6), 캡션 영역 탭은 그 사진만의
+/// 캡션 입력/수정으로 서로 다른 액션이라 영역을 분리했다.
+class _PhotoWithCaptionTile extends StatelessWidget {
+  const _PhotoWithCaptionTile({
+    required this.photo,
+    required this.toggling,
+    required this.onToggleCover,
+    required this.onEditCaption,
+  });
 
   final RecordPhoto photo;
   final bool toggling;
-  final VoidCallback onTap;
+  final VoidCallback onToggleCover;
+  final VoidCallback onEditCaption;
 
   @override
   Widget build(BuildContext context) {
-    return GestureDetector(
-      onTap: toggling ? null : onTap,
-      child: ClipRRect(
-        borderRadius: BorderRadius.circular(10),
-        child: Stack(
-          fit: StackFit.expand,
-          children: [
-            Image.network(
-              photo.storageUrl,
-              fit: BoxFit.cover,
-              errorBuilder: (context, error, stackTrace) => Container(color: AppColors.surfaceSubtle),
-            ),
-            if (photo.isCover)
-              Container(
-                decoration: BoxDecoration(border: Border.all(color: AppColors.lime, width: 3)),
+    final caption = photo.caption;
+    final hasCaption = caption != null && caption.isNotEmpty;
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        GestureDetector(
+          onTap: toggling ? null : onToggleCover,
+          child: AspectRatio(
+            aspectRatio: 4 / 3,
+            child: ClipRRect(
+              borderRadius: BorderRadius.circular(14),
+              child: Stack(
+                fit: StackFit.expand,
+                children: [
+                  Image.network(
+                    photo.storageUrl,
+                    fit: BoxFit.cover,
+                    errorBuilder: (context, error, stackTrace) =>
+                        Container(color: AppColors.surfaceSubtle),
+                  ),
+                  if (photo.isCover)
+                    Container(
+                      decoration: BoxDecoration(border: Border.all(color: AppColors.lime, width: 3)),
+                    ),
+                  Positioned(
+                    top: 8,
+                    right: 8,
+                    child: Container(
+                      padding: const EdgeInsets.all(5),
+                      decoration: const BoxDecoration(color: Color(0x99000000), shape: BoxShape.circle),
+                      child: toggling
+                          ? const SizedBox(
+                              width: 14,
+                              height: 14,
+                              child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
+                            )
+                          : Icon(
+                              photo.isCover ? Icons.star : Icons.star_border,
+                              color: photo.isCover ? AppColors.lime : Colors.white,
+                              size: 18,
+                            ),
+                    ),
+                  ),
+                ],
               ),
-            Positioned(
-              top: 4,
-              right: 4,
-              child: Container(
-                padding: const EdgeInsets.all(4),
-                decoration: const BoxDecoration(color: Color(0x99000000), shape: BoxShape.circle),
-                child: toggling
-                    ? const SizedBox(
-                        width: 12,
-                        height: 12,
-                        child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
-                      )
-                    : Icon(
-                        photo.isCover ? Icons.star : Icons.star_border,
-                        color: photo.isCover ? AppColors.lime : Colors.white,
-                        size: 16,
-                      ),
-              ),
             ),
-          ],
+          ),
         ),
-      ),
+        const SizedBox(height: 8),
+        GestureDetector(
+          onTap: onEditCaption,
+          behavior: HitTestBehavior.opaque,
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Icon(
+                hasCaption ? Icons.edit_note : Icons.add_comment_outlined,
+                size: 16,
+                color: AppColors.ink400,
+              ),
+              const SizedBox(width: 6),
+              Expanded(
+                child: Text(
+                  hasCaption ? caption : '캡션을 남겨보세요',
+                  style: TextStyle(
+                    fontSize: 13.5,
+                    height: 1.4,
+                    fontWeight: FontWeight.w500,
+                    color: hasCaption ? AppColors.ink600 : AppColors.ink400,
+                    fontStyle: hasCaption ? FontStyle.normal : FontStyle.italic,
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ],
     );
   }
 }
