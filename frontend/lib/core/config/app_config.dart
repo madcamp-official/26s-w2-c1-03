@@ -46,6 +46,14 @@ class AppConfig {
     defaultValue: 'ad103f738ca5b988358a62e5e15c8bed',
   );
 
+  /// 카카오 개발자 콘솔의 "JavaScript 키" — 네이티브 앱 키와는 별개 값이며, 웹
+  /// 플랫폼에서만 쓴다(KakaoSdk.init의 javaScriptAppKey, web/index.html의 카카오
+  /// JS SDK와 함께). 콘솔의 "플랫폼 > Web" 사이트 도메인 등록과도 짝이 맞아야 한다.
+  static const String kakaoJavaScriptAppKey = String.fromEnvironment(
+    'KAKAO_JAVASCRIPT_APP_KEY',
+    defaultValue: 'f9564b2418c99a738f7b30eb66744f4f',
+  );
+
   /// Firebase Web은 Android/iOS처럼 google-services.json /
   /// GoogleService-Info.plist를 자동으로 읽지 못한다. 웹에서 Firebase 기능을
   /// 쓰려면 Firebase Console의 Web app 설정값을 --dart-define으로 주입한다.
