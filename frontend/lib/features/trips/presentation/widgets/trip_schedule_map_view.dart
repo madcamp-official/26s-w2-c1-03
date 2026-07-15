@@ -37,7 +37,8 @@ class TripScheduleMapView extends ConsumerStatefulWidget {
   final VoidCallback onStartRecord;
 
   @override
-  ConsumerState<TripScheduleMapView> createState() => _TripScheduleMapViewState();
+  ConsumerState<TripScheduleMapView> createState() =>
+      _TripScheduleMapViewState();
 }
 
 class _TripScheduleMapViewState extends ConsumerState<TripScheduleMapView> {
@@ -70,7 +71,8 @@ class _TripScheduleMapViewState extends ConsumerState<TripScheduleMapView> {
   List<ScheduledTripPlace> get _currentPlaces {
     for (final day in widget.schedule.days) {
       if (day.dayNumber == _selectedDay) {
-        return [...day.places]..sort((a, b) => a.orderInDay.compareTo(b.orderInDay));
+        return [...day.places]
+          ..sort((a, b) => a.orderInDay.compareTo(b.orderInDay));
       }
     }
     return const [];
@@ -108,8 +110,9 @@ class _TripScheduleMapViewState extends ConsumerState<TripScheduleMapView> {
   /// 일정이 비어 있을 때만 쓰는 폴백 — 후보 목록 첫 좌표를 여행 지역 중심으로 삼는다.
   Future<void> _loadRegionCenter() async {
     try {
-      final candidates =
-          await ref.read(placesApiProvider).getCandidates(widget.trip.id);
+      final candidates = await ref
+          .read(placesApiProvider)
+          .getCandidates(widget.trip.id);
       final withCoords = candidates.firstWhere(
         (c) => c.lat != null && c.lng != null,
         orElse: () => candidates.first,
@@ -161,7 +164,10 @@ class _TripScheduleMapViewState extends ConsumerState<TripScheduleMapView> {
 
     if (coords.length == 1) {
       await controller.animateCamera(
-        CameraUpdate.newLatLngZoom(LatLng(coords.first.lat!, coords.first.lng!), 14),
+        CameraUpdate.newLatLngZoom(
+          LatLng(coords.first.lat!, coords.first.lng!),
+          14,
+        ),
       );
       return;
     }
@@ -194,7 +200,10 @@ class _TripScheduleMapViewState extends ConsumerState<TripScheduleMapView> {
     final velocity = details.primaryVelocity ?? 0;
     double target;
     if (velocity < -300) {
-      target = _snaps.firstWhere((s) => s > _extent + 0.001, orElse: () => _max);
+      target = _snaps.firstWhere(
+        (s) => s > _extent + 0.001,
+        orElse: () => _max,
+      );
     } else if (velocity > 300) {
       target = _snaps.lastWhere((s) => s < _extent - 0.001, orElse: () => _min);
     } else {
@@ -232,13 +241,17 @@ class _TripScheduleMapViewState extends ConsumerState<TripScheduleMapView> {
             return Align(
               alignment: Alignment.bottomCenter,
               child: AnimatedContainer(
-                duration: _dragging ? Duration.zero : const Duration(milliseconds: 220),
+                duration: _dragging
+                    ? Duration.zero
+                    : const Duration(milliseconds: 220),
                 curve: Curves.easeOut,
                 height: _extent * maxHeight,
                 clipBehavior: Clip.antiAlias,
                 decoration: BoxDecoration(
                   color: Colors.white,
-                  borderRadius: const BorderRadius.vertical(top: Radius.circular(24)),
+                  borderRadius: const BorderRadius.vertical(
+                    top: Radius.circular(24),
+                  ),
                   boxShadow: [
                     BoxShadow(
                       color: Colors.black.withValues(alpha: 0.12),
@@ -257,7 +270,10 @@ class _TripScheduleMapViewState extends ConsumerState<TripScheduleMapView> {
                         children: [
                           Center(
                             child: Container(
-                              margin: const EdgeInsets.only(top: 10, bottom: 10),
+                              margin: const EdgeInsets.only(
+                                top: 10,
+                                bottom: 10,
+                              ),
                               width: 40,
                               height: 4,
                               decoration: BoxDecoration(
@@ -308,7 +324,10 @@ class _TripScheduleMapViewState extends ConsumerState<TripScheduleMapView> {
           child: Center(
             child: Text(
               '이 날은 아직 장소가 없어',
-              style: TextStyle(color: AppColors.ink400, fontWeight: FontWeight.w600),
+              style: TextStyle(
+                color: AppColors.ink400,
+                fontWeight: FontWeight.w600,
+              ),
             ),
           ),
         ),
@@ -349,7 +368,9 @@ class _TripScheduleMapViewState extends ConsumerState<TripScheduleMapView> {
   }
 
   double? _distanceBetween(ScheduledTripPlace a, ScheduledTripPlace b) {
-    if (a.lat == null || a.lng == null || b.lat == null || b.lng == null) return null;
+    if (a.lat == null || a.lng == null || b.lat == null || b.lng == null) {
+      return null;
+    }
     return haversineKm(a.lat!, a.lng!, b.lat!, b.lng!);
   }
 }
@@ -426,7 +447,11 @@ class _RecordBanner extends StatelessWidget {
           ),
           child: Row(
             children: [
-              const Icon(Icons.auto_stories_outlined, size: 18, color: AppColors.green800),
+              const Icon(
+                Icons.auto_stories_outlined,
+                size: 18,
+                color: AppColors.green800,
+              ),
               const SizedBox(width: 8),
               const Expanded(
                 child: Text(
@@ -438,7 +463,11 @@ class _RecordBanner extends StatelessWidget {
                   ),
                 ),
               ),
-              const Icon(Icons.chevron_right, size: 18, color: AppColors.green800),
+              const Icon(
+                Icons.chevron_right,
+                size: 18,
+                color: AppColors.green800,
+              ),
             ],
           ),
         ),
@@ -487,7 +516,11 @@ class _SheetHeader extends StatelessWidget {
           IconButton(
             onPressed: onGenerateAi,
             tooltip: 'AI로 스케줄 짜기',
-            icon: const Icon(Icons.auto_awesome, size: 18, color: AppColors.green800),
+            icon: const Icon(
+              Icons.auto_awesome,
+              size: 18,
+              color: AppColors.green800,
+            ),
           ),
           TextButton(
             onPressed: onEditSchedule,
@@ -539,9 +572,7 @@ class _StopRow extends StatelessWidget {
                 ),
               ),
               if (!isLast)
-                Expanded(
-                  child: Container(width: 2, color: AppColors.border),
-                ),
+                Expanded(child: Container(width: 2, color: AppColors.border)),
             ],
           ),
           const SizedBox(width: 12),
@@ -583,7 +614,8 @@ class _StopRow extends StatelessWidget {
                             color: color,
                           ),
                         ),
-                        if (place.address != null && place.address!.isNotEmpty) ...[
+                        if (place.address != null &&
+                            place.address!.isNotEmpty) ...[
                           const SizedBox(height: 4),
                           Text(
                             place.address!,
@@ -599,7 +631,6 @@ class _StopRow extends StatelessWidget {
                       ],
                     ),
                   ),
-                  const Icon(Icons.star_border, size: 18, color: AppColors.ink300),
                 ],
               ),
             ),

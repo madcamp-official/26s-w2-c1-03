@@ -4,11 +4,6 @@ import '../../../core/theme/app_colors.dart';
 import '../../../core/theme/app_gradients.dart';
 import '../../../core/utils/date_format.dart';
 import '../../../core/widgets/ai_badge.dart';
-import '../../../core/widgets/app_button.dart';
-import '../../notifications/notification_inbox_controller.dart';
-import '../../notifications/presentation/notifications_screen.dart';
-import '../../profile/presentation/profile_controller.dart';
-import '../../profile/presentation/profile_state.dart';
 import '../data/destination_models.dart';
 import '../data/trip_models.dart';
 import 'destination_detail_screen.dart';
@@ -38,7 +33,6 @@ class _TripListScreenState extends ConsumerState<TripListScreen> {
     super.initState();
     Future.microtask(() {
       ref.read(tripListControllerProvider.notifier).load();
-      ref.read(profileControllerProvider.notifier).load();
       ref.read(destinationRecommendationsControllerProvider.notifier).load();
     });
   }
@@ -46,27 +40,20 @@ class _TripListScreenState extends ConsumerState<TripListScreen> {
   @override
   Widget build(BuildContext context) {
     final state = ref.watch(tripListControllerProvider);
-    final profileState = ref.watch(profileControllerProvider);
 
     return Scaffold(
       backgroundColor: Colors.white,
       body: SafeArea(
-        child: Column(
-          children: [
-            Padding(
-              padding: const EdgeInsets.fromLTRB(22, 18, 22, 0),
-              child: _GreetingHeader(profileState: profileState),
-            ),
-            Expanded(child: _buildBody(state)),
-          ],
-        ),
+        child: Column(children: [Expanded(child: _buildBody(state))]),
       ),
     );
   }
 
   Widget _buildBody(TripListState state) {
     return switch (state) {
-      TripListLoading() => const Center(child: CircularProgressIndicator(color: AppColors.ink900)),
+      TripListLoading() => const Center(
+        child: CircularProgressIndicator(color: AppColors.ink900),
+      ),
       TripListFailed(:final message) => Center(
         child: Padding(
           padding: const EdgeInsets.all(24),
@@ -76,11 +63,15 @@ class _TripListScreenState extends ConsumerState<TripListScreen> {
               Text(
                 message,
                 textAlign: TextAlign.center,
-                style: const TextStyle(color: AppColors.ink600, fontWeight: FontWeight.w600),
+                style: const TextStyle(
+                  color: AppColors.ink600,
+                  fontWeight: FontWeight.w600,
+                ),
               ),
               const SizedBox(height: 12),
               TextButton(
-                onPressed: () => ref.read(tripListControllerProvider.notifier).load(),
+                onPressed: () =>
+                    ref.read(tripListControllerProvider.notifier).load(),
                 child: const Text('다시 시도'),
               ),
             ],
@@ -97,82 +88,35 @@ class _TripListScreenState extends ConsumerState<TripListScreen> {
               const SizedBox(height: 12),
               const Text(
                 '아직 만든 여행이 없어',
-                style: TextStyle(fontSize: 16, fontWeight: FontWeight.w700, color: AppColors.ink900),
+                style: TextStyle(
+                  fontSize: 16,
+                  fontWeight: FontWeight.w700,
+                  color: AppColors.ink900,
+                ),
               ),
               const SizedBox(height: 4),
               const Text(
                 '아래 ＋ 버튼으로 첫 여행을 만들어봐',
-                style: TextStyle(fontSize: 13, color: AppColors.ink400, fontWeight: FontWeight.w600),
+                style: TextStyle(
+                  fontSize: 13,
+                  color: AppColors.ink400,
+                  fontWeight: FontWeight.w600,
+                ),
                 textAlign: TextAlign.center,
               ),
             ],
           ),
         ),
       ),
-      TripListLoaded(:final trips) => _TripListBody(trips: trips, onRefresh: _reload),
+      TripListLoaded(:final trips) => _TripListBody(
+        trips: trips,
+        onRefresh: _reload,
+      ),
     };
   }
 
-  Future<void> _reload() => ref.read(tripListControllerProvider.notifier).load();
-}
-
-class _GreetingHeader extends ConsumerWidget {
-  const _GreetingHeader({required this.profileState});
-  final ProfileState profileState;
-
-  @override
-  Widget build(BuildContext context, WidgetRef ref) {
-    final nickname = profileState is ProfileLoaded ? (profileState as ProfileLoaded).user.nickname : null;
-    // 이 기기가 받은 알림 중 안 읽은 개수. 알림 확인 창을 열면 markAllRead로 0이 된다.
-    final unread = ref.watch(notificationInboxControllerProvider).where((n) => !n.read).length;
-
-    return Row(
-      mainAxisAlignment: MainAxisAlignment.spaceBetween,
-      children: [
-        Expanded(
-          child: Text(
-            nickname != null ? '$nickname님, 안녕! 👋' : '안녕! 👋',
-            style: const TextStyle(fontSize: 19, fontWeight: FontWeight.w700, color: AppColors.ink900),
-          ),
-        ),
-        InkWell(
-          borderRadius: BorderRadius.circular(19),
-          onTap: () => Navigator.of(
-            context,
-          ).push(MaterialPageRoute(builder: (_) => const NotificationsScreen())),
-          child: Stack(
-            clipBehavior: Clip.none,
-            children: [
-              Container(
-                width: 38,
-                height: 38,
-                decoration: const BoxDecoration(
-                  color: AppColors.surfaceSubtle,
-                  shape: BoxShape.circle,
-                ),
-                child: const Icon(Icons.notifications_outlined, size: 19, color: AppColors.ink600),
-              ),
-              // 안 읽은 알림이 실제로 있을 때만 빨간 점을 띄운다.
-              if (unread > 0)
-                Positioned(
-                  right: 0,
-                  top: 0,
-                  child: Container(
-                    width: 10,
-                    height: 10,
-                    decoration: BoxDecoration(
-                      color: AppColors.danger,
-                      shape: BoxShape.circle,
-                      border: Border.all(color: Colors.white, width: 1.5),
-                    ),
-                  ),
-                ),
-            ],
-          ),
-        ),
-      ],
-    );
-  }
+  Future<void> _reload() =>
+      ref.read(tripListControllerProvider.notifier).load();
 }
 
 void _showComingSoon(BuildContext context, String label) {
@@ -190,53 +134,49 @@ class _TripListBody extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final upcoming = _nearestUpcoming(trips);
-    final completedTrips = trips.where((trip) => trip.status == 'completed').toList()
-      ..sort((a, b) => b.startDate.compareTo(a.startDate));
+    final completedTrips =
+        trips.where((trip) => trip.status == 'completed').toList()
+          ..sort((a, b) => b.startDate.compareTo(a.startDate));
 
     return RefreshIndicator(
       onRefresh: onRefresh,
       color: AppColors.ink900,
-      // 가로 패딩을 ListView 전체가 아니라 섹션마다 각자 주는 이유 — 섹션 사이의
-      // 구분 바(_SectionDivider)는 화면 끝까지 꽉 채워야(full-bleed) 해서, 그
-      // 바만 패딩 밖에 있어야 한다.
+      // 상단 히어로는 full-bleed 면으로 쓰고, 아래 콘텐츠는 _HomeSection이
+      // 자체 패딩과 배경을 가져 섹션별로 구분되게 한다.
       child: ListView(
-        padding: const EdgeInsets.only(top: 20, bottom: 120),
+        padding: const EdgeInsets.only(bottom: 120),
         children: [
           if (upcoming != null) ...[
-            Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 22),
-              child: _DdayHeroCard(trip: upcoming),
-            ),
-            const SizedBox(height: 24),
-            const _SectionDivider(),
-            const SizedBox(height: 24),
+            _DdayHeroCard(trip: upcoming),
+          ] else ...[
+            const SizedBox(height: 18),
           ],
-          const Padding(
-            padding: EdgeInsets.symmetric(horizontal: 22),
-            child: _RecommendedDestinationsSection(),
-          ),
+          const _HomeSection(child: _RecommendedDestinationsSection()),
           if (completedTrips.isNotEmpty) ...[
-            const SizedBox(height: 24),
-            const _SectionDivider(),
-            const SizedBox(height: 24),
-            Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 22),
+            const SizedBox(height: 12),
+            _HomeSection(
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   const Text(
                     '지난 여행 기록',
-                    style: TextStyle(fontSize: 17, fontWeight: FontWeight.w800, color: AppColors.ink900),
+                    style: TextStyle(
+                      fontSize: 17,
+                      fontWeight: FontWeight.w800,
+                      color: AppColors.ink900,
+                    ),
                   ),
                   const SizedBox(height: 14),
                   SizedBox(
                     height: 148,
                     child: ListView.separated(
                       scrollDirection: Axis.horizontal,
-                      clipBehavior: Clip.none,
+                      clipBehavior: Clip.hardEdge,
                       itemCount: completedTrips.length,
-                      separatorBuilder: (context, index) => const SizedBox(width: 14),
-                      itemBuilder: (context, index) => _TripCard(trip: completedTrips[index]),
+                      separatorBuilder: (context, index) =>
+                          const SizedBox(width: 14),
+                      itemBuilder: (context, index) =>
+                          _TripCard(trip: completedTrips[index]),
                     ),
                   ),
                 ],
@@ -259,7 +199,8 @@ class _TripListBody extends StatelessWidget {
       final start = DateTime.tryParse(trip.startDate);
       final end = DateTime.tryParse(trip.endDate);
       if (start == null || end == null) continue;
-      final isOngoingNow = !todayDate.isBefore(start) && !todayDate.isAfter(end);
+      final isOngoingNow =
+          !todayDate.isBefore(start) && !todayDate.isAfter(end);
       final isUpcoming = start.isAfter(todayDate) || isOngoingNow;
       if (!isUpcoming) continue;
       if (bestStart == null || start.isBefore(bestStart)) {
@@ -271,16 +212,38 @@ class _TripListBody extends StatelessWidget {
   }
 }
 
-/// 콘텐츠 섹션 사이를 화면 끝까지 꽉 채운 옅은 회색 바로 나눈다(내용별 구분
-/// 요청 참고 — D-day 카드 / "다음엔 여기 어때?" / 지난 여행 기록 세 구간을
-/// 시각적으로 분리). 부모(ListView)가 가로 패딩을 안 주기 때문에 이 위젯만
-/// 화면 폭 전체를 그대로 차지한다.
-class _SectionDivider extends StatelessWidget {
-  const _SectionDivider();
+/// 추천/기록 같은 보조 콘텐츠를 연한 바탕 위 카드로 묶어 상단 히어로와 명확히
+/// 구분한다. 상단은 full-bleed 면, 아래는 섹션 카드라는 대비를 만든다.
+class _HomeSection extends StatelessWidget {
+  const _HomeSection({required this.child});
+
+  final Widget child;
 
   @override
   Widget build(BuildContext context) {
-    return Container(height: 10, width: double.infinity, color: AppColors.canvas);
+    return Container(
+      width: double.infinity,
+      color: AppColors.surfaceMuted,
+      padding: const EdgeInsets.fromLTRB(18, 18, 18, 6),
+      child: Container(
+        width: double.infinity,
+        padding: const EdgeInsets.fromLTRB(18, 18, 18, 20),
+        clipBehavior: Clip.antiAlias,
+        decoration: BoxDecoration(
+          color: Colors.white,
+          borderRadius: BorderRadius.circular(24),
+          border: Border.all(color: AppColors.border),
+          boxShadow: [
+            BoxShadow(
+              color: Colors.black.withValues(alpha: 0.035),
+              blurRadius: 18,
+              offset: const Offset(0, 8),
+            ),
+          ],
+        ),
+        child: child,
+      ),
+    );
   }
 }
 
@@ -310,10 +273,13 @@ class _DdayHeroCard extends StatelessWidget {
 
     return Container(
       width: double.infinity,
-      padding: const EdgeInsets.all(26),
-      decoration: BoxDecoration(
-        color: AppColors.lime,
-        borderRadius: BorderRadius.circular(24),
+      padding: const EdgeInsets.fromLTRB(28, 22, 28, 28),
+      decoration: const BoxDecoration(
+        gradient: LinearGradient(
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+          colors: [Color(0xFF63D1BD), Color(0xFF45B99F)],
+        ),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -321,74 +287,278 @@ class _DdayHeroCard extends StatelessWidget {
           Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
-              Expanded(
-                child: Text(
-                  trip.title,
-                  style: const TextStyle(
-                    fontSize: 14,
-                    fontWeight: FontWeight.w700,
-                    color: AppColors.green800,
-                  ),
-                  overflow: TextOverflow.ellipsis,
+              InkWell(
+                borderRadius: BorderRadius.circular(18),
+                onTap: () => Navigator.of(context).maybePop(),
+                child: const SizedBox(
+                  width: 36,
+                  height: 36,
+                  child: Icon(Icons.close, size: 21, color: Colors.white),
                 ),
               ),
-              Text(
-                formatTripDateRange(trip.startDate, trip.endDate),
-                style: const TextStyle(
-                  fontSize: 13,
-                  fontWeight: FontWeight.w700,
-                  color: AppColors.green800,
-                ),
+              Row(
+                children: [
+                  _HeroIconButton(
+                    icon: Icons.search,
+                    onTap: () => _showComingSoon(context, '검색'),
+                  ),
+                  const SizedBox(width: 8),
+                  _HeroIconButton(
+                    icon: Icons.map_outlined,
+                    onTap: () {
+                      Navigator.of(context).push(
+                        MaterialPageRoute(
+                          builder: (_) => TripDetailScreen(tripId: trip.id),
+                        ),
+                      );
+                    },
+                  ),
+                  const SizedBox(width: 8),
+                  _HeroIconButton(
+                    icon: Icons.menu,
+                    showDot: true,
+                    onTap: () => _showComingSoon(context, '메뉴'),
+                  ),
+                ],
               ),
             ],
           ),
-          const SizedBox(height: 10),
+          const SizedBox(height: 28),
+          Text(
+            '${trip.title},',
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: const TextStyle(
+              fontSize: 25,
+              fontWeight: FontWeight.w900,
+              color: Colors.white,
+              letterSpacing: -0.5,
+              height: 1.08,
+            ),
+          ),
           Text(
             ddayLabel,
             style: const TextStyle(
-              fontSize: 52,
-              fontWeight: FontWeight.w800,
-              color: AppColors.green900,
-              letterSpacing: -1.5,
-              height: 1,
+              fontSize: 24,
+              fontWeight: FontWeight.w900,
+              color: Colors.white,
+              letterSpacing: -0.5,
+              height: 1.08,
             ),
           ),
-          const SizedBox(height: 10),
+          const SizedBox(height: 16),
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 13, vertical: 8),
+            decoration: BoxDecoration(
+              color: Colors.white.withValues(alpha: 0.18),
+              borderRadius: BorderRadius.circular(999),
+              border: Border.all(color: Colors.white.withValues(alpha: 0.18)),
+            ),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text(
+                  formatTripDateRange(trip.startDate, trip.endDate),
+                  style: const TextStyle(
+                    fontSize: 12.5,
+                    fontWeight: FontWeight.w800,
+                    color: Colors.white,
+                  ),
+                ),
+                const SizedBox(width: 6),
+                const Icon(
+                  Icons.keyboard_arrow_down,
+                  size: 16,
+                  color: Colors.white,
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(height: 22),
           Text(
             message,
-            style: const TextStyle(fontSize: 14.5, fontWeight: FontWeight.w600, color: AppColors.green700),
+            style: TextStyle(
+              fontSize: 13.5,
+              fontWeight: FontWeight.w700,
+              color: Colors.white.withValues(alpha: 0.86),
+            ),
           ),
-          const SizedBox(height: 18),
+          const SizedBox(height: 24),
           Row(
             children: [
-              Expanded(
-                child: AppButton(
-                  label: '일정 보기',
-                  onPressed: () {
-                    Navigator.of(
-                      context,
-                    ).push(MaterialPageRoute(builder: (_) => TripDetailScreen(tripId: trip.id)));
-                  },
-                ),
+              _HeroTextChip(
+                label: '가이드',
+                selected: true,
+                onTap: () => _showComingSoon(context, '가이드'),
               ),
-              const SizedBox(width: 8),
-              // 공동 여행 계획(초대 링크, Phase 10)이 아직 없어 "곧 만나요"만 띄운다.
-              InkWell(
-                borderRadius: BorderRadius.circular(14),
-                onTap: () => _showComingSoon(context, '친구 초대'),
-                child: Container(
-                  width: 46,
-                  height: 52,
-                  decoration: BoxDecoration(
-                    color: const Color(0x99FFFFFF),
-                    borderRadius: BorderRadius.circular(14),
-                  ),
-                  child: const Icon(Icons.ios_share, size: 18, color: AppColors.green900),
-                ),
+              _HeroTextChip(
+                label: '일정',
+                onTap: () {
+                  Navigator.of(context).push(
+                    MaterialPageRoute(
+                      builder: (_) => TripDetailScreen(tripId: trip.id),
+                    ),
+                  );
+                },
+              ),
+              _HeroTextChip(
+                label: '관광',
+                onTap: () => _showComingSoon(context, '관광'),
+              ),
+              _HeroTextChip(
+                label: '맛집',
+                onTap: () => _showComingSoon(context, '맛집'),
+              ),
+              _HeroTextChip(
+                label: '기록',
+                onTap: () => _showComingSoon(context, '기록'),
               ),
             ],
           ),
+          const SizedBox(height: 24),
+          InkWell(
+            borderRadius: BorderRadius.circular(18),
+            onTap: () {
+              Navigator.of(context).push(
+                MaterialPageRoute(
+                  builder: (_) => TripDetailScreen(tripId: trip.id),
+                ),
+              );
+            },
+            child: Container(
+              width: double.infinity,
+              padding: const EdgeInsets.fromLTRB(18, 18, 18, 18),
+              decoration: BoxDecoration(
+                color: Colors.white,
+                borderRadius: BorderRadius.circular(18),
+                boxShadow: [
+                  BoxShadow(
+                    color: Colors.black.withValues(alpha: 0.06),
+                    blurRadius: 18,
+                    offset: const Offset(0, 8),
+                  ),
+                ],
+              ),
+              child: Row(
+                children: [
+                  const Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          '내 여행 일정 확인하기',
+                          style: TextStyle(
+                            fontSize: 15.5,
+                            fontWeight: FontWeight.w900,
+                            color: AppColors.ink900,
+                          ),
+                        ),
+                        SizedBox(height: 5),
+                        Text(
+                          'AI가 만든 일정과 장소를 다시 볼 수 있어요',
+                          style: TextStyle(
+                            fontSize: 12.5,
+                            fontWeight: FontWeight.w600,
+                            color: AppColors.ink400,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  Container(
+                    width: 44,
+                    height: 44,
+                    decoration: BoxDecoration(
+                      color: AppColors.surfaceSubtle,
+                      borderRadius: BorderRadius.circular(14),
+                    ),
+                    child: const Icon(
+                      Icons.auto_awesome,
+                      size: 21,
+                      color: AppColors.green800,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
         ],
+      ),
+    );
+  }
+}
+
+class _HeroIconButton extends StatelessWidget {
+  const _HeroIconButton({
+    required this.icon,
+    required this.onTap,
+    this.showDot = false,
+  });
+
+  final IconData icon;
+  final VoidCallback onTap;
+  final bool showDot;
+
+  @override
+  Widget build(BuildContext context) {
+    return InkWell(
+      borderRadius: BorderRadius.circular(18),
+      onTap: onTap,
+      child: Stack(
+        clipBehavior: Clip.none,
+        children: [
+          SizedBox(
+            width: 34,
+            height: 34,
+            child: Icon(icon, size: 21, color: Colors.white),
+          ),
+          if (showDot)
+            Positioned(
+              right: 3,
+              top: 4,
+              child: Container(
+                width: 6,
+                height: 6,
+                decoration: const BoxDecoration(
+                  color: Color(0xFFFF6B83),
+                  shape: BoxShape.circle,
+                ),
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+}
+
+class _HeroTextChip extends StatelessWidget {
+  const _HeroTextChip({
+    required this.label,
+    required this.onTap,
+    this.selected = false,
+  });
+
+  final String label;
+  final VoidCallback onTap;
+  final bool selected;
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.only(right: 20),
+      child: InkWell(
+        borderRadius: BorderRadius.circular(999),
+        onTap: onTap,
+        child: Text(
+          label,
+          style: TextStyle(
+            fontSize: 13,
+            fontWeight: FontWeight.w800,
+            color: selected
+                ? Colors.white
+                : Colors.white.withValues(alpha: 0.78),
+          ),
+        ),
       ),
     );
   }
@@ -405,7 +575,9 @@ class _TripCard extends StatelessWidget {
     return InkWell(
       borderRadius: BorderRadius.circular(20),
       onTap: () {
-        Navigator.of(context).push(MaterialPageRoute(builder: (_) => TripDetailScreen(tripId: trip.id)));
+        Navigator.of(context).push(
+          MaterialPageRoute(builder: (_) => TripDetailScreen(tripId: trip.id)),
+        );
       },
       child: Container(
         width: 130,
@@ -442,7 +614,9 @@ class _RecommendedDestinationsSection extends ConsumerWidget {
       return const SizedBox.shrink();
     }
 
-    final items = state is DestinationRecommendationsLoaded ? state.items : null;
+    final items = state is DestinationRecommendationsLoaded
+        ? state.items
+        : null;
     final isLoading = items == null;
     final itemCount = isLoading ? 3 : items.length;
     if (!isLoading && items.isEmpty) {
@@ -454,14 +628,18 @@ class _RecommendedDestinationsSection extends ConsumerWidget {
       children: [
         const Text(
           '다음엔 여기 어때?',
-          style: TextStyle(fontSize: 17, fontWeight: FontWeight.w800, color: AppColors.ink900),
+          style: TextStyle(
+            fontSize: 17,
+            fontWeight: FontWeight.w800,
+            color: AppColors.ink900,
+          ),
         ),
         const SizedBox(height: 14),
         SizedBox(
           height: 148,
           child: ListView.separated(
             scrollDirection: Axis.horizontal,
-            clipBehavior: Clip.none,
+            clipBehavior: Clip.hardEdge,
             itemCount: itemCount,
             separatorBuilder: (context, index) => const SizedBox(width: 14),
             itemBuilder: (context, index) => isLoading
@@ -528,14 +706,22 @@ class _DestinationCard extends StatelessWidget {
             const SizedBox(height: 8),
             Text(
               destination.cityName,
-              style: const TextStyle(fontSize: 14.5, fontWeight: FontWeight.w700, color: AppColors.ink900),
+              style: const TextStyle(
+                fontSize: 14.5,
+                fontWeight: FontWeight.w700,
+                color: AppColors.ink900,
+              ),
             ),
             const SizedBox(height: 2),
             Text(
               destination.subtitle,
               maxLines: 1,
               overflow: TextOverflow.ellipsis,
-              style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: AppColors.ink400),
+              style: const TextStyle(
+                fontSize: 12,
+                fontWeight: FontWeight.w600,
+                color: AppColors.ink400,
+              ),
             ),
           ],
         ),
@@ -572,11 +758,18 @@ class _DestinationThumbnail extends StatelessWidget {
                 child: Image.network(
                   url,
                   fit: BoxFit.cover,
-                  errorBuilder: (_, _, _) =>
-                      Container(decoration: BoxDecoration(gradient: AppGradients.forKey(destination.cityName))),
+                  errorBuilder: (_, _, _) => Container(
+                    decoration: BoxDecoration(
+                      gradient: AppGradients.forKey(destination.cityName),
+                    ),
+                  ),
                 ),
               ),
-            if (tag != null) Align(alignment: Alignment.topLeft, child: _DestinationTag(label: tag!)),
+            if (tag != null)
+              Align(
+                alignment: Alignment.topLeft,
+                child: _DestinationTag(label: tag!),
+              ),
           ],
         ),
       ),

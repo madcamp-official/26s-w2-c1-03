@@ -534,9 +534,9 @@ describe('ScheduleService', () => {
         dayNumber: 1,
       }),
     ).rejects.toMatchObject({ code: 'SCHEDULE_PLACE_INPUT_INVALID' });
-    await expect(
-      service.addPlace('trip-1', 'user-1', { dayNumber: 1 }),
-    ).rejects.toMatchObject({ code: 'SCHEDULE_PLACE_INPUT_INVALID' });
+    await expect(service.addPlace('trip-1', 'user-1', { dayNumber: 1 })).rejects.toMatchObject({
+      code: 'SCHEDULE_PLACE_INPUT_INVALID',
+    });
   });
 
   it('addPlace: 여행 일수(2일)를 벗어난 dayNumber는 거부한다', async () => {
@@ -577,11 +577,7 @@ describe('ScheduleService', () => {
   });
 
   it('updatePlace: 다른 날로 이동하면 원래 날과 대상 날 모두 1..n으로 재부여된다', async () => {
-    const rows = [
-      buildRow('t1', 1, 1),
-      buildRow('t2', 1, 2),
-      buildRow('t3', 2, 1),
-    ];
+    const rows = [buildRow('t1', 1, 1), buildRow('t2', 1, 2), buildRow('t3', 2, 1)];
     setupEditRepo(rows);
 
     // t1을 2일차 1번 위치로 이동
@@ -619,11 +615,7 @@ describe('ScheduleService', () => {
   });
 
   it('reorder: 일괄 operations를 적용하고 day별 1..n으로 재부여된 전체 스케줄을 반환한다', async () => {
-    const rows = [
-      buildRow('t1', 1, 1),
-      buildRow('t2', 1, 2),
-      buildRow('t3', 2, 1),
-    ];
+    const rows = [buildRow('t1', 1, 1), buildRow('t2', 1, 2), buildRow('t3', 2, 1)];
     setupEditRepo(rows);
 
     // t3을 1일차 맨 앞으로, t1을 2일차로
@@ -740,7 +732,9 @@ describe('ScheduleService', () => {
     });
 
     expect(manager.delete).toHaveBeenCalledWith(expect.anything(), { tripId: 'trip-1' });
-    expect(schedule.days[0].places.map((p) => [p.placeId, p.name, p.orderInDay, p.startTime])).toEqual([
+    expect(
+      schedule.days[0].places.map((p) => [p.placeId, p.name, p.orderInDay, p.startTime]),
+    ).toEqual([
       ['p1', 'place-p1', 1, '10:00'],
       [null, '내가 아는 맛집', 2, null],
     ]);
@@ -918,7 +912,9 @@ describe('ScheduleService', () => {
       })
       .mockResolvedValueOnce({ type: 'message', content: '스타벅스 제주점을 추천할게요.' });
 
-    await service.chat('trip-1', 'user-1', { messages: [{ role: 'user', content: '카페 찾아줘' }] });
+    await service.chat('trip-1', 'user-1', {
+      messages: [{ role: 'user', content: '카페 찾아줘' }],
+    });
 
     const secondCallMessages = scheduleAiClient.requestChatTurn.mock.calls[1][0];
     const toolMessage = secondCallMessages[secondCallMessages.length - 1];
@@ -949,7 +945,9 @@ describe('ScheduleService', () => {
     scheduleAiClient.requestChatTurn
       .mockResolvedValueOnce({
         type: 'tool_calls',
-        calls: [toolCall('call-1', 'move_place', { tripPlaceId: 't1', dayNumber: 2, orderInDay: 1 })],
+        calls: [
+          toolCall('call-1', 'move_place', { tripPlaceId: 't1', dayNumber: 2, orderInDay: 1 }),
+        ],
       })
       .mockResolvedValueOnce({ type: 'message', content: '옮겼어요.' });
 
@@ -961,6 +959,57 @@ describe('ScheduleService', () => {
     // t1을 2일차 1번 위치로 끼워 넣으면 기존 t2(1번)는 2번으로 밀린다.
     const day2 = schedule.days.find((d) => d.dayNumber === 2)!;
     expect(day2.places.map((p) => p.id)).toEqual(['t1', 't2']);
+  });
+
+  it('chat: update_time 도구 호출로 장소 방문 시각을 수정한다', async () => {
+    const row = buildRow('t1', 1, 1);
+    row.startTime = '09:00';
+    setupChatRepos([row]);
+    scheduleAiClient.requestChatTurn
+      .mockResolvedValueOnce({
+        type: 'tool_calls',
+        calls: [toolCall('call-1', 'update_time', { tripPlaceId: 't1', startTime: '10:30' })],
+      })
+      .mockResolvedValueOnce({ type: 'message', content: 't1 시간을 10:30으로 바꿨어요.' });
+
+    const { changed, schedule } = await service.chat('trip-1', 'user-1', {
+      messages: [{ role: 'user', content: 't1 시간을 10시 반으로 바꿔줘' }],
+    });
+
+    expect(changed).toBe(true);
+    expect(schedule.days[0].places[0].startTime).toBe('10:30');
+
+    const firstCallMessages = scheduleAiClient.requestChatTurn.mock.calls[0][0];
+    expect(firstCallMessages[0].content).toContain('startTime=09:00');
+    expect(scheduleAiClient.requestChatTurn.mock.calls[0][1]).toEqual(
+      expect.arrayContaining([expect.objectContaining({ name: 'update_time' })]),
+    );
+  });
+
+  it('chat: move_place 도구로 이동과 방문 시각 수정을 함께 처리한다', async () => {
+    const rows = [buildRow('t1', 1, 1), buildRow('t2', 2, 1)];
+    setupChatRepos(rows);
+    scheduleAiClient.requestChatTurn
+      .mockResolvedValueOnce({
+        type: 'tool_calls',
+        calls: [
+          toolCall('call-1', 'move_place', {
+            tripPlaceId: 't1',
+            dayNumber: 2,
+            orderInDay: 1,
+            startTime: '15:00',
+          }),
+        ],
+      })
+      .mockResolvedValueOnce({ type: 'message', content: '2일차 15:00로 옮겼어요.' });
+
+    const { schedule } = await service.chat('trip-1', 'user-1', {
+      messages: [{ role: 'user', content: 't1을 2일차 첫 번째, 오후 3시로 옮겨줘' }],
+    });
+
+    const moved = schedule.days.find((d) => d.dayNumber === 2)!.places[0];
+    expect(moved.id).toBe('t1');
+    expect(moved.startTime).toBe('15:00');
   });
 
   it('chat: 도구 실행이 실패해도 예외를 던지지 않고 error를 담아 대화를 이어간다', async () => {
