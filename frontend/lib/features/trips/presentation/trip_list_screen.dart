@@ -327,7 +327,7 @@ class _DdayHeroCard extends StatelessWidget {
                   style: const TextStyle(
                     fontSize: 14,
                     fontWeight: FontWeight.w700,
-                    color: AppColors.green800,
+                    color: AppColors.onLime,
                   ),
                   overflow: TextOverflow.ellipsis,
                 ),
@@ -337,7 +337,7 @@ class _DdayHeroCard extends StatelessWidget {
                 style: const TextStyle(
                   fontSize: 13,
                   fontWeight: FontWeight.w700,
-                  color: AppColors.green800,
+                  color: AppColors.onLime,
                 ),
               ),
             ],
@@ -348,7 +348,7 @@ class _DdayHeroCard extends StatelessWidget {
             style: const TextStyle(
               fontSize: 52,
               fontWeight: FontWeight.w800,
-              color: AppColors.green900,
+              color: AppColors.onLime,
               letterSpacing: -1.5,
               height: 1,
             ),
@@ -356,7 +356,7 @@ class _DdayHeroCard extends StatelessWidget {
           const SizedBox(height: 10),
           Text(
             message,
-            style: const TextStyle(fontSize: 14.5, fontWeight: FontWeight.w600, color: AppColors.green700),
+            style: const TextStyle(fontSize: 14.5, fontWeight: FontWeight.w600, color: AppColors.onLime),
           ),
           const SizedBox(height: 18),
           Row(
@@ -383,7 +383,7 @@ class _DdayHeroCard extends StatelessWidget {
                     color: const Color(0x99FFFFFF),
                     borderRadius: BorderRadius.circular(14),
                   ),
-                  child: const Icon(Icons.ios_share, size: 18, color: AppColors.green900),
+                  child: const Icon(Icons.ios_share, size: 18, color: AppColors.lime),
                 ),
               ),
             ],

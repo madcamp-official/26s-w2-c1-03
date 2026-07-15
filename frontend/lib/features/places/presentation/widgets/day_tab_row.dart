@@ -69,7 +69,7 @@ class DayTabRow extends StatelessWidget {
                       style: TextStyle(
                         fontSize: 12,
                         fontWeight: FontWeight.w800,
-                        color: isSelected ? AppColors.lime : AppColors.green800,
+                        color: AppColors.lime,
                       ),
                     ),
                   ],

@@ -176,7 +176,7 @@ class _PlaceRow extends StatelessWidget {
           height: 34,
           alignment: Alignment.center,
           decoration: const BoxDecoration(
-            color: AppColors.lime,
+            color: AppColors.limeBg,
             shape: BoxShape.circle,
           ),
           child: Text(
@@ -184,7 +184,7 @@ class _PlaceRow extends StatelessWidget {
             style: const TextStyle(
               fontSize: 13,
               fontWeight: FontWeight.w900,
-              color: AppColors.green800,
+              color: AppColors.lime,
             ),
           ),
         ),
@@ -202,7 +202,7 @@ class _PlaceRow extends StatelessWidget {
                       style: const TextStyle(
                         fontSize: 12,
                         fontWeight: FontWeight.w800,
-                        color: AppColors.green800,
+                        color: AppColors.lime,
                       ),
                     ),
                     const SizedBox(width: 7),
