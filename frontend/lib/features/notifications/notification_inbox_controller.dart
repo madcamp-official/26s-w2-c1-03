@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:firebase_messaging/firebase_messaging.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import 'notification_inbox_store.dart';
@@ -34,6 +35,10 @@ class NotificationInboxController extends StateNotifier<List<ReceivedNotificatio
 
   Future<void> init() async {
     state = await _store.readAll();
+
+    if (kIsWeb) {
+      return;
+    }
 
     _subs.add(FirebaseMessaging.onMessage.listen(_ingest));
     _subs.add(FirebaseMessaging.onMessageOpenedApp.listen(_ingest));

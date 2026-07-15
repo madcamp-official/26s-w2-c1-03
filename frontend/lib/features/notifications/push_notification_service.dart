@@ -1,6 +1,5 @@
-import 'dart:io' show Platform;
-
 import 'package:firebase_messaging/firebase_messaging.dart';
+import 'package:flutter/foundation.dart';
 import '../../core/storage/token_storage.dart';
 import '../profile/data/users_api.dart';
 
@@ -24,7 +23,12 @@ class DeviceRegistrationUnavailable extends DeviceRegistration {
 /// 것까지만 한다.
 class PushNotificationService {
   Future<DeviceRegistration> requestPermissionAndGetToken() async {
-    if (!Platform.isIOS && !Platform.isAndroid) {
+    if (kIsWeb) {
+      return const DeviceRegistrationUnavailable();
+    }
+
+    final platform = defaultTargetPlatform;
+    if (platform != TargetPlatform.iOS && platform != TargetPlatform.android) {
       return const DeviceRegistrationUnavailable();
     }
 
@@ -41,7 +45,10 @@ class PushNotificationService {
       return const DeviceRegistrationUnavailable();
     }
 
-    return DeviceRegistrationAvailable(pushToken: token, platform: Platform.isIOS ? 'ios' : 'android');
+    return DeviceRegistrationAvailable(
+      pushToken: token,
+      platform: platform == TargetPlatform.iOS ? 'ios' : 'android',
+    );
   }
 
   /// 세션이 확립된 시점(로그인 성공/앱 시작 시 유효한 토큰 확인 후)마다 호출한다.
