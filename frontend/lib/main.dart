@@ -18,7 +18,10 @@ void main() async {
   // ios/Runner/GoogleService-Info.plist를 네이티브 빌드가 읽어서 자동으로 설정을 채운다
   // (FlutterFire CLI로 만드는 DefaultFirebaseOptions와 동일한 값을 얻는 또 다른 방법).
   await Firebase.initializeApp();
-  KakaoSdk.init(nativeAppKey: AppConfig.kakaoNativeAppKey);
+  KakaoSdk.init(
+    nativeAppKey: AppConfig.kakaoNativeAppKey,
+    javaScriptAppKey: AppConfig.kakaoJavaScriptAppKey,
+  );
   // 초대 딥링크(plan.md Phase 10). 토큰이 와도 세션 준비(AppShell 진입) 전까지는
   // 핸들러가 보관만 하므로 로그인 흐름을 방해하지 않는다.
   unawaited(

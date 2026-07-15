@@ -37,6 +37,11 @@
        정적 파일이라 .env를 자동으로 못 읽으므로 여기에 직접 넣어야 한다.
        frontend/.env.example 참고. (Android/iOS만 쓸 거면 건드릴 필요 없음.) -->
   <!-- <script src="https://maps.googleapis.com/maps/api/js?key=YOUR_MAPS_API_KEY"></script> -->
+
+  <!-- 카카오 로그인(웹) — kakao_flutter_sdk가 window.Kakao를 통해 호출하므로
+       SDK 스크립트가 먼저 로드돼 있어야 한다. KakaoSdk.init()의 javaScriptAppKey
+       (AppConfig.kakaoJavaScriptAppKey, 네이티브 앱 키와는 다른 값)와 짝을 맞춘다. -->
+  <script src="https://developers.kakao.com/sdk/js/kakao.min.js"></script>
 </head>
 <body>
   <!--
