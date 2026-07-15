@@ -10,6 +10,7 @@ function createRepositoryMock<T extends object>(): RepoMock<T> {
   return {
     create: jest.fn((entity) => entity),
     save: jest.fn(async (entity) => entity),
+    findOne: jest.fn(async () => null),
     findOneBy: jest.fn(),
     upsert: jest.fn(async () => ({ identifiers: [], generatedMaps: [], raw: [] })),
     find: jest.fn(async () => []),
@@ -36,8 +37,12 @@ function buildTourApiItem(overrides: Partial<TourApiPlaceItem> = {}): TourApiPla
   };
 }
 
-/** TourAPI 아이템에 대응하는 저장된 Place(벌크 upsert 후 repo.find가 돌려주는 형태). */
-function buildPlace(item: TourApiPlaceItem, id = item.contentId): Place {
+/** TourAPI 아이템에 대응하는 저장된 Place(캐시에서 repo.find가 돌려주는 형태). */
+function buildPlace(
+  item: TourApiPlaceItem,
+  id = item.contentId,
+  syncedAt: Date | null = new Date(),
+): Place {
   return {
     id,
     source: PlaceSource.TOURAPI,
@@ -53,10 +58,26 @@ function buildPlace(item: TourApiPlaceItem, id = item.contentId): Place {
     tel: item.tel,
     imageUrl: item.firstImage,
     overview: null,
-    syncedAt: null,
+    syncedAt,
     createdAt: new Date(),
     updatedAt: new Date(),
   };
+}
+
+/**
+ * 캐시 조회(queryByContentType)는 find({ where: { contentTypeId } })로 카테고리별로
+ * 읽는다. 이 헬퍼는 contentTypeId → Place[] 맵을 받아 그 동작을 흉내내는 find mock을 만든다.
+ */
+function findByContentType(placesByContentType: Record<string, Place[]>) {
+  return jest.fn(async (options?: { where?: { contentTypeId?: string } }) => {
+    const ct = options?.where?.contentTypeId;
+    return ct ? placesByContentType[ct] ?? [] : [];
+  });
+}
+
+/** getAreaCacheState가 "신선한 캐시 있음"으로 판단하도록 최근 syncedAt을 가진 행을 반환. */
+function freshCache(placeRepository: RepoMock<Place>) {
+  (placeRepository.findOne as jest.Mock).mockResolvedValue({ syncedAt: new Date() });
 }
 
 describe('PlacesService', () => {
@@ -117,23 +138,25 @@ describe('PlacesService', () => {
       expect(tourApiClient.fetchAreaBasedList).not.toHaveBeenCalled();
     });
 
-    it('trip 지역으로 TourAPI를 조회하고 후보를 벌크 upsert한 뒤 집중률을 매칭해 반환한다', async () => {
+    it('캐시가 비었으면(콜드) TourAPI로 지역을 동기화(관광지/음식점/쇼핑 3종)해 적재한 뒤 DB에서 후보를 읽는다', async () => {
       const item = buildTourApiItem();
       tripsService.getDetail.mockResolvedValue({
         areaCode: '6',
         sigunguCode: '1',
         startDate: '2026-07-13',
       });
+      // findOne(신선도 검사)이 null → 콜드 → 동기화. 동기화는 3개 contentType을 받는다.
+      (placeRepository.findOne as jest.Mock).mockResolvedValue(null);
       tourApiClient.fetchAreaBasedList.mockResolvedValue([item]);
-      (placeRepository.find as jest.Mock).mockResolvedValue([buildPlace(item)]);
-      tatsCnctrRateClient.fetchConcentrationMap.mockResolvedValue(
-        new Map([['가덕도등대', 42.5]]),
-      );
+      // 읽기는 contentType별 find로 이뤄진다 — 관광지(12)에만 후보가 있다고 가정.
+      placeRepository.find = findByContentType({ '12': [buildPlace(item)] });
+      tatsCnctrRateClient.fetchConcentrationMap.mockResolvedValue(new Map([['가덕도등대', 42.5]]));
 
       const result = await service.getCandidates('trip-1', 'user-1', {});
 
+      expect(tourApiClient.fetchAreaBasedList).toHaveBeenCalledTimes(3);
       expect(tourApiClient.fetchAreaBasedList).toHaveBeenCalledWith(
-        expect.objectContaining({ areaCode: '6', sigunguCode: '1' }),
+        expect.objectContaining({ areaCode: '6', sigunguCode: '1', contentTypeId: '12' }),
       );
       expect(placeRepository.upsert).toHaveBeenCalledTimes(1);
       expect(result.candidates).toHaveLength(1);
@@ -144,7 +167,24 @@ describe('PlacesService', () => {
       });
     });
 
-    it('category 미지정("전체")이면 관광지/음식점/쇼핑 3개를 각각 조회해 합친다(숙박·여행코스 등 배제)', async () => {
+    it('캐시가 신선하면 TourAPI를 호출하지 않고 DB에서만 후보를 읽는다(성능 최적화 핵심)', async () => {
+      const item = buildTourApiItem();
+      tripsService.getDetail.mockResolvedValue({
+        areaCode: '6',
+        sigunguCode: '1',
+        startDate: '2026-07-13',
+      });
+      freshCache(placeRepository);
+      placeRepository.find = findByContentType({ '12': [buildPlace(item)] });
+
+      const result = await service.getCandidates('trip-1', 'user-1', {});
+
+      expect(tourApiClient.fetchAreaBasedList).not.toHaveBeenCalled();
+      expect(placeRepository.upsert).not.toHaveBeenCalled();
+      expect(result.candidates.map((c) => c.name)).toEqual(['가덕도 등대']);
+    });
+
+    it('category 미지정("전체")이면 관광지/음식점/쇼핑을 각각 DB에서 읽어 합친다', async () => {
       const attraction = buildTourApiItem({ contentId: 'a1', contentTypeId: '12', title: '관광지' });
       const restaurant = buildTourApiItem({ contentId: 'r1', contentTypeId: '39', title: '식당' });
       const shopping = buildTourApiItem({ contentId: 's1', contentTypeId: '38', title: '쇼핑몰' });
@@ -153,52 +193,44 @@ describe('PlacesService', () => {
         sigunguCode: '13',
         startDate: '2026-07-13',
       });
-      tourApiClient.fetchAreaBasedList.mockImplementation(
-        async ({ contentTypeId }: { contentTypeId: string }) => {
-          if (contentTypeId === '12') return [attraction];
-          if (contentTypeId === '39') return [restaurant];
-          if (contentTypeId === '38') return [shopping];
-          return [];
-        },
-      );
-      (placeRepository.find as jest.Mock).mockResolvedValue([
-        buildPlace(attraction, 'a1'),
-        buildPlace(restaurant, 'r1'),
-        buildPlace(shopping, 's1'),
-      ]);
+      freshCache(placeRepository);
+      placeRepository.find = findByContentType({
+        '12': [buildPlace(attraction, 'a1')],
+        '39': [buildPlace(restaurant, 'r1')],
+        '38': [buildPlace(shopping, 's1')],
+      });
 
       const result = await service.getCandidates('trip-1', 'user-1', {});
 
-      expect(tourApiClient.fetchAreaBasedList).toHaveBeenCalledTimes(3);
-      expect(tourApiClient.fetchAreaBasedList).toHaveBeenCalledWith(
-        expect.objectContaining({ contentTypeId: '12' }),
+      expect(placeRepository.find).toHaveBeenCalledWith(
+        expect.objectContaining({ where: expect.objectContaining({ contentTypeId: '12' }) }),
       );
-      expect(tourApiClient.fetchAreaBasedList).toHaveBeenCalledWith(
-        expect.objectContaining({ contentTypeId: '39' }),
+      expect(placeRepository.find).toHaveBeenCalledWith(
+        expect.objectContaining({ where: expect.objectContaining({ contentTypeId: '39' }) }),
       );
-      expect(tourApiClient.fetchAreaBasedList).toHaveBeenCalledWith(
-        expect.objectContaining({ contentTypeId: '38' }),
+      expect(placeRepository.find).toHaveBeenCalledWith(
+        expect.objectContaining({ where: expect.objectContaining({ contentTypeId: '38' }) }),
       );
-      // 숙박(32)·여행코스(25) 등은 애초에 요청하지 않으므로 결과에 섞일 수 없다.
       expect(result.candidates.map((c) => c.name)).toEqual(['관광지', '식당', '쇼핑몰']);
     });
 
-    it('category가 주어지면 contentTypeId로 변환해 TourAPI에 전달한다', async () => {
+    it('category가 주어지면 그 contentTypeId로 DB를 조회한다', async () => {
       tripsService.getDetail.mockResolvedValue({
         areaCode: '6',
         sigunguCode: null,
         startDate: '2026-07-13',
       });
-      tourApiClient.fetchAreaBasedList.mockResolvedValue([]);
+      freshCache(placeRepository);
+      placeRepository.find = findByContentType({ '39': [] });
 
       await service.getCandidates('trip-1', 'user-1', { category: 'restaurant' });
 
-      expect(tourApiClient.fetchAreaBasedList).toHaveBeenCalledWith(
-        expect.objectContaining({ contentTypeId: '39' }),
+      expect(placeRepository.find).toHaveBeenCalledWith(
+        expect.objectContaining({ where: expect.objectContaining({ contentTypeId: '39' }) }),
       );
     });
 
-    it('category=restaurant면 음식점(39)을 받아 카페(cat3=A05020900)는 제외한다', async () => {
+    it('category=restaurant면 음식점(39)을 읽어 카페(cat3=A05020900)는 제외한다', async () => {
       const realRestaurant = buildTourApiItem({
         contentId: 'r1',
         contentTypeId: '39',
@@ -216,16 +248,13 @@ describe('PlacesService', () => {
         sigunguCode: '1',
         startDate: '2026-07-13',
       });
-      tourApiClient.fetchAreaBasedList.mockResolvedValue([realRestaurant, cafe]);
-      (placeRepository.find as jest.Mock).mockResolvedValue([
-        buildPlace(realRestaurant, 'r1'),
-      ]);
+      freshCache(placeRepository);
+      placeRepository.find = findByContentType({
+        '39': [buildPlace(realRestaurant, 'r1'), buildPlace(cafe, 'c1')],
+      });
 
       const result = await service.getCandidates('trip-1', 'user-1', { category: 'restaurant' });
 
-      expect(tourApiClient.fetchAreaBasedList).toHaveBeenCalledWith(
-        expect.objectContaining({ contentTypeId: '39', numOfRows: 60 }),
-      );
       expect(result.candidates.map((c) => c.name)).toEqual(['진짜 식당']);
     });
 
@@ -247,15 +276,17 @@ describe('PlacesService', () => {
         sigunguCode: '1',
         startDate: '2026-07-13',
       });
-      tourApiClient.fetchAreaBasedList.mockResolvedValue([realRestaurant, cafe]);
-      (placeRepository.find as jest.Mock).mockResolvedValue([buildPlace(cafe, 'c1')]);
+      freshCache(placeRepository);
+      placeRepository.find = findByContentType({
+        '39': [buildPlace(realRestaurant, 'r1'), buildPlace(cafe, 'c1')],
+      });
 
       const result = await service.getCandidates('trip-1', 'user-1', { category: 'cafe' });
 
       expect(result.candidates.map((c) => c.name)).toEqual(['카페']);
     });
 
-    it('집중률이 높은 관광지를 위로, 매칭 안 된 장소는 TourAPI 순서를 유지한 채 뒤로 정렬한다', async () => {
+    it('집중률이 높은 관광지를 위로, 매칭 안 된 장소는 조회 순서를 유지한 채 뒤로 정렬한다', async () => {
       const low = buildTourApiItem({ contentId: '1', title: '집중률 낮음' });
       const unmatched = buildTourApiItem({ contentId: '2', title: '미매칭 장소' });
       const high = buildTourApiItem({ contentId: '3', title: '집중률 높음' });
@@ -264,12 +295,10 @@ describe('PlacesService', () => {
         sigunguCode: '1',
         startDate: '2026-07-13',
       });
-      tourApiClient.fetchAreaBasedList.mockResolvedValue([low, unmatched, high]);
-      (placeRepository.find as jest.Mock).mockResolvedValue([
-        buildPlace(low),
-        buildPlace(unmatched),
-        buildPlace(high),
-      ]);
+      freshCache(placeRepository);
+      placeRepository.find = findByContentType({
+        '12': [buildPlace(low, '1'), buildPlace(unmatched, '2'), buildPlace(high, '3')],
+      });
       tatsCnctrRateClient.fetchConcentrationMap.mockResolvedValue(
         new Map([
           ['집중률낮음', 10],
@@ -286,7 +315,7 @@ describe('PlacesService', () => {
       ]);
     });
 
-    it('시군구 코드가 없으면 집중률을 조회하지 않고 TourAPI 순서를 유지한다', async () => {
+    it('시군구 코드가 없으면 집중률을 조회하지 않고 조회 순서를 유지한다', async () => {
       const first = buildTourApiItem({ contentId: '1', title: '첫째' });
       const second = buildTourApiItem({ contentId: '2', title: '둘째' });
       tripsService.getDetail.mockResolvedValue({
@@ -294,8 +323,10 @@ describe('PlacesService', () => {
         sigunguCode: null,
         startDate: '2026-07-13',
       });
-      tourApiClient.fetchAreaBasedList.mockResolvedValue([first, second]);
-      (placeRepository.find as jest.Mock).mockResolvedValue([buildPlace(first), buildPlace(second)]);
+      freshCache(placeRepository);
+      placeRepository.find = findByContentType({
+        '12': [buildPlace(first, '1'), buildPlace(second, '2')],
+      });
 
       const result = await service.getCandidates('trip-1', 'user-1', {});
 
@@ -304,21 +335,55 @@ describe('PlacesService', () => {
       expect(result.candidates[0].concentrationRate).toBeNull();
     });
 
-    it('집중률 조회가 실패해도 후보 조회 전체는 실패하지 않고 TourAPI 순서로 반환한다', async () => {
+    it('집중률 조회가 실패해도 후보 조회 전체는 실패하지 않고 조회 순서로 반환한다', async () => {
       const item = buildTourApiItem();
       tripsService.getDetail.mockResolvedValue({
         areaCode: '6',
         sigunguCode: '1',
         startDate: '2026-07-13',
       });
-      tourApiClient.fetchAreaBasedList.mockResolvedValue([item]);
-      (placeRepository.find as jest.Mock).mockResolvedValue([buildPlace(item)]);
+      freshCache(placeRepository);
+      placeRepository.find = findByContentType({ '12': [buildPlace(item)] });
       tatsCnctrRateClient.fetchConcentrationMap.mockRejectedValue(new Error('502'));
 
       const result = await service.getCandidates('trip-1', 'user-1', {});
 
       expect(result.candidates).toHaveLength(1);
       expect(result.candidates[0].concentrationRate).toBeNull();
+    });
+
+    it('콜드 상태에서 TourAPI 동기화가 실패하면 에러를 전파한다(보여줄 캐시가 없음)', async () => {
+      tripsService.getDetail.mockResolvedValue({
+        areaCode: '6',
+        sigunguCode: '1',
+        startDate: '2026-07-13',
+      });
+      (placeRepository.findOne as jest.Mock).mockResolvedValue(null); // 콜드
+      const failure = Object.assign(new Error('down'), { code: 'TOUR_API_REQUEST_FAILED' });
+      tourApiClient.fetchAreaBasedList.mockRejectedValue(failure);
+
+      await expect(service.getCandidates('trip-1', 'user-1', {})).rejects.toMatchObject({
+        code: 'TOUR_API_REQUEST_FAILED',
+      });
+    });
+
+    it('stale 캐시에서 동기화가 실패하면 기존 캐시로 폴백한다(에러 안 던짐)', async () => {
+      const item = buildTourApiItem();
+      tripsService.getDetail.mockResolvedValue({
+        areaCode: '6',
+        sigunguCode: '1',
+        startDate: '2026-07-13',
+      });
+      // 오래된 캐시 존재(8일 전) → stale이지만 hasAny=true
+      (placeRepository.findOne as jest.Mock).mockResolvedValue({
+        syncedAt: new Date(Date.now() - 8 * 24 * 60 * 60 * 1000),
+      });
+      tourApiClient.fetchAreaBasedList.mockRejectedValue(new Error('down'));
+      placeRepository.find = findByContentType({ '12': [buildPlace(item)] });
+
+      const result = await service.getCandidates('trip-1', 'user-1', {});
+
+      expect(result.candidates.map((c) => c.name)).toEqual(['가덕도 등대']);
     });
   });
 

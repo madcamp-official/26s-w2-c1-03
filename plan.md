@@ -390,6 +390,7 @@ erDiagram
 - **데이터 소스 변경(팀 결정, 유지)**: "Kakao 로컬 API 리뷰수/평점 병합 정렬"은 Kakao 로컬 API가 해당 필드를 제공하지 않아 불가능으로 확인됨(카카오 공식 답변, 2026-01-14) → **Google Places API (New)**로 대체.
 - **체크리스트**:
   - [x] BE: TourAPI 연동(`places/clients/tour-api.client.ts`, `area_code`/`sigungu_code` 기준 조회 → `places` 캐싱)
+  - [x] **[성능 최적화, 2026-07-15] DB-우선(cache-first) 후보 조회로 전환** — 기존엔 후보 조회마다 느린 TourAPI(data.go.kr)를 라이브로 3번(관광지/음식점/쇼핑) 호출했고 `places` 테이블은 write-only 캐시에 그쳤음. 이제 `getCandidates`가 지역 단위로 한 번만 TourAPI에서 받아 적재하고(`syncArea`, 카테고리별 50건), **TTL(7일) 동안은 TourAPI를 건드리지 않고 `places` 테이블에서 바로 읽음**(`queryByContentType`, 기존 `(area_code, sigungu_code)` 인덱스 활용). 콜드 동기화 실패 시에만 에러 전파, stale이면 기존 캐시로 폴백. 공공누리 1유형이라 저장 허용. `getScheduleCandidatePools`(스케줄 생성 보강 후보)도 같은 캐시를 재사용해 스케줄 생성에서 TourAPI 라이브 호출 제거. 유닛테스트로 콜드/신선/stale·폴백 경로 검증(`places.service.spec.ts`, 전체 265 tests 통과)
   - [x] BE: Google Places API(New) 연동(`places/clients/google-places.client.ts`) — **현재는 키워드 검색(`searchText`)과 장소 상세 리뷰 조회에만 사용.** 후보 목록 정렬용 평점/리뷰수 병합은 아래 정렬 정책 변경으로 대체됨
   - [x] **[정렬 정책 변경, 2026-07-15 감사 반영]** 후보 정렬 기준을 `rating × log10(reviewCount+1)`(Google 평점 가중치)에서 **TourAPI 관광지 집중률(`tats-cnctr-rate.client.ts`, 방문 추이 예측 0~100)** 순으로 교체함 — 성능(시군구 단위 1회 조회로 후보 전체 커버, 장소별 Google 매칭 제거)과 공공누리 약관 준수(Google 콘텐츠 미저장) 때문. 집중률 미매칭 장소(음식점/쇼핑·미등록)는 안정 정렬로 TourAPI 기본순 유지하며 뒤로 배치. `places.service.ts`의 `buildCandidates`/`safeFetchConcentration`로 코드 확인, 예측창(오늘~+30일) 밖 여행은 오늘로 폴백. 근거 메모리: `places-sorting-policy`
   - [x] BE: `GET /trips/{tripId}/places/candidates`, `GET /places/{placeId}` 완성

@@ -103,13 +103,10 @@ const CAT3_CAFE = 'A05020900';
 const UNMATCHED_SCORE = -1;
 
 /**
- * 카테고리 미지정("전체") 조회 시 카테고리당 요청 개수 — candidatePageSize(30)를
- * 균등 배분한다. contentTypeId 없이 조회하면 TourAPI가 숙박(32)·여행코스(25, 좌표
- * 없음)·행사/축제(15) 등 관광지 후보로 부적절한 항목까지 섞어 내려주므로, 카테고리별로
- * 나눠 받아 합친다. 맛집(39) 한 번만 받고 그 안에 카페가 섞여 있어도 "전체" 탭은
- * 애초에 카테고리를 가리지 않으니 별도로 카페를 더 조회하지 않는다.
+ * 지역 동기화·"전체" 조회에서 다루는 카테고리. contentTypeId 없이 한 번에 조회하면
+ * TourAPI가 숙박(32)·여행코스(25, 좌표 없음)·행사/축제(15) 등 후보로 부적절한 항목까지
+ * 섞어 내려주므로, 관광지/음식점/쇼핑만 카테고리별로 나눠 받아 적재·조회한다.
  */
-const UNCATEGORIZED_ROWS_PER_CATEGORY = 10;
 const UNCATEGORIZED_FETCH_CATEGORIES: readonly PlaceCategory[] = [
   'tourist_spot',
   'restaurant',
@@ -149,6 +146,19 @@ export class PlacesService {
   /** 집중률 API가 제공하는 예측 창(현재일 기준 향후 30일) — 정렬 기준일이 이 범위를 벗어나면 오늘로 폴백. */
   private static readonly CONCENTRATION_WINDOW_DAYS = 30;
 
+  /**
+   * 지역 후보 캐시 유효기간 — 이 기간 안에는 TourAPI를 다시 부르지 않고 DB에서 읽는다.
+   * TourAPI 지역 관광정보는 변동이 드물어(신규 등록/폐업 반영이 느림) 7일이면 충분하며,
+   * 필요 시 값만 늘리면 된다. 공공누리 1유형이라 저장·캐싱이 약관상 허용된다.
+   */
+  private static readonly AREA_SYNC_TTL_MS = 7 * 24 * 60 * 60 * 1000;
+  /** 콜드 동기화 시 카테고리(관광지/음식점/쇼핑)별로 받아 적재할 행 수 — 카테고리 탭이 충분히 채워지도록 넉넉히. */
+  private static readonly SYNC_ROWS_PER_CATEGORY = 50;
+  /** "전체" 응답에서 카테고리별로 내려줄 후보 수 상한(균형 유지). */
+  private static readonly CANDIDATE_ROWS_PER_CATEGORY = 30;
+  /** 단일 카테고리(관광지/쇼핑) 응답 후보 수 상한. */
+  private static readonly SINGLE_CATEGORY_LIMIT = 60;
+
   constructor(
     @InjectRepository(Place) private readonly placeRepository: Repository<Place>,
     private readonly tripsService: TripsService,
@@ -167,11 +177,13 @@ export class PlacesService {
     if (!trip.areaCode) {
       throw new BusinessException(PlacesErrorCode.AREA_CODE_REQUIRED);
     }
+    const sigunguCode = trip.sigunguCode ?? undefined;
 
-    const baseParams = { areaCode: trip.areaCode, sigunguCode: trip.sigunguCode ?? undefined };
-    const rawItems = query.category
-      ? await this.fetchCategoryItems(baseParams, query.category)
-      : await this.fetchUncategorizedItems(baseParams);
+    // 성능 핵심: TourAPI(data.go.kr)는 응답이 느려 매 조회마다 라이브 호출하면 체감이
+    // 크게 나빠진다. 공공누리 1유형이라 저장이 허용되므로(TourAPI 데이터), 지역 단위로
+    // 한 번만 받아 places 테이블에 적재하고 이후 TTL(7일) 동안은 DB에서 바로 읽는다.
+    await this.ensureAreaSynced(trip.areaCode, sigunguCode);
+    const places = await this.queryCachedPlaces(trip.areaCode, sigunguCode, query.category);
 
     // 방문 집중도 순 정렬용 데이터 — 시군구 단위 1회 조회로 후보 전체를 커버한다
     // (장소별 Google 매칭을 대체). 시군구 코드가 없으면 조회 불가라 TourAPI 기본순 폴백.
@@ -180,60 +192,150 @@ export class PlacesService {
       trip.sigunguCode,
       trip.startDate,
     );
-    return { candidates: await this.buildCandidates(rawItems, concentrationMap) };
+    return { candidates: this.sortAndMapCandidates(places, concentrationMap) };
   }
 
   /**
-   * 카테고리 하나를 지정한 조회. 맛집/카페는 TourAPI에 별도 contentTypeId가 없어
-   * 음식점(39)을 넉넉히 받은 뒤 cat3(카페/전통찻집)로 원하는 쪽만 남긴다.
+   * 지역의 TourAPI 후보 캐시가 없거나 오래됐으면(TTL 초과) 한 번 동기화한다. 신선한
+   * 캐시가 있으면 아무 것도 하지 않아 TourAPI를 건드리지 않는다. 콜드 상태(캐시가
+   * 아예 없음)에서 동기화가 실패하면 보여줄 데이터가 없으므로 에러를 전파하고(기존
+   * 라이브 조회와 동일한 실패 동작), 캐시가 이미 있으면 stale이어도 그대로 서비스한다.
    */
-  private async fetchCategoryItems(
-    baseParams: { areaCode: string; sigunguCode?: string },
-    category: PlaceCategory,
-  ): Promise<TourApiPlaceItem[]> {
-    if (category !== 'restaurant' && category !== 'cafe') {
-      return this.tourApiClient.fetchAreaBasedList({
-        ...baseParams,
-        contentTypeId: CATEGORY_TO_CONTENT_TYPE_ID[category],
-      });
+  private async ensureAreaSynced(areaCode: string, sigunguCode?: string): Promise<void> {
+    const cache = await this.getAreaCacheState(areaCode, sigunguCode);
+    if (cache.fresh) {
+      return;
     }
-    const items = await this.tourApiClient.fetchAreaBasedList({
-      ...baseParams,
-      contentTypeId: CONTENT_TYPE_RESTAURANT,
-      numOfRows: CATEGORY_FOOD_FETCH_ROWS,
+    try {
+      await this.syncArea(areaCode, sigunguCode);
+    } catch (error) {
+      if (!cache.hasAny) {
+        throw error;
+      }
+      this.logger.warn(
+        `TourAPI 지역 동기화 실패, 기존 캐시로 폴백(area=${areaCode}, sigungu=${sigunguCode ?? '-'}): ${(error as Error).message}`,
+      );
+    }
+  }
+
+  /** 지역 캐시 상태 — 캐시 존재 여부(hasAny)와 TTL 내 신선 여부(fresh). */
+  private async getAreaCacheState(
+    areaCode: string,
+    sigunguCode?: string,
+  ): Promise<{ hasAny: boolean; fresh: boolean }> {
+    const newest = await this.placeRepository.findOne({
+      where: {
+        source: PlaceSource.TOURAPI,
+        areaCode,
+        ...(sigunguCode ? { sigunguCode } : {}),
+      },
+      order: { syncedAt: 'DESC' },
     });
-    const wantCafe = category === 'cafe';
-    return items.filter((item) => (item.cat3 === CAT3_CAFE) === wantCafe);
+    if (!newest?.syncedAt) {
+      return { hasAny: !!newest, fresh: false };
+    }
+    const fresh = Date.now() - newest.syncedAt.getTime() < PlacesService.AREA_SYNC_TTL_MS;
+    return { hasAny: true, fresh };
   }
 
   /**
-   * "전체"(카테고리 미지정) 조회 — 관광지/음식점/쇼핑 세 카테고리를 각각 조회해 합친다.
-   * contentTypeId 없이 한 번에 조회하면 TourAPI가 숙박·여행코스·행사 등도 함께 내려줘
-   * 부적절한 항목이 섞인다(§UNCATEGORIZED_ROWS_PER_CATEGORY 주석 참고). 음식점(39) 안의
-   * 카페는 걸러내지 않는다 — "전체" 탭은 애초에 카테고리를 가리지 않는 탭이다.
+   * 지역의 관광지(12)/음식점(39)/쇼핑(38)을 각각 넉넉히 받아 places 테이블에 적재한다.
+   * 카테고리별로 나눠 받는 이유는 contentTypeId 없이 조회하면 숙박·여행코스·행사 등
+   * 후보로 부적절한 항목이 섞이기 때문(§UNCATEGORIZED_FETCH_CATEGORIES 주석과 동일 이유).
    */
-  private async fetchUncategorizedItems(baseParams: {
-    areaCode: string;
-    sigunguCode?: string;
-  }): Promise<TourApiPlaceItem[]> {
+  private async syncArea(areaCode: string, sigunguCode?: string): Promise<void> {
+    const baseParams = { areaCode, sigunguCode };
     const results = await Promise.all(
       UNCATEGORIZED_FETCH_CATEGORIES.map((category) =>
         this.tourApiClient.fetchAreaBasedList({
           ...baseParams,
           contentTypeId: CATEGORY_TO_CONTENT_TYPE_ID[category],
-          numOfRows: UNCATEGORIZED_ROWS_PER_CATEGORY,
+          numOfRows: PlacesService.SYNC_ROWS_PER_CATEGORY,
         }),
       ),
     );
 
-    // 같은 contentId가 여러 카테고리에 걸쳐 중복 내려올 가능성에 대비해 먼저 나온 것을 유지한다.
+    // 같은 contentId가 여러 카테고리에 중복으로 내려올 수 있어 먼저 나온 것을 유지한다.
     const byContentId = new Map<string, TourApiPlaceItem>();
     for (const item of results.flat()) {
       if (!byContentId.has(item.contentId)) {
         byContentId.set(item.contentId, item);
       }
     }
-    return [...byContentId.values()];
+    await this.upsertPlaceRows([...byContentId.values()]);
+  }
+
+  /**
+   * DB에 적재된 지역 후보를 카테고리에 맞게 읽는다(TourAPI 라이브 호출 없음). "전체"는
+   * 관광지/음식점/쇼핑을 각각 상한만큼 받아 합쳐 카테고리 균형을 유지한다 — FE가
+   * 클라이언트 사이드로 카테고리 탭을 거르므로 각 카테고리가 충분히 채워져 있어야 한다.
+   */
+  private async queryCachedPlaces(
+    areaCode: string,
+    sigunguCode: string | undefined,
+    category?: PlaceCategory,
+  ): Promise<Place[]> {
+    if (!category) {
+      const [spots, foods, shops] = await Promise.all(
+        UNCATEGORIZED_FETCH_CATEGORIES.map((c) =>
+          this.queryByContentType(
+            areaCode,
+            sigunguCode,
+            CATEGORY_TO_CONTENT_TYPE_ID[c],
+            PlacesService.CANDIDATE_ROWS_PER_CATEGORY,
+          ),
+        ),
+      );
+      // 음식점(39)과 쇼핑/관광이 겹칠 일은 없지만 방어적으로 중복 제거한다.
+      return this.dedupePlaces([...spots, ...foods, ...shops]);
+    }
+
+    if (category === 'restaurant' || category === 'cafe') {
+      const foods = await this.queryByContentType(
+        areaCode,
+        sigunguCode,
+        CONTENT_TYPE_RESTAURANT,
+        CATEGORY_FOOD_FETCH_ROWS,
+      );
+      const wantCafe = category === 'cafe';
+      return foods.filter((place) => (place.categoryCode === CAT3_CAFE) === wantCafe);
+    }
+
+    return this.queryByContentType(
+      areaCode,
+      sigunguCode,
+      CATEGORY_TO_CONTENT_TYPE_ID[category],
+      PlacesService.SINGLE_CATEGORY_LIMIT,
+    );
+  }
+
+  /** 한 contentTypeId의 지역 후보를 최신 동기화순으로 상한만큼 읽는다((areaCode, sigunguCode) 인덱스 활용). */
+  private queryByContentType(
+    areaCode: string,
+    sigunguCode: string | undefined,
+    contentTypeId: string,
+    limit: number,
+  ): Promise<Place[]> {
+    return this.placeRepository.find({
+      where: {
+        source: PlaceSource.TOURAPI,
+        areaCode,
+        ...(sigunguCode ? { sigunguCode } : {}),
+        contentTypeId,
+      },
+      order: { syncedAt: 'DESC' },
+      take: limit,
+    });
+  }
+
+  private dedupePlaces(places: Place[]): Place[] {
+    const byId = new Map<string, Place>();
+    for (const place of places) {
+      if (!byId.has(place.id)) {
+        byId.set(place.id, place);
+      }
+    }
+    return [...byId.values()];
   }
 
   /**
@@ -356,18 +458,15 @@ export class PlacesService {
   }
 
   /**
-   * rawItems(TourAPI) → places 캐시 벌크 upsert → 관광지 집중률(방문 추이 예측) 매칭 →
-   * 방문 집중도 순 정렬 → DTO. 집중률이 매칭 안 되는 장소(음식점/쇼핑·미등록)는
-   * TourAPI 기본순(수정일순)을 유지한 채 뒤로 보낸다.
+   * DB에서 읽은 places → 관광지 집중률(방문 추이 예측) 매칭 → 방문 집중도 순 정렬 →
+   * DTO. 집중률이 매칭 안 되는 장소(음식점/쇼핑·미등록)는 조회 순서를 유지한 채 뒤로 보낸다.
    */
-  private async buildCandidates(
-    rawItems: TourApiPlaceItem[],
+  private sortAndMapCandidates(
+    places: Place[],
     concentrationMap: Map<string, number>,
-  ): Promise<PlaceCandidateDto[]> {
-    const places = await this.upsertPlaces(rawItems);
-
+  ): PlaceCandidateDto[] {
     // Array.prototype.sort는 안정 정렬이라 집중률이 같거나(둘 다 미매칭) 값이 없으면
-    // TourAPI가 내려준 원래 순서가 보존된다.
+    // DB에서 읽어온 순서(최신 동기화순)가 보존된다.
     const withRate = places.map((place) => ({
       place,
       concentrationRate: place.name
@@ -420,10 +519,13 @@ export class PlacesService {
 
   /**
    * 스케줄 생성에서 사용자가 고른 필수 장소 외에 함께 고려할 카테고리별 보강 후보 풀을
-   * 가져온다. 관광지(12)와 음식점(39)을 TourAPI에서 각각 조회하고, 음식점은 cat3로
-   * 식당/카페를 분리한 뒤, 각 풀을 선택 장소 중심좌표(anchors)에서 가까운 순으로 정렬해
-   * 반환한다 — 동선(거리·이동시간)을 실제로 반영하려면 애초에 가까운 후보를 AI에 줘야 한다.
-   * 후보 조회 실패가 전체 스케줄 생성을 막지는 않도록 빈 풀로 폴백한다.
+   * 가져온다. 관광지(12)와 음식점(39)을 조회하고, 음식점은 cat3로 식당/카페를 분리한 뒤,
+   * 각 풀을 선택 장소 중심좌표(anchors)에서 가까운 순으로 정렬해 반환한다 — 동선(거리·이동
+   * 시간)을 실제로 반영하려면 애초에 가까운 후보를 AI에 줘야 한다. 후보 조회 실패가 전체
+   * 스케줄 생성을 막지는 않도록 빈 풀로 폴백한다.
+   *
+   * getCandidates와 동일한 지역 캐시를 재사용한다 — 사용자는 보통 후보를 둘러본 뒤
+   * 스케줄을 만들기 때문에 이 시점엔 캐시가 이미 채워져 있어 TourAPI를 다시 부르지 않는다.
    */
   async getScheduleCandidatePools(
     tripId: string,
@@ -438,28 +540,17 @@ export class PlacesService {
       if (!trip.areaCode) {
         return empty;
       }
+      const sigunguCode = trip.sigunguCode ?? undefined;
+      await this.ensureAreaSynced(trip.areaCode, sigunguCode);
 
-      const baseParams = {
-        areaCode: trip.areaCode,
-        sigunguCode: trip.sigunguCode ?? undefined,
-      };
-      const [touristItems, foodItems] = await Promise.all([
-        this.tourApiClient.fetchAreaBasedList({
-          ...baseParams,
-          contentTypeId: CONTENT_TYPE_TOURIST_SPOT,
-          numOfRows: 40,
-        }),
+      const [touristPlaces, foodPlaces] = await Promise.all([
+        this.queryByContentType(trip.areaCode, sigunguCode, CONTENT_TYPE_TOURIST_SPOT, 40),
         // 카페가 소분류라 식당 풀과 함께 오도록 넉넉히 받는다.
-        this.tourApiClient.fetchAreaBasedList({
-          ...baseParams,
-          contentTypeId: CONTENT_TYPE_RESTAURANT,
-          numOfRows: 60,
-        }),
+        this.queryByContentType(trip.areaCode, sigunguCode, CONTENT_TYPE_RESTAURANT, 60),
       ]);
 
       const excluded = new Set(excludeIds);
-      const toSortedInfos = async (items: TourApiPlaceItem[]): Promise<ScheduledPlaceInfo[]> => {
-        const places = await this.upsertPlaces(items);
+      const toSortedInfos = async (places: Place[]): Promise<ScheduledPlaceInfo[]> => {
         const infos: ScheduledPlaceInfo[] = [];
         for (const place of places) {
           if (excluded.has(place.id)) {
@@ -474,8 +565,8 @@ export class PlacesService {
       };
 
       const [attractions, foods] = await Promise.all([
-        toSortedInfos(touristItems),
-        toSortedInfos(foodItems),
+        toSortedInfos(touristPlaces),
+        toSortedInfos(foodPlaces),
       ]);
       return {
         attractions: attractions.slice(0, limits.attractions),
@@ -609,17 +700,15 @@ export class PlacesService {
   }
 
   /**
-   * (source, externalId) 기준 벌크 upsert — TourAPI 캐시 테이블이라 존재하면 최신 정보로
-   * 갱신한다. 항목마다 findOneBy+save를 돌리지 않고 ON CONFLICT 한 번(+id 조회 한 번)으로
-   * 처리해, 후보 30건 조회 시 DB 왕복을 2N에서 2로 줄인다. 반환 순서는 rawItems 순서를
-   * 유지한다(정렬은 호출부가 담당). overview 등 여기서 안 건드리는 컬럼은 ON CONFLICT가
-   * 덮어쓰지 않아 기존 값이 보존된다.
+   * TourAPI 항목을 places 테이블에 (source, externalId) 기준 벌크 upsert한다(조회 없음).
+   * 항목마다 findOneBy+save를 돌리지 않고 ON CONFLICT 한 번으로 처리한다.
+   * 지역 동기화(syncArea)는 적재만 필요하고 반환 행이 필요 없어 이 경량 버전을 쓴다.
+   * overview 등 여기서 안 건드리는 컬럼은 ON CONFLICT가 덮어쓰지 않아 기존 값이 보존된다.
    */
-  private async upsertPlaces(rawItems: TourApiPlaceItem[]): Promise<Place[]> {
+  private async upsertPlaceRows(rawItems: TourApiPlaceItem[]): Promise<void> {
     if (rawItems.length === 0) {
-      return [];
+      return;
     }
-
     const rows = rawItems.map((item) => ({
       source: PlaceSource.TOURAPI,
       externalId: item.contentId,
@@ -636,17 +725,6 @@ export class PlacesService {
       syncedAt: new Date(),
     }));
     await this.placeRepository.upsert(rows, ['source', 'externalId']);
-
-    const externalIds = rawItems.map((item) => item.contentId);
-    const saved = await this.placeRepository.find({
-      where: { source: PlaceSource.TOURAPI, externalId: In(externalIds) },
-    });
-
-    // upsert/find는 순서를 보장하지 않으므로 externalId로 rawItems 순서에 맞춰 재정렬한다.
-    const byExternalId = new Map(saved.map((place) => [place.externalId, place]));
-    return rawItems
-      .map((item) => byExternalId.get(item.contentId))
-      .filter((place): place is Place => place !== undefined);
   }
 
   /** Google Places 매칭 실패는 후보 전체 조회를 막지 않는다 — 미매칭으로 처리하고 계속 진행한다. */
