@@ -31,7 +31,13 @@ class AppConfig {
   /// GoogleSignIn이 idToken을 못 받고 "로그인 중 문제" 에러가 난다.
   static const String googleServerClientId = String.fromEnvironment(
     'GOOGLE_SERVER_CLIENT_ID',
-    defaultValue: '504131351844-3or38ad183eaedmc2vcgqkrn060p8c85.apps.googleusercontent.com',
+    defaultValue:
+        '504131351844-3or38ad183eaedmc2vcgqkrn060p8c85.apps.googleusercontent.com',
+  );
+
+  static const String googleWebClientId = String.fromEnvironment(
+    'GOOGLE_WEB_CLIENT_ID',
+    defaultValue: googleServerClientId,
   );
 
   /// 카카오 개발자 콘솔의 "네이티브 앱 키". AndroidManifest.xml/Info.plist의
@@ -57,12 +63,24 @@ class AppConfig {
   /// Firebase Web은 Android/iOS처럼 google-services.json /
   /// GoogleService-Info.plist를 자동으로 읽지 못한다. 웹에서 Firebase 기능을
   /// 쓰려면 Firebase Console의 Web app 설정값을 --dart-define으로 주입한다.
-  static const String firebaseWebApiKey = String.fromEnvironment('FIREBASE_WEB_API_KEY');
-  static const String firebaseWebAuthDomain = String.fromEnvironment('FIREBASE_WEB_AUTH_DOMAIN');
-  static const String firebaseWebProjectId = String.fromEnvironment('FIREBASE_WEB_PROJECT_ID');
-  static const String firebaseWebStorageBucket = String.fromEnvironment('FIREBASE_WEB_STORAGE_BUCKET');
-  static const String firebaseWebMessagingSenderId = String.fromEnvironment('FIREBASE_WEB_MESSAGING_SENDER_ID');
-  static const String firebaseWebAppId = String.fromEnvironment('FIREBASE_WEB_APP_ID');
+  static const String firebaseWebApiKey = String.fromEnvironment(
+    'FIREBASE_WEB_API_KEY',
+  );
+  static const String firebaseWebAuthDomain = String.fromEnvironment(
+    'FIREBASE_WEB_AUTH_DOMAIN',
+  );
+  static const String firebaseWebProjectId = String.fromEnvironment(
+    'FIREBASE_WEB_PROJECT_ID',
+  );
+  static const String firebaseWebStorageBucket = String.fromEnvironment(
+    'FIREBASE_WEB_STORAGE_BUCKET',
+  );
+  static const String firebaseWebMessagingSenderId = String.fromEnvironment(
+    'FIREBASE_WEB_MESSAGING_SENDER_ID',
+  );
+  static const String firebaseWebAppId = String.fromEnvironment(
+    'FIREBASE_WEB_APP_ID',
+  );
 
   static bool get hasFirebaseWebOptions =>
       firebaseWebApiKey.isNotEmpty &&

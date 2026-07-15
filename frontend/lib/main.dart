@@ -123,7 +123,9 @@ class _StartupGateState extends ConsumerState<_StartupGate> {
       future: _resolved,
       builder: (context, snapshot) {
         if (snapshot.connectionState != ConnectionState.done) {
-          return const Scaffold(body: Center(child: CircularProgressIndicator()));
+          return const Scaffold(
+            body: Center(child: CircularProgressIndicator()),
+          );
         }
         return snapshot.data ?? const LoginScreen();
       },

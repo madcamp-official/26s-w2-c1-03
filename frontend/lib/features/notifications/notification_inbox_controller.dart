@@ -13,8 +13,13 @@ final notificationInboxStoreProvider = Provider<NotificationInboxStore>(
 
 /// 홈 헤더의 안 읽음 배지와 알림 확인 창이 함께 watch하는 수신 알림 목록.
 final notificationInboxControllerProvider =
-    StateNotifierProvider<NotificationInboxController, List<ReceivedNotification>>((ref) {
-      return NotificationInboxController(ref.watch(notificationInboxStoreProvider))..init();
+    StateNotifierProvider<
+      NotificationInboxController,
+      List<ReceivedNotification>
+    >((ref) {
+      return NotificationInboxController(
+        ref.watch(notificationInboxStoreProvider),
+      )..init();
     });
 
 /// 이 기기가 받은 FCM 알림을 모아 "알림 확인 창"에 공급한다.
@@ -27,7 +32,8 @@ final notificationInboxControllerProvider =
 ///
 /// 백그라운드에서 도착했지만 탭하지 않은 알림은 별도 백그라운드 isolate 저장이
 /// 필요해 이번 스코프에선 기록하지 않는다(포그라운드 수신 + 탭 진입까지 커버).
-class NotificationInboxController extends StateNotifier<List<ReceivedNotification>> {
+class NotificationInboxController
+    extends StateNotifier<List<ReceivedNotification>> {
   NotificationInboxController(this._store) : super(const []);
 
   final NotificationInboxStore _store;

@@ -28,9 +28,11 @@ class ProfileImagePickFailed extends ProfileImagePickResult {
 /// `request.auth`를 요구하면 업로드가 permission-denied로 막힌다. `profile-images/**`
 /// 경로는 인증 없이 쓸 수 있도록 Firebase 콘솔에서 규칙을 열어둬야 한다.
 class ProfileImageUploadService {
-  ProfileImageUploadService({ImagePicker? imagePicker, FirebaseStorage? storage})
-    : _imagePicker = imagePicker ?? ImagePicker(),
-      _storage = storage ?? FirebaseStorage.instance;
+  ProfileImageUploadService({
+    ImagePicker? imagePicker,
+    FirebaseStorage? storage,
+  }) : _imagePicker = imagePicker ?? ImagePicker(),
+       _storage = storage ?? FirebaseStorage.instance;
 
   final ImagePicker _imagePicker;
   final FirebaseStorage _storage;
