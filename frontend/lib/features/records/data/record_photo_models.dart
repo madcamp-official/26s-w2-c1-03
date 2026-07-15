@@ -37,6 +37,23 @@ class FinalizeSelection {
   };
 }
 
+/// Day 항목(제목/본문/대표사진) — PUT .../days/{date} 응답 및 기록 상세의 dayEntries.
+class RecordDayEntry {
+  const RecordDayEntry({required this.date, required this.title, required this.content, required this.photo});
+
+  final String date;
+  final String? title;
+  final String? content;
+  final RecordPhoto? photo;
+
+  factory RecordDayEntry.fromJson(Map<String, dynamic> json) => RecordDayEntry(
+    date: json['date'] as String,
+    title: json['title'] as String?,
+    content: json['content'] as String?,
+    photo: json['photo'] == null ? null : RecordPhoto.fromJson(json['photo'] as Map<String, dynamic>),
+  );
+}
+
 /// API 명세서 §4 POST .../photos/finalize 응답 항목(record_photos row).
 class RecordPhoto {
   const RecordPhoto({

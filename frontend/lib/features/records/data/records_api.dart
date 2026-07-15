@@ -156,4 +156,24 @@ class RecordsApi {
       data: {'caption': caption},
     );
   }
+
+  /// Day 항목(제목/본문/대표사진) 생성 또는 수정 — PUT이라 안 보낸 필드는 서버가 null로 지운다.
+  Future<RecordDayEntry> upsertDayEntry(
+    String tripId,
+    String recordId,
+    String date, {
+    String? title,
+    String? content,
+    String? photoId,
+  }) async {
+    final response = await _apiClient.dio.put<Map<String, dynamic>>(
+      '/trips/$tripId/records/$recordId/days/$date',
+      data: {'title': title, 'content': content, 'photoId': photoId},
+    );
+    return RecordDayEntry.fromJson(response.data!);
+  }
+
+  Future<void> deleteDayEntry(String tripId, String recordId, String date) {
+    return _apiClient.dio.delete<void>('/trips/$tripId/records/$recordId/days/$date');
+  }
 }

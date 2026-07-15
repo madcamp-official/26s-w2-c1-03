@@ -55,7 +55,7 @@ class PaginatedRecords {
   );
 }
 
-/// API 명세서 §5 GET /records/{recordId} 상세 — 사진 목록 포함.
+/// API 명세서 §5 GET /records/{recordId} 상세 — 사진 목록 + Day별 다이어리 항목 포함.
 class RecordDetail {
   const RecordDetail({
     required this.id,
@@ -65,9 +65,12 @@ class RecordDetail {
     required this.content,
     required this.status,
     required this.tripCityName,
+    required this.tripStartDate,
+    required this.tripEndDate,
     required this.createdAt,
     required this.updatedAt,
     required this.photos,
+    required this.dayEntries,
   });
 
   final String id;
@@ -77,9 +80,12 @@ class RecordDetail {
   final String? content;
   final String status;
   final String tripCityName;
+  final String tripStartDate;
+  final String tripEndDate;
   final DateTime createdAt;
   final DateTime updatedAt;
   final List<RecordPhoto> photos;
+  final List<RecordDayEntry> dayEntries;
 
   factory RecordDetail.fromJson(Map<String, dynamic> json) => RecordDetail(
     id: json['id'] as String,
@@ -89,10 +95,15 @@ class RecordDetail {
     content: json['content'] as String?,
     status: json['status'] as String,
     tripCityName: json['tripCityName'] as String,
+    tripStartDate: json['tripStartDate'] as String,
+    tripEndDate: json['tripEndDate'] as String,
     createdAt: DateTime.parse(json['createdAt'] as String),
     updatedAt: DateTime.parse(json['updatedAt'] as String),
     photos: (json['photos'] as List<dynamic>)
         .map((e) => RecordPhoto.fromJson(e as Map<String, dynamic>))
+        .toList(),
+    dayEntries: (json['dayEntries'] as List<dynamic>)
+        .map((e) => RecordDayEntry.fromJson(e as Map<String, dynamic>))
         .toList(),
   );
 }
