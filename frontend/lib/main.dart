@@ -41,7 +41,7 @@ class TripAndEndApp extends StatelessWidget {
       title: 'trip and end',
       debugShowCheckedModeBanner: false,
       theme: ThemeData(
-        colorSchemeSeed: const Color(0xFF191F28),
+        colorSchemeSeed: const Color(0xFF5B4778),
         scaffoldBackgroundColor: Colors.white,
         useMaterial3: true,
         fontFamily: 'Pretendard',

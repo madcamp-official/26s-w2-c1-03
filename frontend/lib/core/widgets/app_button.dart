@@ -28,8 +28,8 @@ class AppButton extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final (bg, fg, disabledBg) = switch (variant) {
-      AppButtonVariant.ink => (AppColors.ink900, Colors.white, const Color(0xFFB0B8C1)),
-      AppButtonVariant.lime => (AppColors.lime, AppColors.green900, const Color(0xFFFBFDDD)),
+      AppButtonVariant.ink => (AppColors.ink900, Colors.white, AppColors.ink300),
+      AppButtonVariant.lime => (AppColors.lime, AppColors.green900, const Color(0xFFFEFFE6)),
       AppButtonVariant.outline => (Colors.white, AppColors.ink900, Colors.white),
     };
 
