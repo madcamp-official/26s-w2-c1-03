@@ -3,6 +3,7 @@ import { TypeOrmModule } from '@nestjs/typeorm';
 import { StorageModule } from '../storage/storage.module';
 import { TripsModule } from '../trips/trips.module';
 import { OpenAiPhotoCurateClient, PHOTO_CURATE_AI_CLIENT } from './client/photo-curate-ai.client';
+import { RecordDayEntry } from './entities/record-day-entry.entity';
 import { RecordPhotoRef } from './entities/record-photo-ref.entity';
 import { TravelRecord } from './entities/travel-record.entity';
 import { RecordPhoto } from './entities/record-photo.entity';
@@ -22,7 +23,7 @@ import { TripCoverController } from './trip-cover.controller';
  */
 @Module({
   imports: [
-    TypeOrmModule.forFeature([TravelRecord, RecordPhoto, RecordPhotoRef]),
+    TypeOrmModule.forFeature([TravelRecord, RecordPhoto, RecordPhotoRef, RecordDayEntry]),
     TripsModule,
     StorageModule,
   ],
