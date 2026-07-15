@@ -85,17 +85,17 @@ class _RecordsListScreenState extends ConsumerState<RecordsListScreen> {
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              const Text('📔', style: TextStyle(fontSize: 40)),
-              const SizedBox(height: 12),
-              const Text(
-                '아직 작성한 기록이 없어',
-                style: TextStyle(fontSize: 16, fontWeight: FontWeight.w700, color: AppColors.ink900),
+              Container(
+                width: 96,
+                height: 96,
+                alignment: Alignment.center,
+                decoration: const BoxDecoration(color: AppColors.surfaceSubtle, shape: BoxShape.circle),
+                child: const Icon(Icons.menu_book_outlined, size: 40, color: AppColors.ink300),
               ),
-              const SizedBox(height: 4),
+              const SizedBox(height: 16),
               const Text(
-                '여행이 끝나면 트립 상세 화면에서 기록을 시작할 수 있어',
-                style: TextStyle(fontSize: 13, color: AppColors.ink400, fontWeight: FontWeight.w600),
-                textAlign: TextAlign.center,
+                '아직 작성한 기록이 없어요.',
+                style: TextStyle(fontSize: 16, fontWeight: FontWeight.w700, color: AppColors.ink900),
               ),
             ],
           ),

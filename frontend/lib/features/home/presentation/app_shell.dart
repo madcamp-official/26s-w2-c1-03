@@ -9,8 +9,8 @@ import '../../schedule/presentation/schedule_trip_list_screen.dart';
 import '../../trips/presentation/create_trip_screen.dart';
 import '../../trips/presentation/trip_list_screen.dart';
 
-/// 하단 탭바 셸(design.md §5.1/§6): 좌측 홈/스케줄, 중앙 raised FAB(여행 추가),
-/// 우측 기록/마이.
+/// 하단 탭바 셸(design.md §5.1/§6): 좌측 홈/스케줄, 중앙 여행 추가 버튼,
+/// 우측 기록/마이 — 5개 모두 탭바와 같은 라인에 놓인다.
 class AppShell extends StatefulWidget {
   const AppShell({super.key});
 
@@ -46,68 +46,69 @@ class _AppShellState extends State<AppShell> {
   Widget build(BuildContext context) {
     return Scaffold(
       body: IndexedStack(index: _tabIndex, children: _tabs),
-      floatingActionButton: SizedBox(
-        width: 52,
-        height: 52,
-        child: FloatingActionButton(
-          onPressed: _openCreateTrip,
-          backgroundColor: AppColors.ink900,
-          elevation: 0,
-          shape: const CircleBorder(),
-          child: const Icon(Icons.add, color: AppColors.lime, size: 26),
-        ),
-      ),
-      floatingActionButtonLocation: FloatingActionButtonLocation.centerDocked,
       bottomNavigationBar: ClipRect(
         child: BackdropFilter(
           filter: ImageFilter.blur(sigmaX: 10, sigmaY: 10),
           child: Container(
+            height: 88,
             decoration: const BoxDecoration(
               color: Color(0xF5FFFFFF),
               border: Border(
                 top: BorderSide(color: Color(0xFFEFF1F3), width: 1),
               ),
             ),
-            child: BottomAppBar(
-              shape: const CircularNotchedRectangle(),
-              notchMargin: 8,
-              color: Colors.transparent,
-              elevation: 0,
-              height: 88,
-              padding: EdgeInsets.zero,
-              child: Row(
-                mainAxisAlignment: MainAxisAlignment.spaceAround,
-                children: [
-                  _TabButton(
-                    icon: Icons.home_outlined,
-                    label: '홈',
-                    selected: _tabIndex == 0,
-                    onTap: () => setState(() => _tabIndex = 0),
-                  ),
-                  _TabButton(
-                    icon: Icons.map_outlined,
-                    label: '스케줄',
-                    selected: _tabIndex == 1,
-                    onTap: () => setState(() => _tabIndex = 1),
-                  ),
-                  const SizedBox(width: 44),
-                  _TabButton(
-                    icon: Icons.photo_outlined,
-                    label: '기록',
-                    selected: _tabIndex == 2,
-                    onTap: () => setState(() => _tabIndex = 2),
-                  ),
-                  _TabButton(
-                    icon: Icons.person_outline,
-                    label: '마이',
-                    selected: _tabIndex == 3,
-                    onTap: () => setState(() => _tabIndex = 3),
-                  ),
-                ],
-              ),
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.spaceAround,
+              children: [
+                _TabButton(
+                  icon: Icons.home_outlined,
+                  label: '홈',
+                  selected: _tabIndex == 0,
+                  onTap: () => setState(() => _tabIndex = 0),
+                ),
+                _TabButton(
+                  icon: Icons.map_outlined,
+                  label: '스케줄',
+                  selected: _tabIndex == 1,
+                  onTap: () => setState(() => _tabIndex = 1),
+                ),
+                _AddTripButton(onTap: _openCreateTrip),
+                _TabButton(
+                  icon: Icons.photo_outlined,
+                  label: '기록',
+                  selected: _tabIndex == 2,
+                  onTap: () => setState(() => _tabIndex = 2),
+                ),
+                _TabButton(
+                  icon: Icons.person_outline,
+                  label: '마이',
+                  selected: _tabIndex == 3,
+                  onTap: () => setState(() => _tabIndex = 3),
+                ),
+              ],
             ),
           ),
         ),
+      ),
+    );
+  }
+}
+
+class _AddTripButton extends StatelessWidget {
+  const _AddTripButton({required this.onTap});
+
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return InkWell(
+      onTap: onTap,
+      customBorder: const CircleBorder(),
+      child: Container(
+        width: 48,
+        height: 48,
+        decoration: const BoxDecoration(color: AppColors.ink900, shape: BoxShape.circle),
+        child: const Icon(Icons.add, color: AppColors.lime, size: 24),
       ),
     );
   }
