@@ -53,6 +53,7 @@ class _TripScheduleMapViewState extends ConsumerState<TripScheduleMapView> {
   GoogleMapController? _mapController;
   int _selectedDay = 1;
   Set<Marker> _markers = {};
+  Set<Polyline> _polylines = {};
 
   /// 장소가 하나도 없을 때 지도를 맞출 여행 지역 대략 좌표. 후보 조회(§2.2) 결과의
   /// 첫 좌표를 재사용한다 — 지오코딩 API를 새로 붙이지 않고도 정확한 지역 중심을 얻는다.
@@ -128,23 +129,44 @@ class _TripScheduleMapViewState extends ConsumerState<TripScheduleMapView> {
   Future<void> _loadMarkers() async {
     final places = _currentPlaces;
     final markers = <Marker>{};
+    final points = <LatLng>[];
     for (final place in places) {
       if (place.lat == null || place.lng == null) continue;
       final icon = await ScheduleMarkerIcons.numbered(
         number: place.orderInDay,
         color: categoryColor(place.category),
       );
+      final position = LatLng(place.lat!, place.lng!);
+      points.add(position);
       markers.add(
         Marker(
           markerId: MarkerId(place.id),
-          position: LatLng(place.lat!, place.lng!),
+          position: position,
           icon: icon,
           anchor: const Offset(0.5, 0.5),
         ),
       );
     }
+    final polylines = <Polyline>{};
+    if (points.length > 1) {
+      polylines.add(
+        Polyline(
+          polylineId: PolylineId('day-$_selectedDay-route'),
+          points: points,
+          color: AppColors.lime,
+          width: 4,
+          patterns: [PatternItem.dash(16), PatternItem.gap(10)],
+          startCap: Cap.roundCap,
+          endCap: Cap.roundCap,
+          jointType: JointType.round,
+        ),
+      );
+    }
     if (!mounted) return;
-    setState(() => _markers = markers);
+    setState(() {
+      _markers = markers;
+      _polylines = polylines;
+    });
     _fitCamera();
   }
 
@@ -227,6 +249,7 @@ class _TripScheduleMapViewState extends ConsumerState<TripScheduleMapView> {
             zoom: 6.5,
           ),
           markers: _markers,
+          polylines: _polylines,
           myLocationButtonEnabled: false,
           zoomControlsEnabled: false,
           padding: const EdgeInsets.only(bottom: 90),
@@ -553,26 +576,42 @@ class _StopRow extends StatelessWidget {
     final color = categoryColor(place.category);
     return IntrinsicHeight(
       child: Row(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
+          SizedBox(
+            width: 52,
+            child: Padding(
+              padding: const EdgeInsets.only(top: 2, right: 8),
+              child: Text(
+                place.startTime ?? '',
+                textAlign: TextAlign.right,
+                style: const TextStyle(
+                  fontSize: 11.5,
+                  fontWeight: FontWeight.w700,
+                  color: AppColors.ink600,
+                ),
+              ),
+            ),
+          ),
           Column(
             children: [
               Container(
-                width: 26,
-                height: 26,
-                alignment: Alignment.center,
-                decoration: BoxDecoration(color: color, shape: BoxShape.circle),
-                child: Text(
-                  '${place.orderInDay}',
-                  style: const TextStyle(
-                    fontSize: 12,
-                    fontWeight: FontWeight.w900,
-                    color: Colors.white,
-                  ),
+                width: 10,
+                height: 10,
+                margin: const EdgeInsets.only(top: 3),
+                decoration: const BoxDecoration(
+                  color: AppColors.lime,
+                  shape: BoxShape.circle,
                 ),
               ),
               if (!isLast)
-                Expanded(child: Container(width: 2, color: AppColors.border)),
+                Expanded(
+                  child: Container(
+                    width: 2,
+                    margin: const EdgeInsets.only(top: 4),
+                    color: AppColors.border,
+                  ),
+                ),
             ],
           ),
           const SizedBox(width: 12),
@@ -588,10 +627,25 @@ class _StopRow extends StatelessWidget {
               child: Row(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
+                  _CategoryThumbnail(
+                    imageUrl: place.imageUrl,
+                    category: place.category,
+                    color: color,
+                  ),
+                  const SizedBox(width: 12),
                   Expanded(
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
+                        Text(
+                          _categoryLabels[place.category] ?? '장소',
+                          style: const TextStyle(
+                            fontSize: 12,
+                            fontWeight: FontWeight.w600,
+                            color: AppColors.ink400,
+                          ),
+                        ),
+                        const SizedBox(height: 4),
                         Text(
                           place.name.isEmpty ? '이름 없는 장소' : place.name,
                           maxLines: 1,
@@ -600,18 +654,6 @@ class _StopRow extends StatelessWidget {
                             fontSize: 15,
                             fontWeight: FontWeight.w800,
                             color: AppColors.ink900,
-                          ),
-                        ),
-                        const SizedBox(height: 4),
-                        Text(
-                          [
-                            _categoryLabels[place.category] ?? '장소',
-                            if (place.startTime != null) place.startTime!,
-                          ].join(' · '),
-                          style: TextStyle(
-                            fontSize: 12,
-                            fontWeight: FontWeight.w700,
-                            color: color,
                           ),
                         ),
                         if (place.address != null &&
@@ -641,6 +683,41 @@ class _StopRow extends StatelessWidget {
   }
 }
 
+/// 장소 카드 왼쪽 썸네일 — 사진(imageUrl)이 있으면 사진을, 없으면 카테고리 아이콘을
+/// 원형 배지 위에 보여준다. 색은 categoryColor와 동일해 장소 리스트 색과 통일된다.
+class _CategoryThumbnail extends StatelessWidget {
+  const _CategoryThumbnail({
+    required this.imageUrl,
+    required this.category,
+    required this.color,
+  });
+
+  final String? imageUrl;
+  final String? category;
+  final Color color;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: 44,
+      height: 44,
+      clipBehavior: Clip.antiAlias,
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(12),
+      ),
+      child: imageUrl != null && imageUrl!.isNotEmpty
+          ? Image.network(
+              imageUrl!,
+              fit: BoxFit.cover,
+              errorBuilder: (_, _, _) =>
+                  Icon(categoryIcon(category), size: 20, color: color),
+            )
+          : Icon(categoryIcon(category), size: 20, color: color),
+    );
+  }
+}
+
 class _DistanceChip extends StatelessWidget {
   const _DistanceChip({required this.label});
 
@@ -649,7 +726,7 @@ class _DistanceChip extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Padding(
-      padding: const EdgeInsets.only(left: 6, bottom: 10),
+      padding: const EdgeInsets.only(left: 54, bottom: 10),
       child: Container(
         padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
         decoration: BoxDecoration(

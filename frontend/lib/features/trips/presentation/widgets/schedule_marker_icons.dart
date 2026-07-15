@@ -14,6 +14,16 @@ Color categoryColor(String? category) {
   };
 }
 
+/// 스케줄 장소 category → 대표 아이콘. 사진(imageUrl)이 없을 때 썸네일 자리에 쓴다.
+IconData categoryIcon(String? category) {
+  return switch (category) {
+    'attraction' => Icons.attractions_outlined,
+    'restaurant' => Icons.restaurant_outlined,
+    'cafe' => Icons.local_cafe_outlined,
+    _ => Icons.place_outlined,
+  };
+}
+
 /// "N번 숫자 + 카테고리색 원" 커스텀 지도 마커를 만들어 캐싱한다. google_maps_flutter는
 /// 색이 있는 숫자 핀을 기본 제공하지 않아 Canvas로 직접 그려 비트맵으로 굽는다.
 class ScheduleMarkerIcons {
