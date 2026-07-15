@@ -117,7 +117,7 @@ class _RecordTripPickerScreenState extends ConsumerState<RecordTripPickerScreen>
               ),
               const SizedBox(height: 4),
               const Text(
-                '여행이 끝나야(완료 상태) 기록을 시작할 수 있어',
+                '여행이 끝난 뒤에 기록을 시작할 수 있어',
                 style: TextStyle(fontSize: 13, color: AppColors.ink400, fontWeight: FontWeight.w600),
                 textAlign: TextAlign.center,
               ),
