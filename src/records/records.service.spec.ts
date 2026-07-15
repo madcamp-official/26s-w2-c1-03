@@ -260,6 +260,33 @@ describe('RecordsService', () => {
       );
       expect(result.photos).toEqual([{ photoRefId: 'ref-1', localId: 'local-1' }]);
     });
+
+    it('이미 finalize/discard된(PENDING이 아닌) localId를 재등록하면 다시 업로드할 수 있도록 PENDING으로 되돌린다', async () => {
+      // "사진 추가하기"로 같은 기록에 다시 들어가 예전에 이미 처리된(같은 여행
+      // 기간 앨범이라 재선택되기 쉬운) 사진을 다시 고르는 상황 — status를
+      // 그대로 두면 uploadPhotos가 PENDING이 아니라는 이유로 영원히 건너뛴다.
+      const existingRef = buildPhotoRef({
+        status: RecordPhotoRefStatus.DISCARDED,
+        tempFilePath: '/tmp/buffer/ref-1',
+      });
+      travelRecordRepository.findOneBy!.mockResolvedValue(buildRecord());
+      recordPhotoRefRepository.findOneBy!.mockResolvedValue(existingRef);
+      const unlinkSpy = jest.spyOn(fs, 'unlink').mockResolvedValue(undefined);
+
+      const result = await service.registerMetadata('trip-1', 'record-1', 'user-1', dto);
+
+      expect(recordPhotoRefRepository.save).toHaveBeenCalledWith(
+        expect.objectContaining({
+          id: 'ref-1',
+          status: RecordPhotoRefStatus.PENDING,
+          tempFilePath: null,
+        }),
+      );
+      expect(unlinkSpy).toHaveBeenCalledWith('/tmp/buffer/ref-1');
+      expect(result.photos).toEqual([{ photoRefId: 'ref-1', localId: 'local-1' }]);
+
+      unlinkSpy.mockRestore();
+    });
   });
 
   describe('uploadPhotos', () => {
