@@ -1,3 +1,5 @@
+import 'dart:ui';
+
 import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -42,12 +44,20 @@ class _ScheduleTripListScreenState
 
     return Scaffold(
       backgroundColor: AppColors.surfaceFaint,
+      appBar: AppBar(
+        backgroundColor: AppColors.surfaceFaint,
+        elevation: 0,
+        title: const Text(
+          '스케줄',
+          style: TextStyle(color: AppColors.ink900, fontWeight: FontWeight.w800),
+        ),
+      ),
       body: SafeArea(
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             const Padding(
-              padding: EdgeInsets.fromLTRB(22, 18, 22, 8),
+              padding: EdgeInsets.fromLTRB(22, 14, 22, 8),
               child: _ScheduleHeader(),
             ),
             Expanded(child: _buildBody(state)),
@@ -128,28 +138,14 @@ class _ScheduleHeader extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return const Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Text(
-          '스케줄',
-          style: TextStyle(
-            fontSize: 26,
-            fontWeight: FontWeight.w900,
-            color: AppColors.ink900,
-          ),
-        ),
-        SizedBox(height: 6),
-        Text(
-          '계획 중인 여행을 골라 일정을 이어서 만들어봐',
-          style: TextStyle(
-            fontSize: 14,
-            height: 1.4,
-            fontWeight: FontWeight.w600,
-            color: AppColors.ink600,
-          ),
-        ),
-      ],
+    return const Text(
+      '계획 중인 여행을 골라 일정을 이어서 만들어봐',
+      style: TextStyle(
+        fontSize: 14,
+        height: 1.4,
+        fontWeight: FontWeight.w600,
+        color: AppColors.ink600,
+      ),
     );
   }
 }
@@ -184,6 +180,7 @@ class _PlanningTripList extends StatelessWidget {
                 return Dismissible(
                   key: ValueKey(trip.id),
                   direction: DismissDirection.endToStart,
+                  dismissThresholds: const {DismissDirection.endToStart: 0.2},
                   confirmDismiss: (_) => _confirmDeleteTrip(context, trip),
                   onDismissed: (_) => onDelete(trip),
                   background: Container(
@@ -268,12 +265,21 @@ class _PlanningTripCardState extends ConsumerState<_PlanningTripCard> {
           fit: StackFit.expand,
           children: [
             if (photoUrl != null)
-              Image.network(
-                photoUrl,
-                fit: BoxFit.cover,
-                errorBuilder: (context, error, stackTrace) => DecoratedBox(
-                  decoration: BoxDecoration(gradient: AppGradients.forKey(trip.id)),
+              ImageFiltered(
+                imageFilter: ImageFilter.blur(sigmaX: 2.5, sigmaY: 2.5),
+                child: Image.network(
+                  photoUrl,
+                  fit: BoxFit.cover,
+                  errorBuilder: (context, error, stackTrace) => DecoratedBox(
+                    decoration: BoxDecoration(gradient: AppGradients.forKey(trip.id)),
+                  ),
                 ),
+              ),
+            if (photoUrl != null)
+              // 사진이 너무 또렷해 보이지 않도록 전체에 흰 스크림을 얹어 은은하게 만들고,
+              // 하단은 텍스트 가독성을 위해 추가로 어둡게 한다.
+              DecoratedBox(
+                decoration: BoxDecoration(color: Colors.white.withValues(alpha: 0.3)),
               ),
             if (photoUrl != null)
               DecoratedBox(
@@ -282,8 +288,8 @@ class _PlanningTripCardState extends ConsumerState<_PlanningTripCard> {
                     begin: Alignment.topCenter,
                     end: Alignment.bottomCenter,
                     colors: [
-                      Colors.black.withValues(alpha: 0.05),
-                      Colors.black.withValues(alpha: 0.55),
+                      Colors.black.withValues(alpha: 0.02),
+                      Colors.black.withValues(alpha: 0.5),
                     ],
                   ),
                 ),

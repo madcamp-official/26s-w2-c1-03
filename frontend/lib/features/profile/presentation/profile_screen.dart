@@ -163,6 +163,14 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
 
     return Scaffold(
       backgroundColor: AppColors.surfaceFaint,
+      appBar: AppBar(
+        backgroundColor: AppColors.surfaceFaint,
+        elevation: 0,
+        title: const Text(
+          '마이',
+          style: TextStyle(color: AppColors.ink900, fontWeight: FontWeight.w800),
+        ),
+      ),
       body: SafeArea(
         child: Padding(
           padding: const EdgeInsets.symmetric(horizontal: 22),
@@ -170,11 +178,6 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               const SizedBox(height: 12),
-              const Text(
-                '마이',
-                style: TextStyle(fontSize: 24, fontWeight: FontWeight.w800, color: AppColors.ink900),
-              ),
-              const SizedBox(height: 20),
               Expanded(child: _buildBody(state, tripState)),
             ],
           ),
