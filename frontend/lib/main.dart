@@ -70,7 +70,13 @@ class TripAndEndApp extends StatelessWidget {
         scaffoldBackgroundColor: Colors.white,
         useMaterial3: true,
         fontFamily: 'Pretendard',
-        appBarTheme: const AppBarTheme(centerTitle: true),
+        appBarTheme: const AppBarTheme(
+          centerTitle: true,
+          // 기본(Material3 titleLarge)이 22sp라 조금 크게 느껴져서 줄임 — 화면들이
+          // title Text에 color/fontWeight만 지정하고 fontSize는 안 정하므로, 여기
+          // 하나만 바꾸면 전체 AppBar 제목 크기가 한 번에 반영된다.
+          titleTextStyle: TextStyle(fontSize: 18),
+        ),
       ),
       home: const _StartupGate(),
     );
