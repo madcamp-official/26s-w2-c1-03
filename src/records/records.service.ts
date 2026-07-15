@@ -160,8 +160,24 @@ export class RecordsService {
       const takenAt = new Date(item.takenAt);
       const locationName = item.locationName ?? null;
 
+      // 재등록은 "이 사진을 (다시) 업로드하겠다"는 의도다 — 예전에 같은 기록에
+      // finalize/discard까지 마쳐 status가 PENDING을 지난 ref를 그대로 두면
+      // 업로드 단계가 영원히 건너뛰어(§업로드는 PENDING만 받음) 같은 기록에
+      // "사진 추가하기"를 다시 써서 예전에 처리된 사진을 재선택하는 순간
+      // 조용히 업로드 불가 상태가 된다. 그래서 재등록 시 항상 PENDING으로
+      // 되돌리고, 남아있던 임시 파일이 있으면 정리한다.
+      if (existing?.tempFilePath) {
+        await fs.unlink(existing.tempFilePath).catch(() => undefined);
+      }
+
       const saved = existing
-        ? await this.recordPhotoRefRepository.save({ ...existing, takenAt, locationName })
+        ? await this.recordPhotoRefRepository.save({
+            ...existing,
+            takenAt,
+            locationName,
+            status: RecordPhotoRefStatus.PENDING,
+            tempFilePath: null,
+          })
         : await this.recordPhotoRefRepository.save(
             this.recordPhotoRefRepository.create({
               recordId: record.id,

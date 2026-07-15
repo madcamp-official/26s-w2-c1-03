@@ -143,4 +143,17 @@ class RecordsApi {
   Future<void> clearTripCover(String tripId) {
     return _apiClient.dio.delete<void>('/trips/$tripId/cover');
   }
+
+  /// API 명세서 §4 PATCH .../photos/{recordPhotoId} — 캡션만 부분 수정.
+  Future<void> updatePhotoCaption(
+    String tripId,
+    String recordId,
+    String recordPhotoId,
+    String caption,
+  ) {
+    return _apiClient.dio.patch<void>(
+      '/trips/$tripId/records/$recordId/photos/$recordPhotoId',
+      data: {'caption': caption},
+    );
+  }
 }
