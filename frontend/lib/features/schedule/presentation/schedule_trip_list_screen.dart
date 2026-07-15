@@ -8,6 +8,7 @@ import '../../../core/theme/app_colors.dart';
 import '../../../core/theme/app_gradients.dart';
 import '../../../core/utils/date_format.dart';
 import '../../../core/widgets/app_button.dart';
+import '../../../core/widgets/tab_header.dart';
 import '../../places/data/places_api.dart';
 import '../../trips/data/trip_models.dart';
 import '../../trips/presentation/create_trip_screen.dart';
@@ -44,37 +45,30 @@ class _ScheduleTripListScreenState
 
     return Scaffold(
       backgroundColor: AppColors.surfaceFaint,
-      appBar: AppBar(
-        backgroundColor: AppColors.surfaceFaint,
-        elevation: 0,
-        title: const Text(
-          '스케줄',
-          style: TextStyle(color: AppColors.ink900, fontWeight: FontWeight.w800),
-        ),
-      ),
-      body: SafeArea(
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            const Padding(
-              padding: EdgeInsets.fromLTRB(22, 14, 22, 8),
-              child: _ScheduleHeader(),
-            ),
-            Expanded(child: _buildBody(state)),
-          ],
-        ),
-      ),
+      body: SafeArea(child: _buildBody(state)),
     );
   }
 
   Widget _buildBody(TripListState state) {
     return switch (state) {
-      TripListLoading() => const Center(
-        child: CircularProgressIndicator(color: AppColors.ink900),
+      TripListLoading() => ListView(
+        padding: const EdgeInsets.fromLTRB(22, 0, 22, 120),
+        children: const [
+          TabHeader(title: '스케줄'),
+          SizedBox(height: 4),
+          _ScheduleHeader(),
+          SizedBox(height: 80),
+          Center(child: CircularProgressIndicator(color: AppColors.ink900)),
+        ],
       ),
-      TripListFailed(:final message) => _FailedView(
-        message: message,
-        onRetry: _reload,
+      TripListFailed(:final message) => ListView(
+        padding: const EdgeInsets.fromLTRB(22, 0, 22, 120),
+        children: [
+          const TabHeader(title: '스케줄'),
+          const SizedBox(height: 4),
+          const _ScheduleHeader(),
+          _FailedView(message: message, onRetry: _reload),
+        ],
       ),
       TripListLoaded(:final trips) => _PlanningTripList(
         trips: _planningTrips(trips),
@@ -168,15 +162,24 @@ class _PlanningTripList extends StatelessWidget {
       color: AppColors.ink900,
       child: trips.isEmpty
           ? ListView(
-              padding: const EdgeInsets.fromLTRB(22, 80, 22, 120),
-              children: const [_EmptyPlanningTrips()],
+              padding: const EdgeInsets.fromLTRB(22, 0, 22, 120),
+              children: const [
+                TabHeader(title: '스케줄'),
+                SizedBox(height: 4),
+                _ScheduleHeader(),
+                SizedBox(height: 72),
+                _EmptyPlanningTrips(),
+              ],
             )
           : ListView.separated(
-              padding: const EdgeInsets.fromLTRB(22, 18, 22, 120),
-              itemCount: trips.length,
-              separatorBuilder: (context, index) => const SizedBox(height: 14),
+              padding: const EdgeInsets.fromLTRB(22, 0, 22, 120),
+              itemCount: trips.length + 2,
+              separatorBuilder: (context, index) =>
+                  SizedBox(height: index == 0 ? 4 : 14),
               itemBuilder: (context, index) {
-                final trip = trips[index];
+                if (index == 0) return const TabHeader(title: '스케줄');
+                if (index == 1) return const _ScheduleHeader();
+                final trip = trips[index - 2];
                 return Dismissible(
                   key: ValueKey(trip.id),
                   direction: DismissDirection.endToStart,

@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../core/theme/app_colors.dart';
 import '../../../core/theme/app_gradients.dart';
 import '../../../core/utils/date_format.dart';
+import '../../../core/widgets/tab_header.dart';
 import '../data/record_summary_models.dart';
 import 'record_detail_screen.dart';
 import 'record_trip_picker_screen.dart';
@@ -33,18 +34,17 @@ class _RecordsListScreenState extends ConsumerState<RecordsListScreen> {
 
     return Scaffold(
       backgroundColor: AppColors.surfaceFaint,
-      appBar: AppBar(
-        backgroundColor: AppColors.surfaceFaint,
-        elevation: 0,
-        title: const Text('기록', style: TextStyle(color: AppColors.ink900, fontWeight: FontWeight.w800)),
-        actions: [
-          IconButton(
-            icon: const Icon(Icons.add, color: AppColors.ink900),
-            onPressed: _openTripPicker,
-          ),
-        ],
-      ),
       body: SafeArea(child: _buildBody(state)),
+    );
+  }
+
+  Widget _buildHeader() {
+    return TabHeader(
+      title: '기록',
+      trailing: IconButton(
+        icon: const Icon(Icons.add, color: AppColors.ink900),
+        onPressed: _openTripPicker,
+      ),
     );
   }
 
@@ -58,57 +58,76 @@ class _RecordsListScreenState extends ConsumerState<RecordsListScreen> {
 
   Widget _buildBody(RecordsListState state) {
     return switch (state) {
-      RecordsListLoading() => const Center(child: CircularProgressIndicator(color: AppColors.ink900)),
-      RecordsListFailed(:final message) => Center(
-        child: Padding(
-          padding: const EdgeInsets.all(24),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Text(
-                message,
-                textAlign: TextAlign.center,
-                style: const TextStyle(color: AppColors.ink600, fontWeight: FontWeight.w600),
-              ),
-              const SizedBox(height: 12),
-              TextButton(
-                onPressed: () => ref.read(recordsListControllerProvider.notifier).load(),
-                child: const Text('다시 시도'),
-              ),
-            ],
-          ),
-        ),
+      RecordsListLoading() => ListView(
+        padding: const EdgeInsets.fromLTRB(22, 0, 22, 120),
+        children: [
+          _buildHeader(),
+          const SizedBox(height: 100),
+          const Center(child: CircularProgressIndicator(color: AppColors.ink900)),
+        ],
       ),
-      RecordsListLoaded(:final records) when records.isEmpty => Center(
-        child: Padding(
-          padding: const EdgeInsets.all(24),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Container(
-                width: 96,
-                height: 96,
-                alignment: Alignment.center,
-                decoration: const BoxDecoration(color: AppColors.surfaceSubtle, shape: BoxShape.circle),
-                child: const Icon(Icons.menu_book_outlined, size: 40, color: AppColors.ink300),
-              ),
-              const SizedBox(height: 16),
-              const Text(
-                '아직 작성한 기록이 없어요.',
-                style: TextStyle(fontSize: 16, fontWeight: FontWeight.w700, color: AppColors.ink900),
-              ),
-            ],
+      RecordsListFailed(:final message) => ListView(
+        padding: const EdgeInsets.fromLTRB(22, 0, 22, 120),
+        children: [
+          _buildHeader(),
+          Padding(
+            padding: const EdgeInsets.all(24),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text(
+                  message,
+                  textAlign: TextAlign.center,
+                  style: const TextStyle(color: AppColors.ink600, fontWeight: FontWeight.w600),
+                ),
+                const SizedBox(height: 12),
+                TextButton(
+                  onPressed: () => ref.read(recordsListControllerProvider.notifier).load(),
+                  child: const Text('다시 시도'),
+                ),
+              ],
+            ),
           ),
-        ),
+        ],
+      ),
+      RecordsListLoaded(:final records) when records.isEmpty => ListView(
+        padding: const EdgeInsets.fromLTRB(22, 0, 22, 120),
+        children: [
+          _buildHeader(),
+          Padding(
+            padding: const EdgeInsets.all(24),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Container(
+                  width: 96,
+                  height: 96,
+                  alignment: Alignment.center,
+                  decoration: const BoxDecoration(color: AppColors.surfaceSubtle, shape: BoxShape.circle),
+                  child: const Icon(Icons.menu_book_outlined, size: 40, color: AppColors.ink300),
+                ),
+                const SizedBox(height: 16),
+                const Text(
+                  '아직 작성한 기록이 없어요.',
+                  style: TextStyle(fontSize: 16, fontWeight: FontWeight.w700, color: AppColors.ink900),
+                ),
+              ],
+            ),
+          ),
+        ],
       ),
       RecordsListLoaded(:final records) => RefreshIndicator(
         onRefresh: () => ref.read(recordsListControllerProvider.notifier).load(),
         color: AppColors.ink900,
         child: ListView.separated(
-          padding: const EdgeInsets.fromLTRB(22, 12, 22, 120),
-          itemCount: records.length,
-          separatorBuilder: (context, index) => const SizedBox(height: 14),
-          itemBuilder: (context, index) => _RecordCard(record: records[index]),
+          padding: const EdgeInsets.fromLTRB(22, 0, 22, 120),
+          itemCount: records.length + 1,
+          separatorBuilder: (context, index) =>
+              SizedBox(height: index == 0 ? 8 : 14),
+          itemBuilder: (context, index) {
+            if (index == 0) return _buildHeader();
+            return _RecordCard(record: records[index - 1]);
+          },
         ),
       ),
     };

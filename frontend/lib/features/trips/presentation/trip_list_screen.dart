@@ -298,7 +298,7 @@ class _DdayHeroCard extends ConsumerWidget {
             children: [
               Expanded(
                 child: Text(
-                  trip.cityName,
+                  trip.title,
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
                   style: const TextStyle(

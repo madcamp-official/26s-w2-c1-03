@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../core/theme/app_colors.dart';
 import '../../../core/widgets/app_button.dart';
+import '../../../core/widgets/tab_header.dart';
 import '../../auth/presentation/login_controller.dart';
 import '../../auth/presentation/login_screen.dart';
 import '../../trips/presentation/trip_list_controller.dart';
@@ -163,55 +164,49 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
 
     return Scaffold(
       backgroundColor: AppColors.surfaceFaint,
-      appBar: AppBar(
-        backgroundColor: AppColors.surfaceFaint,
-        elevation: 0,
-        title: const Text(
-          '마이',
-          style: TextStyle(color: AppColors.ink900, fontWeight: FontWeight.w800),
-        ),
-      ),
-      body: SafeArea(
-        child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 22),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              const SizedBox(height: 12),
-              Expanded(child: _buildBody(state, tripState)),
-            ],
-          ),
-        ),
-      ),
+      body: SafeArea(child: _buildBody(state, tripState)),
     );
   }
 
   Widget _buildBody(ProfileState state, TripListState tripState) {
     return switch (state) {
-      ProfileLoading() => const Center(child: CircularProgressIndicator(color: AppColors.ink900)),
-      ProfileFailed(:final message) => Center(
-        child: Padding(
-          padding: const EdgeInsets.all(24),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Text(
-                message,
-                textAlign: TextAlign.center,
-                style: const TextStyle(color: AppColors.ink600, fontWeight: FontWeight.w600),
-              ),
-              const SizedBox(height: 12),
-              TextButton(
-                onPressed: () => ref.read(profileControllerProvider.notifier).load(),
-                child: const Text('다시 시도'),
-              ),
-            ],
+      ProfileLoading() => ListView(
+        padding: const EdgeInsets.fromLTRB(22, 0, 22, 120),
+        children: const [
+          TabHeader(title: '마이페이지'),
+          SizedBox(height: 100),
+          Center(child: CircularProgressIndicator(color: AppColors.ink900)),
+        ],
+      ),
+      ProfileFailed(:final message) => ListView(
+        padding: const EdgeInsets.fromLTRB(22, 0, 22, 120),
+        children: [
+          const TabHeader(title: '마이페이지'),
+          Padding(
+            padding: const EdgeInsets.all(24),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text(
+                  message,
+                  textAlign: TextAlign.center,
+                  style: const TextStyle(color: AppColors.ink600, fontWeight: FontWeight.w600),
+                ),
+                const SizedBox(height: 12),
+                TextButton(
+                  onPressed: () => ref.read(profileControllerProvider.notifier).load(),
+                  child: const Text('다시 시도'),
+                ),
+              ],
+            ),
           ),
-        ),
+        ],
       ),
       ProfileLoaded(:final user) => ListView(
-        padding: const EdgeInsets.only(bottom: 120),
+        padding: const EdgeInsets.fromLTRB(22, 0, 22, 120),
         children: [
+          const TabHeader(title: '마이페이지'),
+          const SizedBox(height: 8),
           Center(
             child: Column(
               children: [
