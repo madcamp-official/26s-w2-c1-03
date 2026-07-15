@@ -35,9 +35,8 @@ class _ScheduleEditScreenState extends ConsumerState<ScheduleEditScreen> {
   @override
   void initState() {
     super.initState();
-    _places = [
-      for (final day in widget.schedule.days) ...day.places,
-    ]..sort(_byDayThenOrder);
+    _places = [for (final day in widget.schedule.days) ...day.places]
+      ..sort(_byDayThenOrder);
   }
 
   int _byDayThenOrder(ScheduledTripPlace a, ScheduledTripPlace b) {
@@ -82,7 +81,11 @@ class _ScheduleEditScreenState extends ConsumerState<ScheduleEditScreen> {
   /// Day 내 드래그 순서 변경. Flutter 표준 인덱스 보정(newIndex>oldIndex면 -1)을 적용해
   /// 로컬 목록을 먼저 낙관적으로 재배열하고, 그 Day 전체를 1..n으로 renumber해 서버에
   /// 보낸다. 실패하면 스냅샷으로 원복해 화면과 서버가 어긋나지 않게 한다.
-  Future<void> _reorderWithinDay(int dayNumber, int oldIndex, int newIndex) async {
+  Future<void> _reorderWithinDay(
+    int dayNumber,
+    int oldIndex,
+    int newIndex,
+  ) async {
     final snapshot = [..._places];
     final dayPlaces = _byDay[dayNumber]!
       ..sort((a, b) => a.orderInDay.compareTo(b.orderInDay));
@@ -106,7 +109,9 @@ class _ScheduleEditScreenState extends ConsumerState<ScheduleEditScreen> {
     });
 
     try {
-      await ref.read(scheduleApiProvider).reorder(
+      await ref
+          .read(scheduleApiProvider)
+          .reorder(
             tripId: widget.tripId,
             operations: [
               for (final p in reindexed)
@@ -128,7 +133,8 @@ class _ScheduleEditScreenState extends ConsumerState<ScheduleEditScreen> {
   /// 때까지 기다리지 않고 바로 화면에 반영).
   void _onChatScheduleChanged(SchedulePlan schedule) {
     setState(() {
-      _places = [for (final day in schedule.days) ...day.places]..sort(_byDayThenOrder);
+      _places = [for (final day in schedule.days) ...day.places]
+        ..sort(_byDayThenOrder);
       _changed = true;
     });
   }
@@ -146,7 +152,9 @@ class _ScheduleEditScreenState extends ConsumerState<ScheduleEditScreen> {
 
     setState(() => _busyIds.add(place.id));
     try {
-      final updated = await ref.read(scheduleApiProvider).updatePlace(
+      final updated = await ref
+          .read(scheduleApiProvider)
+          .updatePlace(
             tripId: widget.tripId,
             tripPlaceId: place.id,
             memo: result.memo,
@@ -169,6 +177,8 @@ class _ScheduleEditScreenState extends ConsumerState<ScheduleEditScreen> {
   @override
   Widget build(BuildContext context) {
     final days = _byDay.keys.toList()..sort();
+    final keyboardHeight = MediaQuery.viewInsetsOf(context).bottom;
+    final keyboardVisible = keyboardHeight > 0;
 
     return PopScope(
       canPop: false,
@@ -176,6 +186,7 @@ class _ScheduleEditScreenState extends ConsumerState<ScheduleEditScreen> {
         if (!didPop) Navigator.of(context).pop(_changed);
       },
       child: Scaffold(
+        resizeToAvoidBottomInset: false,
         backgroundColor: Colors.white,
         appBar: AppBar(
           backgroundColor: Colors.white,
@@ -186,7 +197,10 @@ class _ScheduleEditScreenState extends ConsumerState<ScheduleEditScreen> {
           ),
           title: const Text(
             '일정 편집',
-            style: TextStyle(color: AppColors.ink900, fontWeight: FontWeight.w800),
+            style: TextStyle(
+              color: AppColors.ink900,
+              fontWeight: FontWeight.w800,
+            ),
           ),
         ),
         body: SafeArea(
@@ -223,7 +237,11 @@ class _ScheduleEditScreenState extends ConsumerState<ScheduleEditScreen> {
                                   onDelete: _delete,
                                   onEditDetail: _editDetail,
                                   onReorder: (oldIndex, newIndex) =>
-                                      _reorderWithinDay(day, oldIndex, newIndex),
+                                      _reorderWithinDay(
+                                        day,
+                                        oldIndex,
+                                        newIndex,
+                                      ),
                                 ),
                                 const SizedBox(height: 18),
                               ],
@@ -238,19 +256,29 @@ class _ScheduleEditScreenState extends ConsumerState<ScheduleEditScreen> {
                           heroTag: 'schedule-chat-fab',
                           backgroundColor: AppColors.ink900,
                           onPressed: () => setState(() => _chatOpen = true),
-                          child: const Icon(Icons.chat_bubble_outline, color: Colors.white),
+                          child: const Icon(
+                            Icons.chat_bubble_outline,
+                            color: Colors.white,
+                          ),
                         ),
                       ),
                   ],
                 ),
               ),
               if (_chatOpen)
-                SizedBox(
-                  height: MediaQuery.of(context).size.height * 0.5,
-                  child: ScheduleChatPanel(
-                    tripId: widget.tripId,
-                    onScheduleChanged: _onChatScheduleChanged,
-                    onClose: () => setState(() => _chatOpen = false),
+                AnimatedPadding(
+                  duration: const Duration(milliseconds: 180),
+                  curve: Curves.easeOut,
+                  padding: EdgeInsets.only(bottom: keyboardHeight),
+                  child: SizedBox(
+                    height:
+                        MediaQuery.sizeOf(context).height *
+                        (keyboardVisible ? 0.42 : 0.5),
+                    child: ScheduleChatPanel(
+                      tripId: widget.tripId,
+                      onScheduleChanged: _onChatScheduleChanged,
+                      onClose: () => setState(() => _chatOpen = false),
+                    ),
                   ),
                 ),
             ],
@@ -280,7 +308,8 @@ class _DayEditSection extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final sorted = [...places]..sort((a, b) => a.orderInDay.compareTo(b.orderInDay));
+    final sorted = [...places]
+      ..sort((a, b) => a.orderInDay.compareTo(b.orderInDay));
     return Container(
       width: double.infinity,
       padding: const EdgeInsets.all(16),
@@ -357,7 +386,11 @@ class _PlaceEditRow extends StatelessWidget {
               enabled: !busy,
               child: const Padding(
                 padding: EdgeInsets.only(top: 1, right: 8),
-                child: Icon(Icons.drag_indicator, size: 20, color: AppColors.ink200),
+                child: Icon(
+                  Icons.drag_indicator,
+                  size: 20,
+                  color: AppColors.ink200,
+                ),
               ),
             ),
             if (place.startTime != null) ...[
@@ -408,7 +441,11 @@ class _PlaceEditRow extends StatelessWidget {
             ),
             IconButton(
               visualDensity: VisualDensity.compact,
-              icon: const Icon(Icons.delete_outline, size: 20, color: AppColors.danger),
+              icon: const Icon(
+                Icons.delete_outline,
+                size: 20,
+                color: AppColors.danger,
+              ),
               onPressed: busy ? null : onDelete,
             ),
           ],

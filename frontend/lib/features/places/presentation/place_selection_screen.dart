@@ -45,6 +45,7 @@ class PlaceSelectionScreen extends ConsumerStatefulWidget {
   });
 
   final String tripId;
+
   /// 여행 시작/종료일("yyyy-MM-dd") — 날짜 배지에 쓸 여행 일수를 계산하는 데 쓴다.
   final String startDate;
   final String endDate;
@@ -305,7 +306,9 @@ class _PlaceSelectionScreenState extends ConsumerState<PlaceSelectionScreen> {
       final error = e.error;
       setState(() {
         _detailLoading = false;
-        _detailError = error is ApiException ? error.message : '상세 정보를 불러오지 못했어요.';
+        _detailError = error is ApiException
+            ? error.message
+            : '상세 정보를 불러오지 못했어요.';
       });
     }
   }
@@ -416,7 +419,9 @@ class _PlaceSelectionScreenState extends ConsumerState<PlaceSelectionScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final keyboardVisible = MediaQuery.viewInsetsOf(context).bottom > 0;
     return Scaffold(
+      resizeToAvoidBottomInset: false,
       backgroundColor: Colors.white,
       appBar: AppBar(
         backgroundColor: Colors.white,
@@ -464,8 +469,8 @@ class _PlaceSelectionScreenState extends ConsumerState<PlaceSelectionScreen> {
                       onClear: _clearSearch,
                     ),
                   ),
-                  // 여러 날 여행이면 일차 탭으로 "지금부터 고르는 장소"의 배정 날짜를 고른다.
-                  if (_dayCount > 1) ...[
+                  // 키보드가 올라오면 검색창만 남겨 세로 공간 오버플로우를 피한다.
+                  if (!keyboardVisible && _dayCount > 1) ...[
                     const SizedBox(height: 8),
                     DayTabRow(
                       dayCount: _dayCount,
@@ -475,7 +480,7 @@ class _PlaceSelectionScreenState extends ConsumerState<PlaceSelectionScreen> {
                     ),
                   ],
                   // 검색 결과는 카테고리로 거르지 않으므로 검색 중엔 칩을 숨긴다.
-                  if (!_searchMode) ...[
+                  if (!keyboardVisible && !_searchMode) ...[
                     const SizedBox(height: 8),
                     CategoryChipRow(
                       selected: _category,
@@ -497,32 +502,33 @@ class _PlaceSelectionScreenState extends ConsumerState<PlaceSelectionScreen> {
             if (_error != null && _allCandidates.isEmpty)
               PlaceErrorOverlay(message: _error!, onRetry: _retry),
             // 하단 드래그 목록 시트.
-            Positioned.fill(
-              child: PlaceSheet(
-                candidates: _visibleCandidates,
-                selectedIds: _selectedIds,
-                loading: _loading,
-                hasCtaPadding: _selectedIds.isNotEmpty,
-                listLabel: _searchMode ? '검색 결과' : _categoryLabel(_category),
-                emptyText: _searchMode
-                    ? '검색 결과가 없어'
-                    : (_category != null
-                          ? '이 카테고리엔 장소가 없어'
-                          : '이 지역에서 찾은 장소가 없어'),
-                selectedDayNumbers: _selectedDayNumbers,
-                onRowTap: _openDetail,
-                onToggle: _toggleSelected,
-                detailPlace: _detailPlace,
-                detailData: _detailData,
-                detailLoading: _detailLoading,
-                detailError: _detailError,
-                onCloseDetail: _closeDetail,
+            if (!keyboardVisible)
+              Positioned.fill(
+                child: PlaceSheet(
+                  candidates: _visibleCandidates,
+                  selectedIds: _selectedIds,
+                  loading: _loading,
+                  hasCtaPadding: _selectedIds.isNotEmpty,
+                  listLabel: _searchMode ? '검색 결과' : _categoryLabel(_category),
+                  emptyText: _searchMode
+                      ? '검색 결과가 없어'
+                      : (_category != null
+                            ? '이 카테고리엔 장소가 없어'
+                            : '이 지역에서 찾은 장소가 없어'),
+                  selectedDayNumbers: _selectedDayNumbers,
+                  onRowTap: _openDetail,
+                  onToggle: _toggleSelected,
+                  detailPlace: _detailPlace,
+                  detailData: _detailData,
+                  detailLoading: _detailLoading,
+                  detailError: _detailError,
+                  onCloseDetail: _closeDetail,
+                ),
               ),
-            ),
           ],
         ),
       ),
-      bottomNavigationBar: _selectedIds.isEmpty
+      bottomNavigationBar: _selectedIds.isEmpty || keyboardVisible
           ? null
           : PlaceFloatingCta(
               count: _selectedIds.length,

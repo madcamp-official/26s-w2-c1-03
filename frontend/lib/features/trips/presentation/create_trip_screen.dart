@@ -60,6 +60,7 @@ class _CreateTripScreenState extends ConsumerState<CreateTripScreen> {
       firstDate: DateTime(now.year - 1),
       lastDate: DateTime(now.year + 2),
       initialDateRange: _dateRange,
+      builder: _keyboardSafeDatePickerBuilder,
     );
     if (picked != null) {
       setState(() => _dateRange = picked);
@@ -119,91 +120,120 @@ class _CreateTripScreenState extends ConsumerState<CreateTripScreen> {
     return '${date.year}-$month-$day';
   }
 
+  Widget _keyboardSafeDatePickerBuilder(BuildContext context, Widget? child) {
+    return MediaQuery.removeViewInsets(
+      context: context,
+      removeBottom: true,
+      child: child ?? const SizedBox.shrink(),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: Colors.white,
       body: SafeArea(
-        child: Padding(
-          padding: const EdgeInsets.fromLTRB(22, 12, 22, 22),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              _CloseButton(onTap: () => Navigator.of(context).pop()),
-              const SizedBox(height: 20),
-              const Text(
-                '어디로 떠날 거야?',
-                style: TextStyle(
-                  fontSize: 26,
-                  fontWeight: FontWeight.w800,
-                  color: AppColors.ink900,
-                ),
+        child: LayoutBuilder(
+          builder: (context, constraints) {
+            return SingleChildScrollView(
+              keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
+              padding: EdgeInsets.fromLTRB(
+                22,
+                12,
+                22,
+                22 + MediaQuery.viewInsetsOf(context).bottom,
               ),
-              const SizedBox(height: 8),
-              const Text(
-                '제목이랑 도시, 날짜만 알려주면\n여행을 만들어줄게',
-                style: TextStyle(
-                  fontSize: 14,
-                  color: AppColors.ink400,
-                  fontWeight: FontWeight.w600,
-                  height: 1.4,
+              child: ConstrainedBox(
+                constraints: BoxConstraints(
+                  minHeight: constraints.maxHeight - 34,
                 ),
-              ),
-              const SizedBox(height: 24),
-              if (_errorText != null) ...[
-                AppErrorBanner(message: _errorText!),
-                const SizedBox(height: 16),
-              ],
-              _FieldContainer(
-                icon: Icons.edit_outlined,
-                child: TextField(
-                  controller: _titleController,
-                  style: _fieldTextStyle,
-                  decoration: _fieldDecoration('여행 제목 · 예) 제주 3박4일'),
-                ),
-              ),
-              const SizedBox(height: 12),
-              InkWell(
-                onTap: _pickCity,
-                borderRadius: BorderRadius.circular(16),
-                child: _FieldContainer(
-                  icon: Icons.search,
-                  child: Text(
-                    _selectedCity?.label ?? '도시 검색 · 예) 강릉, 해운대구',
-                    style: TextStyle(
-                      fontSize: 14.5,
-                      fontWeight: FontWeight.w600,
-                      color: _selectedCity == null
-                          ? AppColors.ink400
-                          : AppColors.ink900,
-                    ),
+                child: IntrinsicHeight(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      _CloseButton(onTap: () => Navigator.of(context).pop()),
+                      const SizedBox(height: 20),
+                      const Text(
+                        '어디로 떠날 거야?',
+                        style: TextStyle(
+                          fontSize: 26,
+                          fontWeight: FontWeight.w800,
+                          color: AppColors.ink900,
+                        ),
+                      ),
+                      const SizedBox(height: 8),
+                      const Text(
+                        '제목이랑 도시, 날짜만 알려주면\n여행을 만들어줄게',
+                        style: TextStyle(
+                          fontSize: 14,
+                          color: AppColors.ink400,
+                          fontWeight: FontWeight.w600,
+                          height: 1.4,
+                        ),
+                      ),
+                      const SizedBox(height: 24),
+                      if (_errorText != null) ...[
+                        AppErrorBanner(message: _errorText!),
+                        const SizedBox(height: 16),
+                      ],
+                      _FieldContainer(
+                        icon: Icons.edit_outlined,
+                        child: TextField(
+                          controller: _titleController,
+                          style: _fieldTextStyle,
+                          decoration: _fieldDecoration('여행 제목 · 예) 제주 3박4일'),
+                        ),
+                      ),
+                      const SizedBox(height: 12),
+                      InkWell(
+                        onTap: _pickCity,
+                        borderRadius: BorderRadius.circular(16),
+                        child: _FieldContainer(
+                          icon: Icons.search,
+                          child: Text(
+                            _selectedCity?.label ?? '도시 검색 · 예) 강릉, 해운대구',
+                            style: TextStyle(
+                              fontSize: 14.5,
+                              fontWeight: FontWeight.w600,
+                              color: _selectedCity == null
+                                  ? AppColors.ink400
+                                  : AppColors.ink900,
+                            ),
+                          ),
+                        ),
+                      ),
+                      const SizedBox(height: 12),
+                      InkWell(
+                        onTap: _pickDateRange,
+                        borderRadius: BorderRadius.circular(16),
+                        child: _FieldContainer(
+                          icon: Icons.calendar_today_outlined,
+                          child: Text(
+                            _dateRange == null
+                                ? '날짜 선택'
+                                : '${_formatDate(_dateRange!.start)} ~ ${_formatDate(_dateRange!.end)}',
+                            style: TextStyle(
+                              fontSize: 14.5,
+                              fontWeight: FontWeight.w600,
+                              color: _dateRange == null
+                                  ? AppColors.ink400
+                                  : AppColors.ink900,
+                            ),
+                          ),
+                        ),
+                      ),
+                      const Spacer(),
+                      AppButton(
+                        label: '만들기',
+                        onPressed: _submit,
+                        loading: _submitting,
+                      ),
+                    ],
                   ),
                 ),
               ),
-              const SizedBox(height: 12),
-              InkWell(
-                onTap: _pickDateRange,
-                borderRadius: BorderRadius.circular(16),
-                child: _FieldContainer(
-                  icon: Icons.calendar_today_outlined,
-                  child: Text(
-                    _dateRange == null
-                        ? '날짜 선택'
-                        : '${_formatDate(_dateRange!.start)} ~ ${_formatDate(_dateRange!.end)}',
-                    style: TextStyle(
-                      fontSize: 14.5,
-                      fontWeight: FontWeight.w600,
-                      color: _dateRange == null
-                          ? AppColors.ink400
-                          : AppColors.ink900,
-                    ),
-                  ),
-                ),
-              ),
-              const Spacer(),
-              AppButton(label: '만들기', onPressed: _submit, loading: _submitting),
-            ],
-          ),
+            );
+          },
         ),
       ),
     );
