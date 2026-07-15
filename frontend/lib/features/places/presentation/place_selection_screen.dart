@@ -430,11 +430,7 @@ class _PlaceSelectionScreenState extends ConsumerState<PlaceSelectionScreen> {
         iconTheme: const IconThemeData(color: AppColors.ink900),
         title: const Text(
           '가고 싶은 곳 골라봐',
-          style: TextStyle(
-            fontSize: 18,
-            fontWeight: FontWeight.w800,
-            color: AppColors.ink900,
-          ),
+          style: TextStyle(fontWeight: FontWeight.w800, color: AppColors.ink900),
         ),
       ),
       body: SafeArea(

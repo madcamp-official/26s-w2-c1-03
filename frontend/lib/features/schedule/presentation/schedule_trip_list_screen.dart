@@ -1,14 +1,20 @@
+import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import '../../../core/network/api_exception.dart';
 import '../../../core/theme/app_colors.dart';
 import '../../../core/theme/app_gradients.dart';
 import '../../../core/utils/date_format.dart';
 import '../../../core/widgets/app_button.dart';
+import '../../places/data/places_api.dart';
 import '../../trips/data/trip_models.dart';
 import '../../trips/presentation/create_trip_screen.dart';
 import '../../trips/presentation/trip_detail_screen.dart';
 import '../../trips/presentation/trip_list_controller.dart';
 import '../../trips/presentation/trip_list_state.dart';
+
+/// TourAPI 관광지(contentTypeId=12) 후보를 카드 대표 사진으로 우선 쓴다.
+const _touristSpotContentTypeId = '12';
 
 /// 스케줄 탭: 현재 계획 중(planning)인 여행을 모아 보여준다.
 /// 실제 일자별 스케줄 조회/편집은 Phase 9에서 이어 붙이고, 지금은 여행 단위 진입점 역할을 한다.
@@ -35,7 +41,7 @@ class _ScheduleTripListScreenState
     final state = ref.watch(tripListControllerProvider);
 
     return Scaffold(
-      backgroundColor: Colors.white,
+      backgroundColor: AppColors.surfaceFaint,
       body: SafeArea(
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
@@ -63,6 +69,7 @@ class _ScheduleTripListScreenState
       TripListLoaded(:final trips) => _PlanningTripList(
         trips: _planningTrips(trips),
         onRefresh: _reload,
+        onDelete: _deleteTrip,
       ),
     };
   }
@@ -75,6 +82,45 @@ class _ScheduleTripListScreenState
 
   Future<void> _reload() =>
       ref.read(tripListControllerProvider.notifier).load();
+
+  Future<void> _deleteTrip(Trip trip) async {
+    try {
+      await ref.read(tripsApiProvider).delete(trip.id);
+    } on DioException catch (e) {
+      if (!mounted) return;
+      final error = e.error;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(error is ApiException ? error.message : '삭제하지 못했어요.'),
+        ),
+      );
+    } finally {
+      if (mounted) {
+        await ref.read(tripListControllerProvider.notifier).load();
+      }
+    }
+  }
+}
+
+Future<bool> _confirmDeleteTrip(BuildContext context, Trip trip) async {
+  final confirmed = await showDialog<bool>(
+    context: context,
+    builder: (dialogContext) => AlertDialog(
+      title: const Text('여행을 삭제할까요?'),
+      content: Text('\'${trip.title}\'을(를) 삭제하면 되돌릴 수 없어요.'),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.of(dialogContext).pop(false),
+          child: const Text('취소'),
+        ),
+        TextButton(
+          onPressed: () => Navigator.of(dialogContext).pop(true),
+          child: const Text('삭제', style: TextStyle(color: AppColors.danger)),
+        ),
+      ],
+    ),
+  );
+  return confirmed ?? false;
 }
 
 class _ScheduleHeader extends StatelessWidget {
@@ -109,10 +155,15 @@ class _ScheduleHeader extends StatelessWidget {
 }
 
 class _PlanningTripList extends StatelessWidget {
-  const _PlanningTripList({required this.trips, required this.onRefresh});
+  const _PlanningTripList({
+    required this.trips,
+    required this.onRefresh,
+    required this.onDelete,
+  });
 
   final List<Trip> trips;
   final Future<void> Function() onRefresh;
+  final Future<void> Function(Trip trip) onDelete;
 
   @override
   Widget build(BuildContext context) {
@@ -128,21 +179,78 @@ class _PlanningTripList extends StatelessWidget {
               padding: const EdgeInsets.fromLTRB(22, 18, 22, 120),
               itemCount: trips.length,
               separatorBuilder: (context, index) => const SizedBox(height: 14),
-              itemBuilder: (context, index) =>
-                  _PlanningTripCard(trip: trips[index]),
+              itemBuilder: (context, index) {
+                final trip = trips[index];
+                return Dismissible(
+                  key: ValueKey(trip.id),
+                  direction: DismissDirection.endToStart,
+                  confirmDismiss: (_) => _confirmDeleteTrip(context, trip),
+                  onDismissed: (_) => onDelete(trip),
+                  background: Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 24),
+                    alignment: Alignment.centerRight,
+                    decoration: BoxDecoration(
+                      color: AppColors.danger,
+                      borderRadius: BorderRadius.circular(24),
+                    ),
+                    child: const Icon(
+                      Icons.delete_outline,
+                      color: Colors.white,
+                    ),
+                  ),
+                  child: _PlanningTripCard(trip: trip),
+                );
+              },
             ),
     );
   }
 }
 
-class _PlanningTripCard extends StatelessWidget {
+class _PlanningTripCard extends ConsumerStatefulWidget {
   const _PlanningTripCard({required this.trip});
 
   final Trip trip;
 
   @override
+  ConsumerState<_PlanningTripCard> createState() => _PlanningTripCardState();
+}
+
+class _PlanningTripCardState extends ConsumerState<_PlanningTripCard> {
+  String? _photoUrl;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadPhoto();
+  }
+
+  /// 여행 지역(areaCode/sigunguCode)의 관광지 후보 중 사진이 있는 걸 대표 이미지로
+  /// 쓴다. 못 찾으면 null로 남겨서 기존 그라디언트 플레이스홀더를 그대로 쓴다.
+  Future<void> _loadPhoto() async {
+    try {
+      final candidates = await ref
+          .read(placesApiProvider)
+          .getCandidates(widget.trip.id);
+      final withImages = candidates
+          .where((c) => c.imageUrl != null && c.imageUrl!.isNotEmpty)
+          .toList()
+        ..sort((a, b) {
+          final aSpot = a.contentTypeId == _touristSpotContentTypeId ? 0 : 1;
+          final bSpot = b.contentTypeId == _touristSpotContentTypeId ? 0 : 1;
+          return aSpot.compareTo(bSpot);
+        });
+      if (!mounted || withImages.isEmpty) return;
+      setState(() => _photoUrl = withImages.first.imageUrl);
+    } catch (_) {
+      // 대표 사진은 있으면 좋은 정도라, 후보 조회 실패는 카드 표시를 막지 않는다.
+    }
+  }
+
+  @override
   Widget build(BuildContext context) {
+    final trip = widget.trip;
     final dday = _ddayLabel(trip);
+    final photoUrl = _photoUrl;
 
     return InkWell(
       borderRadius: BorderRadius.circular(24),
@@ -151,41 +259,74 @@ class _PlanningTripCard extends StatelessWidget {
       ),
       child: Container(
         height: 154,
-        padding: const EdgeInsets.all(18),
+        clipBehavior: Clip.antiAlias,
         decoration: BoxDecoration(
-          gradient: AppGradients.forKey(trip.id),
+          gradient: photoUrl == null ? AppGradients.forKey(trip.id) : null,
           borderRadius: BorderRadius.circular(24),
         ),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
+        child: Stack(
+          fit: StackFit.expand,
           children: [
-            Row(
-              children: [
-                _StatusPill(label: dday),
-                const Spacer(),
-                const Icon(Icons.chevron_right, color: Colors.white, size: 24),
-              ],
-            ),
-            const Spacer(),
-            Text(
-              trip.title,
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              style: const TextStyle(
-                fontSize: 21,
-                fontWeight: FontWeight.w900,
-                color: Colors.white,
+            if (photoUrl != null)
+              Image.network(
+                photoUrl,
+                fit: BoxFit.cover,
+                errorBuilder: (context, error, stackTrace) => DecoratedBox(
+                  decoration: BoxDecoration(gradient: AppGradients.forKey(trip.id)),
+                ),
               ),
-            ),
-            const SizedBox(height: 5),
-            Text(
-              '${trip.cityName} · ${formatTripDateRange(trip.startDate, trip.endDate)}',
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              style: const TextStyle(
-                fontSize: 13,
-                fontWeight: FontWeight.w700,
-                color: Color(0xF2FFFFFF),
+            if (photoUrl != null)
+              DecoratedBox(
+                decoration: BoxDecoration(
+                  gradient: LinearGradient(
+                    begin: Alignment.topCenter,
+                    end: Alignment.bottomCenter,
+                    colors: [
+                      Colors.black.withValues(alpha: 0.05),
+                      Colors.black.withValues(alpha: 0.55),
+                    ],
+                  ),
+                ),
+              ),
+            Padding(
+              padding: const EdgeInsets.all(18),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    children: [
+                      _StatusPill(label: dday),
+                      const Spacer(),
+                      const Icon(
+                        Icons.chevron_right,
+                        color: Colors.white,
+                        size: 24,
+                      ),
+                    ],
+                  ),
+                  const Spacer(),
+                  Text(
+                    trip.title,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(
+                      fontSize: 21,
+                      fontWeight: FontWeight.w900,
+                      color: Colors.white,
+                    ),
+                  ),
+                  const SizedBox(height: 5),
+                  Text(
+                    '${trip.cityName} · ${formatTripDateRange(trip.startDate, trip.endDate)}',
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(
+                      fontSize: 13,
+                      fontWeight: FontWeight.w700,
+                      color: Color(0xF2FFFFFF),
+                    ),
+                  ),
+                ],
               ),
             ),
           ],
