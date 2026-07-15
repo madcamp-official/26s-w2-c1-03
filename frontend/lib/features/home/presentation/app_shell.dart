@@ -107,8 +107,8 @@ class _AddTripButton extends StatelessWidget {
       child: Container(
         width: 48,
         height: 48,
-        decoration: const BoxDecoration(color: AppColors.ink900, shape: BoxShape.circle),
-        child: const Icon(Icons.add, color: AppColors.lime, size: 24),
+        decoration: const BoxDecoration(color: AppColors.lime, shape: BoxShape.circle),
+        child: const Icon(Icons.add, color: AppColors.onLime, size: 24),
       ),
     );
   }
