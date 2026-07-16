@@ -43,7 +43,7 @@
 - **핵심 구현 요소:**
   - AI 기반 여행 계획 초안 생성 및 프롬프트 기반 수정 (OpenAI API 연동)
   - 온디바이스 1차 필터링 → 일자별 배치 전송 → AI 베스트샷(최대 15장) 선별 파이프라인
-  - 카카오/애플/구글 소셜 로그인 전용 인증 시스템
+  - 카카오/구글 소셜 로그인 전용 인증 시스템
 - **사용 / 시연 시나리오:** 사용자가 도시와 날짜를 입력하면 AI가 관광지·맛집을 포함한 최적 동선의 여행 계획 초안을 생성한다. 사용자는 초안을 직접 수정하거나 추가 프롬프트로 AI에게 재요청해 계획을 완성한다. 여행이 끝나면 앱이 촬영 기간 내 사진을 온디바이스에서 1차 필터링하고, AI가 일자별 배치로 베스트샷 최대 15장을 추천한다. 사용자는 그중 최종 사용할 사진을 선택해 글과 함께 여행 기록을 작성하고, 이후 기록 목록에서 조회·수정·삭제할 수 있다.
 - **팀원별 역할:**
   - 이예원 (FullStack Dev): Flutter 앱 UI/UX 전반(로그인, 계획 생성/편집, 사진 선별, 기록 작성/관리 화면), 백엔드 API 연동, 온디바이스 필터링(흔들림/노출/중복 제거, OCR, 얼굴 감지, EXIF 추출) 구현
@@ -67,7 +67,7 @@
 
 | 구현 요소 | 설명 | 우선순위 |
 |---|---|---|
-| 소셜 로그인 (카카오/애플/구글) | 이메일/비밀번호 없이 소셜 계정으로만 로그인, 최초 로그인 시 회원 자동 생성/연결 | 필수 |
+| 소셜 로그인 (카카오/구글) | 이메일/비밀번호 없이 소셜 계정으로만 로그인, 최초 로그인 시 회원 자동 생성/연결 | 필수 |
 | AI 기반 여행 계획 생성 및 수정 | 도시·날짜 입력 → AI가 동선 최적화된 계획 초안 생성, 장소 추가/제거/순서 변경 및 프롬프트 재수정 | 필수 |
 | AI 기반 여행 사진 선별 및 기록 | 온디바이스 1차 필터링(흔들림/중복/OCR/얼굴 감지) → 최대 100장 임시 버퍼 → OpenAI 배치 선별(최대 15장) → 사용자 최종 선택 → 암호화 스토리지 저장 | 필수 |
 | 사용자 여행 기록 관리 | 작성한 여행 기록 목록 조회, 요약 표시, 수정/삭제(연결 사진 함께 삭제) | 필수 |
@@ -78,60 +78,111 @@
 
 ## 아키텍처
 
-<!-- 실시간 인터랙션: WebSocket/SSE/WebRTC 구조도 / LLM Wrapper: API 연동 흐름도 / Cross-Platform: 플랫폼 구성도 -->
+```text
+[Flutter App]
+   │
+   ├─ Social Login (Kakao / Google)
+   ├─ Trip / Schedule UI (AI 일정 생성·편집)
+   ├─ Place Search / Map (Google Maps)
+   ├─ On-device Photo Filtering Pipeline
+   └─ Record Management
+        │  REST(Dio) + Socket.IO
+        ▼
+[NestJS Backend]
+   │
+   ├─ Auth Module (JWT access/refresh + 소셜 로그인 검증)
+   ├─ Users / Trips / Schedule Module
+   ├─ Places Module (TourAPI · Google Places 캐시)
+   ├─ Records Module (사진 파이프라인 · AI 큐레이션)
+   ├─ Notifications Module (FCM)
+   └─ Collaboration Gateway (Socket.IO, 공동 일정 편집)
+        │
+        ▼
+[Database / Storage / External APIs]
+   │
+   ├─ PostgreSQL (Supabase, TypeORM 마이그레이션)
+   ├─ Firebase (Storage 사진 저장 · Cloud Messaging)
+   ├─ OpenAI API (일정 생성/수정, 사진 선별)
+   └─ TourAPI / Google Places / Google Maps
+```
 
 ---
 
 ## 설계 문서
 
-> 프로젝트 성격에 따라 필요한 항목만 작성
-
 ### 화면 / 인터페이스 설계
 
-<!-- Figma 링크, 화면 이미지, CLI 사용 예시, 앱 화면 등 -->
+<!-- Figma 링크, 앱 화면 캡처 등 -->
 
 ### 데이터 구조
 
-<!-- DB 스키마, JSON 구조, 파일 저장 방식 등 -->
+주요 엔티티(12개 테이블, TypeORM 마이그레이션 기준): `users`, `social_accounts`, `refresh_tokens`, `trips`, `trip_members`, `trip_invite_links`, `places`, `trip_places`, `ai_plan_requests`, `travel_records`, `record_photos`, `record_day_entries`, `notification_logs`, `user_devices`.
+
 ![DB 스키마](./TripAndEnd.png)
 
 ### API / 외부 서비스 연동
 
 | Method / 방식 | Endpoint / 서비스 | 설명 | 요청 | 응답 | 비고 |
 |---|---|---|---|---|---|
-|  |  |  |  |  |  |
+| REST | `/auth/*` | 카카오/구글 소셜 로그인, JWT access/refresh 발급·재발급 | 소셜 idToken | accessToken, refreshToken | Passport 전략 기반 |
+| REST | `/trips`, `/trips/{id}/schedule` | 여행 CRUD, AI 일정 초안 생성·수정 | 도시/날짜/프롬프트 | 일정(day별 장소 목록) | OpenAI Chat Completions 연동 |
+| REST | `/trips/{id}/places/candidates` | 여행지 주변 장소 후보 검색 | areaCode/sigunguCode/category | 장소 목록(사진·평점 포함) | TourAPI + Google Places 매칭 캐시 |
+| REST | `/records/*` | 기록 세션 시작, 사진 메타등록/업로드/큐레이션/확정, Day별 다이어리 CRUD | 사진 파일, 캡션, Day 텍스트 | 기록 상세 | Firebase Storage 업로드 |
+| REST | `/notifications` | 기기 등록, 알림함 조회 | FCM 토큰 | 알림 목록 | Firebase Cloud Messaging |
+| WebSocket | Collaboration Gateway (`Socket.IO`) | 공동 여행 계획 실시간 동기화 | 일정 변경 이벤트 | 브로드캐스트 이벤트 | 초대 링크로 참여 |
+| External | OpenAI API | 여행 일정 생성/수정, 사진 베스트샷 선별(Vision) | 프롬프트/이미지 | 일정 JSON, 선별 결과 | 배치 처리 |
+| External | Firebase (Storage / Messaging) | 사진 저장, 푸시 알림 발송 | 파일, 메시지 | URL, 전송 결과 | Firebase Admin SDK |
 
 ---
 
 ## 산출물 및 실행 방법
 
-- **산출물 설명:**
-- **실행 환경:**
-- **실행 방법:**
+- **산출물 설명:** trip and end — AI가 여행 일정 초안을 만들어주고, 여행이 끝나면 사진을 자동 선별해 기록으로 남겨주는 Flutter 앱(iOS/Android/Web) + NestJS 백엔드
+- **실행 환경:** Flutter 3.x / Node.js 20+ / PostgreSQL(Supabase) — 모바일은 iOS 시뮬레이터·Android 에뮬레이터 또는 실기기, 웹은 Chrome
+- **실행 방법:** 아래 [실행 방법](#실행-방법) 참고 — 백엔드(NestJS) 먼저 띄운 뒤 프론트(Flutter)에서 연결
 - **시연 영상 / 이미지:** (선택)
 
 ### 실행 방법
 
+**Backend**
+
 ```bash
-# 환경 설정
+# 환경 설정 (.env에 DB 연결 문자열, JWT 시크릿, OpenAI/Firebase/카카오·구글 키 등 채우기)
 cp .env.example .env
 
 # 의존성 설치
-npm install   # 또는 pip install -r requirements.txt 등
+npm install
 
-# 실행
-npm run dev   # 또는 python main.py 등
+# DB 마이그레이션
+npm run migration:run
+
+# 개발 서버 실행 (http://localhost:3000)
+npm run start:dev
 ```
+
+**Frontend**
+
+```bash
+cd frontend
+
+# 의존성 설치
+flutter pub get
+
+# 실행 (연결된 기기/에뮬레이터 또는 -d chrome)
+flutter run
+```
+
+> 카카오/구글 소셜 로그인, Firebase(Storage/Messaging), Google Maps, OpenAI API는 각각 콘솔에서 발급받은 키를 `.env`(백엔드) 및 `frontend/android`, `frontend/ios`, `frontend/web`의 플랫폼별 설정 파일에 넣어야 정상 동작한다.
 
 ### 기술 구성
 
 | 분류 | 사용 기술 |
 |---|---|
-| 핵심 기술 |  |
-| 실행 환경 |  |
-| 데이터 저장 |  |
-| 외부 API / 서비스 |  |
-| 기타 |  |
+| 핵심 기술 | Flutter(Dart) · NestJS(TypeScript) · Riverpod · TypeORM |
+| 실행 환경 | iOS / Android / Web (Flutter 단일 코드베이스) |
+| 데이터 저장 | PostgreSQL(Supabase) · Firebase Storage |
+| 외부 API / 서비스 | OpenAI API · TourAPI · Google Maps / Places · Kakao Login · Google Sign-In · Firebase Cloud Messaging |
+| 기타 | Socket.IO(공동 편집 실시간 동기화) · Google ML Kit(온디바이스 사진 필터링) · JWT 인증(access/refresh 로테이션) |
 
 ---
 
@@ -159,11 +210,11 @@ npm run dev   # 또는 python main.py 등
 
 ### 팀원별 소감
 
-**주성민:**
+**이예원:**
 
 > 
 
-**김희서:**
+**이지민:**
 
 > 
 
@@ -171,60 +222,7 @@ npm run dev   # 또는 python main.py 등
 
 ## 참고 자료
 
-### 실시간 인터랙션
-
-**WebSocket**
-- https://developer.mozilla.org/en-US/docs/Web/API/WebSockets_API
-- https://techblog.woowahan.com/5268/
-- https://tech.kakao.com/posts/391
-- https://daleseo.com/websocket/
-- https://kakaoentertainment-tech.tistory.com/110
-
-**Socket.IO**
-- https://socket.io/docs/v4/
-- https://inpa.tistory.com/entry/SOCKET-%F0%9F%93%9A-Namespace-Room-%EA%B8%B0%EB%8A%A5
-- https://adjh54.tistory.com/549
-- https://fred16157.github.io/node.js/nodejs-socketio-communication-room-and-namespace/
-
-**SSE (Server-Sent Events)**
-- https://developer.mozilla.org/en-US/docs/Web/API/Server-sent_events
-- https://developer.mozilla.org/ko/docs/Web/API/Server-sent_events/Using_server-sent_events
-- https://api7.ai/ko/blog/what-is-sse
-
-**TCP / UDP Socket**
-- https://docs.python.org/3/library/socket.html
-- https://inpa.tistory.com/entry/NW-%F0%9F%8C%90-%EC%95%84%EC%A7%81%EB%8F%84-%EB%AA%A8%ED%98%B8%ED%95%9C-TCP-UDP-%EA%B0%9C%EB%85%90-%E2%9D%93-%EC%89%BD%EA%B2%8C-%EC%9D%B4%ED%95%B4%ED%95%98%EC%9E%90
-
-**gRPC Streaming**
-- https://grpc.io/docs/what-is-grpc/core-concepts/
-- https://tech.ktcloud.com/entry/gRPC%EC%9D%98-%EB%82%B4%EB%B6%80-%EA%B5%AC%EC%A1%B0-%ED%8C%8C%ED%97%A4%EC%B9%98%EA%B8%B0-HTTP2-Protobuf-%EA%B7%B8%EB%A6%AC%EA%B3%A0-%EC%8A%A4%ED%8A%B8%EB%A6%AC%EB%B0%8D
-- https://tech.ktcloud.com/entry/gRPC%EC%9D%98-%EB%82%B4%EB%B6%80-%EA%B5%AC%EC%A1%B0-%ED%8C%8C%ED%97%A4%EC%B9%98%EA%B8%B02-Channel-Stub
-- https://inspirit941.tistory.com/371
-- https://devocean.sk.com/blog/techBoardDetail.do?ID=167433
-
-**WebRTC**
-- https://developer.mozilla.org/en-US/docs/Web/API/WebRTC_API
-- https://webrtc.org/getting-started/overview
-- https://web.dev/articles/webrtc-basics?hl=ko
-- https://devocean.sk.com/blog/techBoardDetail.do?ID=164885
-- https://beomkey-nkb.github.io/%EA%B0%9C%EB%85%90%EC%A0%95%EB%A6%AC/webRTC%EC%A0%95%EB%A6%AC/
-- https://gh402.tistory.com/45
-- https://on.com2us.com/tech/webrtc-coturn-turn-stun-server-setup-guide/
-
-**QUIC / WebTransport**
-- https://developer.mozilla.org/en-US/docs/Web/API/WebTransport_API
-- https://datatracker.ietf.org/doc/html/rfc9000
-- https://news.hada.io/topic?id=13888
-
-#### KCLOUD VM / Cloudflare Tunnel 환경별 주의사항
-
-| 환경 | 사용 가능(권장) 기술 | 포트/조건 | 주의할 기술 |
-|---|---|---|---|
-| **로컬 / 일반 VM** | HTTP/REST, WebSocket, Socket.IO, SSE, TCP Socket, gRPC Streaming, WebRTC, QUIC/WebTransport 등 대부분 가능 | 직접 포트 개방 가능. 예: 3000, 5000, 8000, 8080, 9000 등. 외부 공개 시 방화벽/보안그룹/공인 IP 설정 필요 | WebRTC는 STUN/TURN 필요 가능. QUIC/WebTransport는 HTTP/3 · UDP 지원 필요 |
-| **KCLOUD VM (VPN 내부)** | HTTP/REST, WebSocket, Socket.IO, SSE, WebRTC 시그널링 | 접속 기기 VPN 필요. 기본 허용 포트: **22, 80, 443**. 개발 포트(3000, 8000, 8080 등)는 직접 접근 제한 가능 | TCP Socket은 포트 제한 있음. gRPC는 HTTP/2 설정 필요. WebRTC 미디어·UDP·QUIC/WebTransport 비권장 |
-| **KCLOUD VM + Tunnel** | HTTP/REST, WebSocket, Socket.IO, SSE, WebRTC 시그널링 | VM의 `localhost:<port>`를 도메인에 연결. `localPort`는 **1024~65535**. 예: 3000, 8000, 8080 가능 | 순수 TCP Socket, UDP, WebRTC 미디어/DataChannel, QUIC/WebTransport 불가. gRPC 보장 어려움 |
-| **외부 서비스 + 우리 도메인** | HTTP/REST, WebSocket, Socket.IO, SSE, WebRTC 시그널링 | Vercel/Netlify/Railway/Render/AWS/GCP 등에 배포 후 CNAME/A 레코드 연결. 보통 외부는 **443** 사용 | WebSocket/gRPC/TCP/UDP는 플랫폼 지원 여부 확인 필요. 서버리스 플랫폼은 장시간 연결 제한 가능 |
-| **서버 없이 외부 SaaS 사용** | Supabase Realtime, Firebase, Pusher/Ably, LLM API Streaming | 직접 포트 관리 불필요. 각 서비스 SDK/API 사용 | 커스텀 TCP/UDP 서버 구현 불가. WebRTC는 STUN/TURN 필요할 수 있음 |
+> 선택 옵션(LLM Wrapper, Cross-Platform)에 해당하는 자료만 남겨뒀다. 공동 편집 기능에 쓴 Socket.IO는 [공식 문서](https://socket.io/docs/v4/)를 클라이언트 연동 방식 위주로 참고했다.
 
 ### LLM Wrapper
 
